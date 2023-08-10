@@ -1,0 +1,14 @@
+__pycache__/
+*/*/abq
+*.pyc
+*.csv
+*.inp
+*.odb
+*.com
+*.dat
+*.ipm
+*.log
+*.msg
+*.prt
+*.sim
+*.sta
