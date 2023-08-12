@@ -11,59 +11,30 @@ foamhom_path = os.path.join(base_path,
                             "src")
 sys.path.append(gmsh_path)
 sys.path.append(foamhom_path)
-from abqhom.RVE import make_lattice_RVE
-from abqhom.utils import RVE_to_abaqus_input
+from abqhom.RVE import build_lattice_RVE, RVE_to_abaqus_input
+from abqhom.utils import average_stress_2d
 
 # import abaqus modules
 from abaqus import Mdb, mdb, session
 from abaqusConstants import (DURING_ANALYSIS, CARTESIAN, ON, MIDDLE_SURFACE,
-                              N1_COSINES, PERCENTAGE, ODB, FULL, CENTROID)
+                              N1_COSINES, PERCENTAGE, ODB, FULL)
 
-def average_stress_2d(eps, size, lc, E, nu, d, model_name="RVE2d", 
+def homogenize_stress(eps, size, lc, E, nu, d, model_name="RVE2d", 
                       job_name="effective_material_2d"):
-    """
-    Set up the homogenization BVP and compute the averaged stress tensor.
-    
-    Periodic boundary conditions are applied depending on the macroscopic
-    strain tensor.
-
-    Parameters
-    ----------
-    eps : numpy.ndarray
-        The macroscopic strain tensor in Voigt notation.
-    size : float
-        Edge length of the RVE.
-    lc : float
-        Characteristic cell size.
-    E : float
-        Young's modulus of the strut material.
-    nu : float
-        Poisson's ratio of the strut material.
-    d : float
-        Diameter of the struts.
-    model_name : str, optional
-        Name of the Gmsh and Abaqus model. The default is "RVE2d".
-    job_name : str, optional
-        Name of the Abaqus job. The default is "effective_material_2d".
-
-    Returns
-    -------
-    sig : numpy.ndarray
-        Volume averaged stress tensor in Voigt notation.
-
-    """
     if np.shape(eps) != (3,):
         raise ValueError("strain must be provided in Voigt notation")
     
     # build model in gmsh
     (node_tags, node_coords, 
-     el_tags, conn, node_sets) = make_lattice_RVE(model_name, 2, size, lc)
+     el_tags, conn, node_sets) = build_lattice_RVE(model_name, 2, size, lc)
     
     # write mesh into abaqus input file
     workdir = os.getcwd()
     mesh_file = os.path.join(workdir, model_name + ".inp")
+    ignore_sets = ["EDGE_3", "EDGE_2", "POINT_2", "POINT_3", "POINT_4"]
     RVE_to_abaqus_input(size, node_tags, node_coords, el_tags, conn, "B23",
-                        mesh_file)
+                        mesh_file, node_sets=node_sets, 
+                        ignore_sets=ignore_sets)
     
     # import the RVE from input file
     Mdb()
@@ -130,15 +101,14 @@ def average_stress_2d(eps, size, lc, E, nu, d, model_name="RVE2d",
     # apply Dirichlet BCs to corner nodes
     region = assembly.instances["RVE-1"].sets["POINT_1"]
     model.DisplacementBC(name="point_1_bc", createStepName="Load", 
-                         region=region, 
-                         u1=0.0, u2=0.0, ur3=0.0)
+                         region=region, u1=0.0, u2=0.0, ur3=0.0)
     region = assembly.instances["RVE-1"].sets["POINT_2"]
     model.DisplacementBC(name="point_2_bc", createStepName="Load", 
                          region=region, u1=eps_xx*size, u2=eps_xy*size, 
                          ur3=0.0)
     region = assembly.instances["RVE-1"].sets["POINT_4"]
     model.DisplacementBC(name="point_4_bc", createStepName="Load", 
-                         region=region, u1=eps_xy*size, u2=eps_yy*size, 
+                         region=region, u1=eps_xy*size, u2=eps_yy*size,
                          ur3=0.0)
     region = assembly.instances["RVE-1"].sets["POINT_3"]
     model.DisplacementBC(name="point_3_bc", createStepName="Load", 
@@ -168,9 +138,8 @@ def average_stress_2d(eps, size, lc, E, nu, d, model_name="RVE2d",
     
     # output requests
     model.FieldOutputRequest(name="field_output", createStepName="Load", 
-                             variables=("S", "E", "SE", "U", "RF", "SF", 
-                                        "TF", "NFORC", "ESF1", "SENER",
-                                        "IVOL", "CF", "NFORCSO"))
+                             variables=("S", "E", "SE", "U", "RF", "TF",
+                                        "SF","NFORC", "NFORCSO", "SENER"))
     del model.fieldOutputRequests["F-Output-1"]
     del model.historyOutputRequests["H-Output-1"]
     
@@ -189,39 +158,20 @@ def average_stress_2d(eps, size, lc, E, nu, d, model_name="RVE2d",
     # session.viewports["Viewport: 1"].setValues(displayedObject=odb)
     # session.viewports["Viewport: 1"].makeCurrent()
     
-    # compute volume average of stress
-    forces = (odb.steps["Load"].frames[-1].fieldOutputs["SF"]
-              .getSubset(CENTROID))
-    sig_xx = sig_yy = sig_xy = 0.0
-    for f in forces.values:
-        assert all(f.data[1::] == 0.0)
-        axial_force = f.data[0]
-        
-        # compute strut length and direction
-        el = f.elementLabel
-        n1, n2 = conn[int(np.where(el_tags == el)[0])]
-        x1, x2 = node_coords[int(n1 - 1)], node_coords[int(n2 - 1)]
-        l = np.linalg.norm(x1 - x2)
-        rx, ry, _ = np.abs(x1 - x2)/l
-        
-        # update stress components
-        sig_xx += axial_force*rx*rx*l
-        sig_yy += axial_force*ry*ry*l
-        sig_xy += axial_force*rx*ry*l
-        
-    # divide by RVE volume
-    sig_xx /= size**2
-    sig_yy /= size**2
-    sig_xy /= size**2
-    sig = np.array([sig_xx, sig_yy, sig_xy])
-    print("sig =", sig)
+    # run averaging procedure
+    boundary_sets = ["POINT_1", "POINT_2", "POINT_3", "POINT_4",
+                     "EDGE_1", "EDGE_2", "EDGE_3", "EDGE_4"]
+    sig = average_stress_2d(odb, size, boundary_sets, "RVE-1", "Load")
     
     return sig
     
 # ---------------------------------------------------------------
 # set working directory
 workdir = os.path.join(base_path, 
-                       "Institute for Mechanics/abqhom/examples/abq")
+                       "Institute for Mechanics/abqhom/examples",
+                       "RVE_beam_foam/abq")
+if not os.path.isdir(workdir):
+    os.mkdir(workdir)
 os.chdir(workdir)
 
 # material parameters
@@ -231,41 +181,64 @@ nu = 0.3  # Possion's ratio
 # RVE size
 size = 10
 
-# parameter space
-diameters = [0.1]
-cell_sizes = [5]#[0.39]
+# lattice parameters
+diameter = 0.1
+cell_size = 0.39#[0.39]
 # cell_sizes = np.linspace(0.4, 2.0, 30)
 #diameters = np.linspace(0.05, 0.5, 50)
 
 # macroscopic strain
-eps_star = 0.1
+eps_star = 0.2
 
-# run homogenization routine
-for lc in cell_sizes:
-    for d in diameters:
-        C = np.empty((3, 3))
-        alpha = d/lc  # aspect ratio
-        for case in range(3):
-            eps = np.array([0.0, 0.0, 0.0])
-            if case == 3:
-                eps_star *= 2
-            eps[case] = eps_star
-        
-            # compute volume average of stress tensor
-            print("Run case {}.".format(case))
-            job_name = "effective_material_2d_{}".format(case)
-            sig = average_stress_2d(eps, size, lc, E, nu, d, job_name=job_name)
-            
-            # compute effective stiffness tensor
-            C[:,case] = sig/eps_star
-            
-        path = os.path.join(os.path.dirname(workdir), "C",
-                            #"C_{}_{}.csv".format(lc, d))
-                            "C_{}.csv".format(alpha))
-        with open(path, "w") as file:
-            file.write("{},{},{}\n".format(C[0,0], C[0,1], C[0,2]))
-            file.write("{},{},{}\n".format(C[1,0], C[1,1], C[1,2]))
-            file.write("{},{},{}".format(C[2,0], C[2,1], C[2,2]))
+C = np.empty((3,3))
+for case in range(3):
+    eps = np.array([0.0, 0.0, 0.0])
+    if case == 3:
+        eps_star *= 2
+    eps[case] = eps_star
+
+    # compute volume average of stress tensor
+    print("\n------------------------------")
+    print("Run case {}.".format(case))
+    print("strain = " + str(eps.tolist()))
+    job_name = "effective_material_2d_{}".format(case)
+    sig = homogenize_stress(eps, size, cell_size, E, nu, diameter,
+                            job_name=job_name)
+    print("stress = " + str(sig.tolist()))
     
-        print("Effective constitutive matrix:")
-        print(C)
+    # compute effective stiffness tensor
+    C[:,case] = sig/eps_star
+    
+print("\n------------------------------")
+print("Effective constitutive matrix:")
+print(C)
+
+# # run homogenization routine
+# for lc in cell_sizes:
+#     for d in diameters:
+#         C = np.empty((3, 3))
+#         alpha = d/lc  # aspect ratio
+#         for case in range(3):
+#             eps = np.array([0.0, 0.0, 0.0])
+#             if case == 3:
+#                 eps_star *= 2
+#             eps[case] = eps_star
+        
+#             # compute volume average of stress tensor
+#             print("Run case {}.".format(case))
+#             job_name = "effective_material_2d_{}".format(case)
+#             sig = average_stress_2d(eps, size, lc, E, nu, d, job_name=job_name)
+            
+#             # compute effective stiffness tensor
+#             C[:,case] = sig/eps_star
+            
+#         path = os.path.join(os.path.dirname(workdir), "C",
+#                             #"C_{}_{}.csv".format(lc, d))
+#                             "C_{}.csv".format(alpha))
+#         with open(path, "w") as file:
+#             file.write("{},{},{}\n".format(C[0,0], C[0,1], C[0,2]))
+#             file.write("{},{},{}\n".format(C[1,0], C[1,1], C[1,2]))
+#             file.write("{},{},{}".format(C[2,0], C[2,1], C[2,2]))
+    
+#         print("Effective constitutive matrix:")
+#         print(C)
