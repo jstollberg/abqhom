@@ -169,7 +169,7 @@ def homogenize_stress(eps, size, lc, E, nu, d, model_name="RVE2d",
 # set working directory
 workdir = os.path.join(base_path, 
                        "Institute for Mechanics/abqhom/examples",
-                       "RVE_beam_foam/abq")
+                       "RVE_beam_foam_2d/abq")
 if not os.path.isdir(workdir):
     os.mkdir(workdir)
 os.chdir(workdir)
