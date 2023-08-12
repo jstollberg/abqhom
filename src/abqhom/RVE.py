@@ -551,8 +551,8 @@ def build_hole_RVE(model_name, dim, edge_length, radius, lc=None, gui=False):
     
     return node_tags, node_coords, el_tags, conn, node_sets
 
-def RVE_to_abaqus_input(size, node_tags, node_coords, el_tags, conn, el_type, 
-                        file):
+def RVE_to_abaqus_input(size, node_tags, node_coords, el_tags, conn, el_type,
+                        file, node_sets=None, ignore_sets=None):
     """
     Export an RVE mesh representation to Abaqus input file.
 
@@ -572,6 +572,12 @@ def RVE_to_abaqus_input(size, node_tags, node_coords, el_tags, conn, el_type,
         Abaqus element identifier, e.g. "CPE3".
     file : str
         Name of the Abaqus input file.
+    node_sets : dict, optional
+        Node sets of e.g. the boundary nodes. Default is None.
+    ignore_sets: list, optional
+        Elements with all nodes being part if the node sets with the names
+        defined in this list will be ignored while writing the input file.
+        Default is None.
 
     Returns
     -------
@@ -606,6 +612,12 @@ def RVE_to_abaqus_input(size, node_tags, node_coords, el_tags, conn, el_type,
     file += ".inp"
     path = os.path.abspath(file)
     
+    # initialize function that checks if elements should be skipped
+    ignore_nodes = []
+    if ignore_sets is not None and node_sets is not None:
+        ignore_nodes = np.hstack([node_sets[s] for s in ignore_sets])
+    ignore = lambda n: np.all(np.in1d(n, ignore_nodes))
+    
     max_node_tag = int(np.max(node_tags))
     with open(path, "w") as content:
         content.write("*PART, NAME=RVE\n")
@@ -619,6 +631,8 @@ def RVE_to_abaqus_input(size, node_tags, node_coords, el_tags, conn, el_type,
         # add elements
         content.write("*ELEMENT, TYPE={}\n".format(el_type))
         for tag, nodes in zip(el_tags, conn):
+            if ignore(nodes):
+                continue
             content.write("{}, ".format(tag))
             for i, n in enumerate(nodes):
                 content.write("{}".format(n))
