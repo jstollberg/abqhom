@@ -303,7 +303,7 @@ def simple_RVE_3d(model_name="RVE", x=0.0, y=0.0, z=0.0, dx=1.0, dy=1.0,
     
     # create mesh using Delauny algorithm
     gmsh.option.setNumber("Mesh.Algorithm", 5)
-    gmsh.model.mesh.generate(2)
+    gmsh.model.mesh.generate(3)
     
     if gui:
         gmsh.fltk.run()
