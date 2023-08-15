@@ -1,6 +1,80 @@
 import os
 import numpy as np
 
+def voigt_to_strain_tensor(strain):
+    """
+    Convert strain tensor from Voigt notation to tensor notation.
+
+    Parameters
+    ----------
+    strain : numpy.ndarray
+        Strain tensor in Voigt notation.
+
+    Returns
+    -------
+    eps : numpy.ndarray
+        Strain tensor in symbolic notation.
+
+    """
+    if strain.shape == (6,):
+        eps_xx, eps_yy, eps_zz = strain[0:3]
+        eps_yz, eps_xz, eps_xy = strain[3::]/2
+        
+        eps = np.array([[eps_xx, eps_xy, eps_xy],
+                        [eps_xy, eps_yy, eps_yz],
+                        [eps_xz, eps_yz, eps_zz]])
+        
+    elif strain.shape == (3,):
+        eps_xx, eps_yy = strain[0:2]
+        eps_xy = strain[2]/2
+        
+        eps = np.array([[eps_xx, eps_xy],
+                        [eps_xy, eps_yy]])
+        
+    else:
+        raise ValueError("strain must be provided in Voigt notation")
+        
+    return eps
+
+def voigt_to_stress_tensor(stress):
+    """
+    Convert stress tensor in Voigt notation to tensor notation.
+
+    Parameters
+    ----------
+    stress : numpy.ndarray
+        Stress tensor in Voigt notation.
+
+    Returns
+    -------
+    sig : numpy.ndarray
+        Stress tensor in symbolic notation.
+
+    """
+    if stress.shape == (6,):
+        sig_xx, sig_yy, sig_zz, sig_yz, sig_xz, sig_xy = stress
+        
+        sig = np.array([[sig_xx, sig_xy, sig_xz],
+                        [sig_xy, sig_yy, sig_yz],
+                        [sig_xz, sig_yz, sig_zz]])
+        
+    elif stress.shape == (3,):
+        sig_xx, sig_yy, sig_xy = stress
+        
+        sig = np.array([[sig_xx, sig_xy],
+                        [sig_xy, sig_yy]])
+        
+    else:
+        raise ValueError("stress must be provided in Voigt notation")
+        
+    return sig
+        
+def strain_tensor_to_voigt(strain):
+    pass
+        
+def stress_tensor_to_voigt(stress):
+    pass
+
 def reuss(vol1, C1, C2):
     """
     Compute the homogenized stiffness tensor after Reuss.
@@ -49,38 +123,7 @@ def voigt(vol1, C1, C2):
 def export_material_tensor(C, path):
     pass
 
-def average_stress_2d(odb, edge_length, boundary_sets, instance_name,
-                      step_name, frame=-1):
-    # initialize averaged stress tensor
-    sig = np.zeros((2,2), dtype=float)
-    
-    # get internal forces
-    f1_output = odb.steps[step_name].frames[frame].fieldOutputs["NFORC1"]
-    f2_output = odb.steps[step_name].frames[frame].fieldOutputs["NFORC2"]
-    
-    # loop over all boundary nodes
-    for set_name in boundary_sets:
-        region = odb.rootAssembly.instances[instance_name].nodeSets[set_name]
-        f1_sub = f1_output.getSubset(region=region).values
-        f2_sub = f2_output.getSubset(region=region).values
-        
-        # collect force values
-        f1_dict = {}
-        f2_dict = {}
-        for f1, f2 in zip(f1_sub, f2_sub):
-            f1_dict[f1.nodeLabel] = f1_dict.get(f1.nodeLabel, 0.0) - f1.data
-            f2_dict[f2.nodeLabel] = f2_dict.get(f2.nodeLabel, 0.0) - f2.data
-            
-        # update stress tensor
-        for node in region.nodes:
-            x = node.coordinates[0:2]
-            f_inner = np.array([f1_dict[node.label], f2_dict[node.label]])
-            sig += np.outer(f_inner, x)
-            
-    # divide by RVE volume
-    sig = np.array([sig[0,0], sig[1,1], sig[0,1]])/edge_length**2
-    
-    return sig
+
 
 # def RVE_to_matlab_input(node_tags, node_coords, el_tags, conn, file):
 #     # initialize file
