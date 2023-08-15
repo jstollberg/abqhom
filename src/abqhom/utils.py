@@ -70,10 +70,69 @@ def voigt_to_stress_tensor(stress):
     return sig
         
 def strain_tensor_to_voigt(strain):
-    pass
+    """
+    Convert strain tensor from tensor notation to Voigt notation.
+
+    Parameters
+    ----------
+    strain : numpy.ndarray
+        Strain tensor in symbolic notation.
+
+    Returns
+    -------
+    eps : numpy.ndarray
+        Strain tensor in Voigt notation.
+
+    """
+    if strain.shape == (3,3):
+        eps_xx, eps_yy, eps_zz = strain[0,0], strain[1,1], strain[2,2]
+        eps_yz, eps_xz, eps_xy = strain[1,2], strain[0,2], strain[0,1]
+        
+        eps = np.array([eps_xx, eps_yy, eps_zz, eps_yz, eps_xz, eps_xy])
+        eps[3::] *= 0.5
+        
+    elif strain.shape == (2,2):
+        eps_xx, eps_yy = strain[0,0], strain[1,1]
+        eps_xy = strain[0,1]
+        
+        eps = np.array([eps_xx, eps_yy, 0.5*eps_xy])
+        
+    else:
+        raise ValueError("input has wrong shape")
+        
+    return eps
         
 def stress_tensor_to_voigt(stress):
-    pass
+    """
+    Convert stress tensor from tensor notation to Voigt notation.
+
+    Parameters
+    ----------
+    stress : numpy.ndarray
+        Stress tensor in symbolic notation.
+
+    Returns
+    -------
+    sig : numpy.ndarray
+        Stress tensor in Voigt notation.
+
+    """
+    if stress.shape == (3,3):
+        sig_xx, sig_yy, sig_zz = stress[0,0], stress[1,1], stress[2,2]
+        sig_yz, sig_xz, sig_xy = stress[1,2], stress[0,2], stress[0,1]
+        
+        sig = np.array([sig_xx, sig_yy, sig_zz, sig_yz, sig_xz, sig_xy])
+        
+    elif stress.shape == (2,2):
+        sig_xx, sig_yy = stress[0,0], stress[1,1]
+        sig_xy = stress[0,1]
+        
+        sig = np.array([sig_xx, sig_yy, sig_xy])
+        
+    else:
+        raise ValueError("input has wrong shape")
+        
+    return sig
 
 def reuss(vol1, C1, C2):
     """
