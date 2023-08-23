@@ -129,6 +129,7 @@ def create_beam_structure(model_name):
 
     """
     # TODO: identify element type (e.g. on length of element connectivity)
+    # TODO incorporate 3 node beam elements
     
     current = gmsh.model.getCurrent()
     gmsh.model.setCurrent(model_name)
@@ -406,8 +407,8 @@ def create_boundary_sets(model_name, group_map):
     gmsh.model.setCurrent(current)
     return node_sets
 
-def write_abq_input(model_name, file_name, abq_el_type, node_sets=None, 
-                    element_set=None, ignore_node_sets=None, lattice=False):
+def write_abq_input(model_name, group_map, file_name, abq_el_type, 
+                    element_set=None, node_sets=None, lattice=False):
     """
     
 
@@ -444,8 +445,8 @@ def write_abq_input(model_name, file_name, abq_el_type, node_sets=None,
     # get model dimension
     dim = gmsh.model.getDimension()
     
-    # TODO: improve lattice handling
     if lattice:
+        # TODO: improve lattice handling by returning the element type
         (node_tags, node_coords, 
          el_tags, conn) = create_beam_structure(model_name)
     
@@ -453,10 +454,6 @@ def write_abq_input(model_name, file_name, abq_el_type, node_sets=None,
         # get node information
         node_tags, node_coords, _ = gmsh.model.mesh.getNodes()
         node_coords = node_coords.reshape(-1, 3)
-        
-        # TODO: make this work also for multiple element types
-        # TODO: check if connectivity needs to be reordered for some element types
-        # for compatibility between gmsh elements and abaqus elements
         
         # get element information
         el_types, el_tags, conn = gmsh.model.mesh.getElements(dim, 1)
@@ -468,14 +465,33 @@ def write_abq_input(model_name, file_name, abq_el_type, node_sets=None,
         _, _, _, nen, _, _ = gmsh.model.mesh.getElementProperties(el_type)
         el_tags = el_tags - np.min(el_tags) + 1  # normalize element tags
         conn = conn.reshape(-1, nen)
-    
-    el_type = abq_el_type  # TODO
+        
+    # TODO
+    # map to abaqus elements
+    # abq_el_type = type_map[el_type]
+    # conn = conn[conn_map[el_type]]
     
     # initialize function that checks if elements should be skipped
-    ignore_nodes = []
-    if ignore_node_sets is not None and node_sets is not None:
-        ignore_nodes = np.hstack([node_sets[s] for s in ignore_node_sets])
-    ignore = lambda n: np.all(np.in1d(n, ignore_nodes))
+    # ignore_nodes = []
+    # if ignore_node_sets is not None and node_sets is not None:
+    #     ignore_nodes = np.hstack([node_sets[s] for s in ignore_node_sets])
+    # ignore = lambda n: np.all(np.in1d(n, ignore_nodes))
+    # boundary_nodes = np.hstack([node_sets[s] for s in boundary_node_sets])
+    boundary_sets = create_boundary_sets(model_name, group_map)
+    # boundary_nodes = np.hstack([i for i in boundary_sets.values()])
+    # is_boundary = lambda n: np.all(np.in1d(n, boundary_nodes))
+    
+    # collect all nodes on the boundary
+    boundary_nodes = []
+    physical_groups = gmsh.model.getPhysicalGroups(dim - 1)
+    for group in physical_groups:
+        if gmsh.model.getPhysicalName(*group) not in boundary_sets.keys():
+            continue
+        
+        for entity in gmsh.model.getEntitiesForPhysicalGroup(*group):
+            entity_nodes, _, _ = gmsh.model.mesh.getNodes(group[0], entity,
+                                                          includeBoundary=True)
+            boundary_nodes.append(entity_nodes)
     
     # initialize abaqus input file
     file_name, extension = os.path.splitext(file_name)
@@ -491,10 +507,14 @@ def write_abq_input(model_name, file_name, abq_el_type, node_sets=None,
             file.write("{}, {}, {}, {}\n".format(tag, x, y, z))
             
         # add elements
-        file.write("*ELEMENT, TYPE={}\n".format(el_type))
+        boundary_elements = []
+        file.write("*ELEMENT, TYPE={}\n".format(abq_el_type))
         for tag, nodes in zip(el_tags, conn):
-            if ignore(nodes):
-                continue
+            for i in boundary_nodes:
+                if np.all(np.in1d(nodes, i)):
+                    boundary_elements.append(tag)
+                    break
+            
             file.write("{}, ".format(tag))
             for i, n in enumerate(nodes):
                 file.write("{}".format(n))
@@ -502,144 +522,18 @@ def write_abq_input(model_name, file_name, abq_el_type, node_sets=None,
                     file.write("\n")
                     continue
                 file.write(", ")
+                
+        boundary_nodes = np.hstack([i for i in boundary_sets.values()])
+        volume_nodes = np.setdiff1d(node_tags, boundary_nodes)
+        
         add_set(file, "NSET", "ALL_NODES", node_tags)
         add_set(file, "ELSET", "ALL_ELEMENTS", el_tags)
+        add_set(file, "NSET", "BOUNDARY_NODES", boundary_nodes)
+        add_set(file, "NSET", "VOLUME_NODES", volume_nodes)
+        if len(boundary_elements) > 0:
+            volume_elements = np.setdiff1d(el_tags, boundary_elements)
+            add_set(file, "ELSET", "BOUNDARY_ELEMENTS", boundary_elements)
+            add_set(file, "ELSET", "VOLUME_ELEMENTS", volume_elements)
         file.write("*END PART\n")
         
     return path
-
-
-
-
-
-
-
-
-
-# def _build_node_sets(model_name):
-#     """
-#     Recursively build the node sets of faces, edges and points.
-    
-#     The periodic node pairs are conserved by this method.
-
-#     Parameters
-#     ----------
-#     model_name : str
-#         Name of the Gmsh model.
-
-#     Returns
-#     -------
-#     node_sets : dict
-#         Dictionary containing the node sets. Keys are the set names and values
-#         are the node tags in the set.
-
-#     """
-#     def recursively_build_node_sets(entity, 
-#                                     node_sets):
-#         """Recursive generation of node sets."""
-#         if entity[0] == 0:
-#             return
-        
-#         # get parent entity information
-#         parent_name = gmsh.model.getEntityName(*entity)
-#         parent_nodes = node_sets[parent_name]
-        
-#         boundary = gmsh.model.getBoundary([entity], oriented=False)
-#         to_delete = []
-#         for e in boundary:
-#             # get boundary nodes indices in parent
-#             nodes = gmsh.model.mesh.getNodes(*e, includeBoundary=True)[0]
-#             indices = np.flatnonzero(np.isin(parent_nodes, nodes))
-#             to_delete.extend(indices)
-            
-#             # create entry in dictionary for boundary entity
-#             name = gmsh.model.getEntityName(*e)
-#             vals = [node_sets[parent_name][i] for i in indices]
-#             node_sets[name] = vals
-            
-#             # call function on child entity
-#             recursively_build_node_sets(e, node_sets)
-           
-#         # remove boundary nodes from parent node set
-#         node_sets[parent_name] = np.delete(node_sets[parent_name], to_delete)
-        
-#     current = gmsh.model.getCurrent()
-#     gmsh.model.setCurrent(model_name)
-    
-#     node_sets = {}
-    
-#     dim = gmsh.model.getDimension()
-#     entities = gmsh.model.getEntities(dim - 1)
-#     for e in entities:
-#         # read periodic contraints
-#         tag_master, slave, master, _ = gmsh.model.mesh.getPeriodicNodes(*e)
-#         if tag_master == e[1]:
-#             continue
-        
-#         # sort node tags and add them to dictionary
-#         slave_name = gmsh.model.getEntityName(*e)
-#         master_name = gmsh.model.getEntityName(e[0], tag_master)
-#         sorter = np.argsort(master)
-#         node_sets[master_name] = master[sorter].tolist()
-#         node_sets[slave_name] = slave[sorter].tolist()
-        
-#         # print(node_sets)
-#         recursively_build_node_sets(e, node_sets)
-#         recursively_build_node_sets((e[0], tag_master), node_sets)
-    
-#     gmsh.model.setCurrent(current)   
-#     return node_sets
-
-
-# def build_lattice_RVE(model_name, dim, edge_length, lc=None, gui=False):
-#     """
-#     Create of statistical lattice RVE.
-
-#     Parameters
-#     ----------
-#     model_name : str
-#         Name of the model.
-#     dim : int
-#         Dimension of the model.
-#     edge_length : float
-#         Edge length of the RVE.
-#     lc : float
-#         Characteristig cell size.
-#     gui : bool, optional
-#         If true, the Gmsh GUI will be opened after mesh generation. The 
-#         default is False.
-
-#     Returns
-#     -------
-#     node_tags : numpy.ndarray
-#         Tags of the RVE mesh nodes.
-#     node_coords : numpy.ndarray
-#         Coordinates of the RVE mesh nodes.
-#     el_tags : numpy.ndarray
-#         Tags of the RVE mesh elements.
-#     conn : numpy.ndarray
-#         Connectivity list of the RVE mesh.
-#     node_sets : dict
-#         Node sets of the boundary nodes. The nodes are ordered so that
-#         periodic pairs match each other.
-
-#     """
-#     # build RVE made out of continuum elements in gmsh
-#     if dim == 2:
-#         _make_full_RVE_2d(model_name=model_name, gui=gui, 
-#                           edge_length=edge_length, lc=lc)
-#     else:
-#         _make_full_RVE_3d(model_name=model_name, gui=gui, 
-#                           edge_length=edge_length, lc=lc)
-        
-#     # convert continuum mesh to beam mesh
-#     node_tags, node_coords, el_tags, conn = _make_beam_structure(model_name)
-
-#     # set up node sets for boundary conditions
-#     # node_sets = _build_node_sets(model_name)
-#     node_sets = None
-    
-#     finalize_model()
-    
-#     return node_tags, node_coords, el_tags, conn, node_sets
-
