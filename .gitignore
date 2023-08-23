@@ -12,3 +12,4 @@ __pycache__/
 *.prt
 *.sim
 *.sta
+*.rec
