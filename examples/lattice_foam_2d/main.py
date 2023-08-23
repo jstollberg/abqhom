@@ -11,7 +11,7 @@ foamhom_path = os.path.join(base_path,
                             "src")
 sys.path.append(gmsh_path)
 sys.path.append(foamhom_path)
-from abqhom.RVE import write_abq_input, finalize_model, create_boundary_sets
+from abqhom.RVE import write_abq_input, finalize_model
 from abqhom.abq import average_stress, apply_periodic_bc
 from abqhom.utils import export_csv_file
 from abqhom.examples import simple_RVE_2d
@@ -119,8 +119,7 @@ if not os.path.isdir(result_path):
 # material parameters
 E = 210.0   # Young's modulus
 nu = 0.3  # Possion's ratio
-# aspect_ratios = np.linspace(0.01, 0.8, 101)
-aspect_ratios = [0.1996]
+aspect_ratios = np.linspace(0.01, 0.8, 101)
 
 # RVE size
 dx = dy = 10
@@ -160,7 +159,7 @@ for ar in aspect_ratios:
     
     # export material tensor
     csv_path = os.path.join(result_path, "result_{}.csv".format(ar))
-    # export_csv_file(C, csv_path)
+    export_csv_file(C, csv_path)
 
 # finalize gmsh model
 finalize_model()
