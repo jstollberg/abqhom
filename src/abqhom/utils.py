@@ -20,7 +20,7 @@ def voigt_to_strain_tensor(strain):
         eps_xx, eps_yy, eps_zz = strain[0:3]
         eps_yz, eps_xz, eps_xy = strain[3::]/2
         
-        eps = np.array([[eps_xx, eps_xy, eps_xy],
+        eps = np.array([[eps_xx, eps_xy, eps_xz],
                         [eps_xy, eps_yy, eps_yz],
                         [eps_xz, eps_yz, eps_zz]])
         
@@ -179,7 +179,88 @@ def voigt(vol1, C1, C2):
     C = vol1*C1 + (1 - vol1)*C2
     return C
 
-def export_material_tensor(C, path):
+def export_csv_file(C, path):
+    """
+    Dump an array into a csv file.
+
+    Parameters
+    ----------
+    C : numpy.ndarray
+        The array to export.
+    path : str
+        The file path.
+
+    Returns
+    -------
+    None.
+
+    """
+    path, extension = os.path.splitext(path)
+    path += ".csv"
+    np.savetxt(path, C, delimiter=",")
+    
+def read_csv_file(path, dtype=None):
+    """
+    Read a csv file into an array.
+
+    Parameters
+    ----------
+    path : str
+        Path to the file.
+    dtype : type, optional
+        Data type of the array. The default is None.
+
+    Returns
+    -------
+    array : numpy.ndarray
+        The array containing the values from the csv file.
+
+    """
+    array = np.loadtxt(path, delimiter=",", dtype=dtype)
+    return array
+
+def find_all_files(path, extension=None):
+    """
+    Find all files in a specific location.
+
+    Parameters
+    ----------
+    path : str
+        The location to browse.
+    extension : str, optional
+        The file type to look for. The default is None.
+
+    Returns
+    -------
+    files : list
+        List of the files found in the provided location.
+
+    """
+    if extension is None:
+        files = [os.path.join(path, file) for file in os.listdir(path)]
+        return files
+    
+    files = [os.path.join(path, file) for file in os.listdir(path) 
+             if file.endswith(extension)]
+    return files
+
+def best_isotropic_approximation(C):
+    # if C.shape == (3,3):
+    #     C = np.array([[C[0,0], C[0,1], ]])
+    
+    lam0 = 1/15*(C[0,0] + C[1,1] + C[2,2] - 2*(C[3,3] + C[4,4] + C[5,5])
+                 + 4*(C[0,1] + C[0,2] + C[1,2]))
+    mu0 = 1/15*(C[0,0] + C[1,1] + C[2,2] + 3*(C[3,3] + C[4,4] + C[5,5])
+                - (C[0,1] + C[0,2] + C[1,2]))
+
+    # C_iso = lambda lam, mu: np.array([[lam + 2*mu, lam, lam, 0.0, 0.0, 0.0],
+    #                                   [lam, lam + 2*mu, lam, 0.0, 0.0, 0.0],
+    #                                   [lam, lam, lam + 2*mu, 0.0, 0.0, 0.0],
+    #                                   [0.0, 0.0, 0.0, mu, 0.0, 0.0],
+    #                                   [0.0, 0.0, 0.0, 0.0, mu, 0.0],
+    #                                   [0.0, 0.0, 0.0, 0.0, 0.0, mu]])
+
+def anisotropy_index():
     pass
 
 
@@ -203,16 +284,3 @@ def export_material_tensor(C, path):
 #             content.write("STRUT,{},{},{}\n".format(tag, nodes[0], nodes[1]))
             
 #         return path
-
-def read_csv_file(path, dtype=None):
-    array = np.loadtxt(path, delimiter=",", dtype=dtype)
-    return array
-
-def find_all_files(path, extension=None):
-    if extension is None:
-        files = [os.path.join(path, file) for file in os.listdir(path)]
-        return files
-    
-    files = [os.path.join(path, file) for file in os.listdir(path) 
-             if file.endswith(extension)]
-    return files
