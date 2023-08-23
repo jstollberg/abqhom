@@ -26,7 +26,7 @@ def homogenize_stress(model_name, group_map, strain, E, nu, plane_strain=True,
     workdir = os.getcwd()
     mesh_file = os.path.join(workdir, model_name + ".inp")
     el_type = "CPE3" if plane_strain else "CPS3"
-    write_abq_input(model_name, mesh_file, el_type)
+    write_abq_input(model_name, group_map, mesh_file, el_type)
     
     # import the RVE from input file
     Mdb()

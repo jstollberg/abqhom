@@ -25,7 +25,7 @@ def homogenize_stress(model_name, group_map, strain, E, nu,
     # write mesh into abaqus input file
     workdir = os.getcwd()
     mesh_file = os.path.join(workdir, model_name + ".inp")
-    write_abq_input(model_name, mesh_file, "C3D4")
+    write_abq_input(model_name, group_map, mesh_file, "C3D4")
     
     # import the RVE from input file
     Mdb()

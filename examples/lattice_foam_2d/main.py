@@ -13,6 +13,7 @@ sys.path.append(gmsh_path)
 sys.path.append(foamhom_path)
 from abqhom.RVE import write_abq_input, finalize_model, create_boundary_sets
 from abqhom.abq import average_stress, apply_periodic_bc
+from abqhom.utils import export_csv_file
 from abqhom.examples import simple_RVE_2d
 
 # import abaqus modules
@@ -25,10 +26,7 @@ def homogenize_stress(model_name, group_map, strain, E, nu, d,
     # write mesh into abaqus input file
     workdir = os.getcwd()
     mesh_file = os.path.join(workdir, model_name + ".inp")
-    ignore_sets = ["EDGE_2", "EDGE_3", "POINT_2", "POINT_3", "POINT_4"]
-    boundary_sets = create_boundary_sets(model_name, group_map)
-    write_abq_input(model_name, mesh_file, "B23", lattice=True,
-                    ignore_node_sets=ignore_sets, node_sets=boundary_sets)
+    write_abq_input(model_name, group_map, mesh_file, "B23", lattice=True)
     
     # import the RVE from input file
     Mdb()
@@ -37,21 +35,32 @@ def homogenize_stress(model_name, group_map, strain, E, nu, d,
     model = mdb.models[model_name]
     RVE = model.parts["RVE"]
     all_elements = RVE.sets["ALL_ELEMENTS"]
+    boundary_elements = RVE.sets["BOUNDARY_ELEMENTS"]
+    volume_elements = RVE.sets["VOLUME_ELEMENTS"]
     
-    # create material
-    material = model.Material(name="strut_material")
-    material.Elastic(table=((E, nu), ))
+    # create material, boundary elements will be assigned half stiffness
+    material1 = model.Material(name="strut_material_boundary")
+    material1.Elastic(table=((0.5*E, nu), ))
+    material2 = model.Material(name="strut_material_volume")
+    material2.Elastic(table=((E, nu), ))
     
     # create beam section and profile
     model.CircularProfile(name="beam_profile", r=0.5*d)
-    model.BeamSection(name="beam_section", integration=DURING_ANALYSIS, 
-                      profile="beam_profile", material="strut_material")
-    RVE.SectionAssignment(region=all_elements, sectionName="beam_section", 
+    model.BeamSection(name="beam_section_boundary", 
+                      integration=DURING_ANALYSIS, profile="beam_profile", 
+                      material="strut_material_boundary")
+    model.BeamSection(name="beam_section_volume", 
+                      integration=DURING_ANALYSIS, profile="beam_profile", 
+                      material="strut_material_volume")
+    RVE.SectionAssignment(region=boundary_elements, 
+                          sectionName="beam_section_boundary", 
+                          offsetType=MIDDLE_SURFACE)
+    RVE.SectionAssignment(region=volume_elements, 
+                          sectionName="beam_section_volume", 
                           offsetType=MIDDLE_SURFACE)
     
     # orientation of beam elements
-    # since we use circular beams, the n1-orientation is not important and we 
-    # just use some default parameters here
+    # this is always (0, 0, -1) for 2d models
     RVE.assignBeamSectionOrientation(region=all_elements, method=N1_COSINES, 
                                      n1=(0.0, 0.0, -1.0))
     
@@ -102,14 +111,20 @@ if not os.path.isdir(workdir):
     os.mkdir(workdir)
 os.chdir(workdir)
 
+# create folder to store results
+result_path = os.path.join(workdir, "..", "results")
+if not os.path.isdir(result_path):
+    os.mkdir(result_path)
+
 # material parameters
-E = 4.0   # Young's modulus
+E = 210.0   # Young's modulus
 nu = 0.3  # Possion's ratio
-d = 0.1  # strut diameter
+# aspect_ratios = np.linspace(0.01, 0.8, 101)
+aspect_ratios = [0.1996]
 
 # RVE size
 dx = dy = 10
-lc = 1
+lc = 0.4
 
 # macroscopic strain
 eps_star = 0.2
@@ -118,28 +133,34 @@ eps_star = 0.2
 model_name, group_map = simple_RVE_2d(dx=dx, dy=dy, lc=lc)
 
 # homogenization routine
-C = np.empty((3,3))
-for case in range(3):
-    eps = np.array([0.0, 0.0, 0.0])
-    if case == 2:
-        eps_star *= 2
-    eps[case] = eps_star
-
-    # compute volume average of stress tensor
+for ar in aspect_ratios: 
+    d = ar*lc  # strut diameter
+    C = np.empty((3,3))
+    for case in range(3):
+        eps = np.array([0.0, 0.0, 0.0])
+        if case == 2:
+            eps_star *= 2
+        eps[case] = eps_star
+    
+        # compute volume average of stress tensor
+        print("\n------------------------------")
+        print("Run case {}.".format(case))
+        print("strain = " + str(eps.round(4).tolist()))
+        job_name = "effective_material_2d_{}".format(case)
+        sig = homogenize_stress(model_name, group_map, eps, E, nu, d,
+                                job_name=job_name)
+        print("stress = " + str(sig.round(4).tolist()))
+        
+        # compute effective stiffness tensor
+        C[:,case] = sig/eps_star
+    
     print("\n------------------------------")
-    print("Run case {}.".format(case))
-    print("strain = " + str(eps.round(4).tolist()))
-    job_name = "effective_material_2d_{}".format(case)
-    sig = homogenize_stress(model_name, group_map, eps, E, nu, d,
-                            job_name=job_name)
-    print("stress = " + str(sig.round(4).tolist()))
+    print("Effective constitutive matrix:")
+    print(C.round(4))
     
-    # compute effective stiffness tensor
-    C[:,case] = sig/eps_star
-    
-print("\n------------------------------")
-print("Effective constitutive matrix:")
-print(C.round(4))
+    # export material tensor
+    csv_path = os.path.join(result_path, "result_{}.csv".format(ar))
+    # export_csv_file(C, csv_path)
 
 # finalize gmsh model
 finalize_model()
