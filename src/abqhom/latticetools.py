@@ -1,8 +1,13 @@
 import numpy as np
+import gmsh
 
 from abqhom.RVE import find_boundary_elements
 
 def _point_in_cylinder(p1, p2, radius, q):
+    if len(p1) != 3:
+        p1 = np.array([p1[0], p1[1], 0.0])
+        p2 = np.array([p2[0], p2[1], 0.0])
+        q = np.array([q[0], q[1], 0.0])
     axis = p2 - p1
     
     between_circ_faces = (np.dot(q - p1, axis) >= 0 
@@ -15,6 +20,8 @@ def _point_in_cylinder(p1, p2, radius, q):
 
 def approx_rel_density(model_name, group_map, node_tags, node_coords, el_tags, 
                        conn, radius, dx, dy, dz):
+    dim = gmsh.model.getDimension()
+    
     # get boundary elements
     boundary_elements = find_boundary_elements(model_name, group_map, el_tags, 
                                                conn)
@@ -31,10 +38,10 @@ def approx_rel_density(model_name, group_map, node_tags, node_coords, el_tags,
         
         # get weight factor
         weight = 1.0
-        if set([e]) <= face_elements:
+        if set([e]) <= edge_elements:
+            weight = 0.25 if dim == 3 else 0.5
+        elif set([e]) <= face_elements:
             weight = 0.5
-        elif set([e]) <= edge_elements:
-            weight = 0.25
         
         # update strut volume
         volume_struts += weight*length*np.pi*radius*radius
