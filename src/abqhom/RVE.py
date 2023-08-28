@@ -1,6 +1,7 @@
 import numpy as np
 import gmsh
 import os
+from collections import OrderedDict
 
 GROUP_TO_DIM = {"POINT_1": 0, 
                 "POINT_2": 0, 
@@ -407,6 +408,39 @@ def create_boundary_sets(model_name, group_map):
     gmsh.model.setCurrent(current)
     return node_sets
 
+def find_boundary_elements(model_name, group_map, el_tags, conn):
+    current = gmsh.model.getCurrent()
+    gmsh.model.setCurrent(model_name)
+    
+    # get model dimension
+    dim = gmsh.model.getDimension()
+    
+    boundary_sets = create_boundary_sets(model_name, group_map)
+    boundary_nodes = OrderedDict()
+    for d in range(1, dim):
+        for group in gmsh.model.getPhysicalGroups(d):
+            group_name = gmsh.model.getPhysicalName(*group)
+            if group_name not in boundary_sets.keys():
+                continue
+            
+            for entity in gmsh.model.getEntitiesForPhysicalGroup(*group):
+                (entity_nodes,
+                 _, _) = gmsh.model.mesh.getNodes(group[0], entity,
+                                                  includeBoundary=True)
+                boundary_nodes[group_name] = entity_nodes
+            
+    boundary_elements = OrderedDict()
+    for tag, nodes in zip(el_tags, conn):
+        for group_name, group_nodes in boundary_nodes.items():
+            if boundary_elements.get("ELEMENTS_" + group_name) is None:
+                boundary_elements["ELEMENTS_" + group_name] = []
+            if np.all(np.in1d(nodes, group_nodes)):
+                boundary_elements["ELEMENTS_" + group_name].append(tag)
+                break
+            
+    gmsh.model.setCurrent(current)
+    return boundary_elements
+
 def write_abq_input(model_name, group_map, file_name, abq_el_type, 
                     element_set=None, node_sets=None, lattice=False):
     """
@@ -471,28 +505,11 @@ def write_abq_input(model_name, group_map, file_name, abq_el_type,
     # abq_el_type = type_map[el_type]
     # conn = conn[conn_map[el_type]]
     
-    # initialize function that checks if elements should be skipped
-    # ignore_nodes = []
-    # if ignore_node_sets is not None and node_sets is not None:
-    #     ignore_nodes = np.hstack([node_sets[s] for s in ignore_node_sets])
-    # ignore = lambda n: np.all(np.in1d(n, ignore_nodes))
-    # boundary_nodes = np.hstack([node_sets[s] for s in boundary_node_sets])
+    # find boundary element sets and node sets
     boundary_sets = create_boundary_sets(model_name, group_map)
-    # boundary_nodes = np.hstack([i for i in boundary_sets.values()])
-    # is_boundary = lambda n: np.all(np.in1d(n, boundary_nodes))
-    
-    # collect all nodes on the boundary
-    boundary_nodes = []
-    physical_groups = gmsh.model.getPhysicalGroups(dim - 1)
-    for group in physical_groups:
-        if gmsh.model.getPhysicalName(*group) not in boundary_sets.keys():
-            continue
+    boundary_element_sets = find_boundary_elements(model_name, group_map, 
+                                                   el_tags, conn)
         
-        for entity in gmsh.model.getEntitiesForPhysicalGroup(*group):
-            entity_nodes, _, _ = gmsh.model.mesh.getNodes(group[0], entity,
-                                                          includeBoundary=True)
-            boundary_nodes.append(entity_nodes)
-    
     # initialize abaqus input file
     file_name, extension = os.path.splitext(file_name)
     file_name += ".inp"
@@ -507,14 +524,8 @@ def write_abq_input(model_name, group_map, file_name, abq_el_type,
             file.write("{}, {}, {}, {}\n".format(tag, x, y, z))
             
         # add elements
-        boundary_elements = []
         file.write("*ELEMENT, TYPE={}\n".format(abq_el_type))
         for tag, nodes in zip(el_tags, conn):
-            for i in boundary_nodes:
-                if np.all(np.in1d(nodes, i)):
-                    boundary_elements.append(tag)
-                    break
-            
             file.write("{}, ".format(tag))
             for i, n in enumerate(nodes):
                 file.write("{}".format(n))
@@ -524,6 +535,9 @@ def write_abq_input(model_name, group_map, file_name, abq_el_type,
                 file.write(", ")
                 
         boundary_nodes = np.hstack([i for i in boundary_sets.values()])
+        boundary_elements = np.hstack([i for i in
+                                       boundary_element_sets.values()])
+        boundary_elements = np.array(boundary_elements, dtype=int)
         volume_nodes = np.setdiff1d(node_tags, boundary_nodes)
         
         add_set(file, "NSET", "ALL_NODES", node_tags)
@@ -534,6 +548,8 @@ def write_abq_input(model_name, group_map, file_name, abq_el_type,
             volume_elements = np.setdiff1d(el_tags, boundary_elements)
             add_set(file, "ELSET", "BOUNDARY_ELEMENTS", boundary_elements)
             add_set(file, "ELSET", "VOLUME_ELEMENTS", volume_elements)
+            for (name, elements) in boundary_element_sets.items():
+                add_set(file, "ELSET", name, elements)
         file.write("*END PART\n")
         
     return path
