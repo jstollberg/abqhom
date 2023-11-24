@@ -1,13 +1,7 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Tue Aug 15 20:20:23 2023
-
-@author: jonat
-"""
-
 import os
 import sys
 import numpy as np
+import random
 
 # import gmsh and homogenization package
 base_path = "C:/Users/jonat/Documents/"
@@ -43,26 +37,42 @@ def homogenize_stress(model_name, group_map, strain, E, nu, d,
     del mdb.models["Model-1"]
     model = mdb.models[model_name]
     RVE = model.parts["RVE"]
-    boundary_elements = RVE.sets["BOUNDARY_ELEMENTS"]
     volume_elements = RVE.sets["VOLUME_ELEMENTS"]
     
     # create material, boundary elements will be assigned half stiffness
-    material1 = model.Material(name="strut_material_boundary")
-    material1.Elastic(table=((0.5*E, nu), ))
-    material2 = model.Material(name="strut_material_volume")
-    material2.Elastic(table=((E, nu), ))
+    material1 = model.Material(name="strut_material_edges")
+    material1.Elastic(table=((0.25*E, nu), ))
+    material2 = model.Material(name="strut_material_faces")
+    material2.Elastic(table=((0.5*E, nu), ))
+    material3 = model.Material(name="strut_material_volume")
+    material3.Elastic(table=((E, nu), ))
     
     # create beam section and profile
     model.CircularProfile(name="beam_profile", r=0.5*d)
-    model.BeamSection(name="beam_section_boundary", 
+    model.BeamSection(name="beam_section_edges", 
                       integration=DURING_ANALYSIS, profile="beam_profile", 
-                      material="strut_material_boundary")
+                      material="strut_material_edges")
+    model.BeamSection(name="beam_section_faces", 
+                      integration=DURING_ANALYSIS, profile="beam_profile", 
+                      material="strut_material_faces")
     model.BeamSection(name="beam_section_volume", 
                       integration=DURING_ANALYSIS, profile="beam_profile", 
                       material="strut_material_volume")
-    RVE.SectionAssignment(region=boundary_elements, 
-                          sectionName="beam_section_boundary", 
-                          offsetType=MIDDLE_SURFACE)
+    
+    for i in range(1, 13):
+        set_name = "ELEMENTS_EDGE_{}".format(i)
+        region = RVE.sets[set_name]
+        RVE.SectionAssignment(region=region, 
+                              sectionName="beam_section_edges", 
+                              offsetType=MIDDLE_SURFACE)
+        
+    for i in range(1, 7):
+        set_name = "ELEMENTS_FACE_{}".format(i)
+        region = RVE.sets[set_name]
+        RVE.SectionAssignment(region=region, 
+                              sectionName="beam_section_faces", 
+                              offsetType=MIDDLE_SURFACE)
+        
     RVE.SectionAssignment(region=volume_elements, 
                           sectionName="beam_section_volume", 
                           offsetType=MIDDLE_SURFACE)
@@ -133,7 +143,7 @@ def homogenize_stress(model_name, group_map, strain, E, nu, d,
 # ---------------------------------------------------------------
 # set working directory
 workdir = os.path.join(base_path, 
-                       "Institute for Mechanics/abqhom/examples",
+                       "abqhom/examples",
                        "lattice_foam_3d/abq")
 if not os.path.isdir(workdir):
     os.mkdir(workdir)
@@ -143,11 +153,6 @@ os.chdir(workdir)
 result_path = os.path.join(workdir, "..", "results")
 if not os.path.isdir(result_path):
     os.mkdir(result_path)
-
-# material parameters
-E = 4.0   # Young's modulus
-nu = 0.3  # Possion's ratio
-aspect_ratios = np.linspace(0.01, 0.8, 101)
 
 # RVE size
 dx = dy = dz = 10
@@ -160,7 +165,12 @@ eps_star = 0.2
 model_name, group_map = simple_RVE_3d(dx=dx, dy=dy, dz=dz, lc=lc)
 
 # homogenization routine
-for ar in aspect_ratios: 
+n_samples = 1000
+for i in range(n_samples):
+    E = random.uniform(0.01, 300.0)
+    nu = random.uniform(0.0, 0.5)
+    ar = random.uniform(0.01, 1.0)
+    
     d = ar*lc  # strut diameter
     C = np.empty((6,6))
     for case in range(6):
@@ -186,7 +196,7 @@ for ar in aspect_ratios:
     print(C.round(4))
     
     # export material tensor
-    csv_path = os.path.join(result_path, "result_{}.csv".format(ar))
+    csv_path = os.path.join(result_path, "result_{}_{}_{}.csv".format(ar, E, nu))
     export_csv_file(C, csv_path)
 
 # finalize gmsh model
