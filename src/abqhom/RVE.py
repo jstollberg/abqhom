@@ -553,3 +553,36 @@ def write_abq_input(model_name, group_map, file_name, abq_el_type,
         file.write("*END PART\n")
         
     return path
+
+def write_matlab_input(model_name, file_name):
+    if not gmsh.model.getDimension() == 3:
+        raise RuntimeError("Matlab support only available for 3d models.")
+        
+    
+    (node_tags, node_coords, el_tags, conn) = create_beam_structure(model_name)
+    x_min, x_max = np.min(node_coords[:,0]), np.max(node_coords[:,0])
+    y_min, y_max = np.min(node_coords[:,1]), np.max(node_coords[:,1])
+    z_min, z_max = np.min(node_coords[:,2]), np.max(node_coords[:,2])
+    dx, dy, dz = x_max - x_min, y_max - y_min, z_max - z_min
+    
+    # initialize output file
+    file_name, extension = os.path.splitext(file_name)
+    file_name += ".txt"
+    path = os.path.abspath(file_name)
+    with open(path, "w") as file:
+        # add grid nodes
+        file.write("//Grid\tID\tx\ty\tz\n")
+        for tag, coords in zip(node_tags, node_coords):
+            x = (coords[0] - x_min)/dx
+            y = (coords[1] - y_min)/dy
+            z = (coords[2] - z_min)/dz
+            file.write("GRID\t{}\t{}\t{}\t{}\n".format(tag, x, y, z))
+            
+        # add grid edges
+        file.write("//Strut\tID\tStart\tEnd\n")
+        for tag, el_conn in zip(el_tags, conn):
+            file.write("STRUT\t{}\t{}\t{}\n".format(tag, el_conn[0], 
+                                                    el_conn[1]))
+            
+    return path
+    

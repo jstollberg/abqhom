@@ -143,8 +143,8 @@ def homogenize_stress(model_name, group_map, strain, E, nu, d,
 # ---------------------------------------------------------------
 # set working directory
 workdir = os.path.join(base_path, 
-                       "abqhom/examples",
-                       "lattice_foam_3d/abq")
+                       "Institute for Mechanics/abqhom/examples",
+                       "lattice_3d/abq")
 if not os.path.isdir(workdir):
     os.mkdir(workdir)
 os.chdir(workdir)
@@ -156,7 +156,7 @@ if not os.path.isdir(result_path):
 
 # RVE size
 dx = dy = dz = 10
-lc = 1.25
+lc = 5
 
 # macroscopic strain
 eps_star = 0.2
@@ -165,13 +165,19 @@ eps_star = 0.2
 model_name, group_map = simple_RVE_3d(dx=dx, dy=dy, dz=dz, lc=lc)
 
 # homogenization routine
-n_samples = 1000
+n_samples = 1#1000
 for i in range(n_samples):
     E = random.uniform(0.01, 300.0)
     nu = random.uniform(0.0, 0.5)
     ar = random.uniform(0.01, 1.0)
     
     d = ar*lc  # strut diameter
+    
+    E = 210.0
+    nu = 0.3
+    ar = 0.1
+    d = ar*lc
+    
     C = np.empty((6,6))
     for case in range(6):
         eps = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
