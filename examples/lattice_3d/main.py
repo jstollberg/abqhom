@@ -6,16 +6,23 @@ import random
 # import gmsh and homogenization package
 base_path = "C:/Users/jonat/Documents/"
 gmsh_path = os.path.join(base_path, "gmsh", "lib")
-foamhom_path = os.path.join(base_path, 
-                            "Institute for Mechanics", 
-                            "abqhom", 
-                            "src")
+abqhom_path = os.path.join(base_path,
+                           "abqhom",
+                           "src")
+paraqus_path = os.path.join(base_path, "paraqus", "src")
 sys.path.append(gmsh_path)
-sys.path.append(foamhom_path)
+sys.path.append(abqhom_path)
+sys.path.append(paraqus_path)
+
+# import abaqus homogenization tools
 from abqhom.RVE import write_abq_input, finalize_model
 from abqhom.abq import average_stress, apply_periodic_bc
 from abqhom.utils import export_csv_file
 from abqhom.examples import simple_RVE_3d
+
+# import paraqus to export vtk files
+from paraqus.abaqus import ODBReader
+from paraqus.writers import BinaryWriter
 
 # import abaqus modules
 from abaqus import Mdb, mdb, session
@@ -24,7 +31,21 @@ from abaqusConstants import (CARTESIAN, ON, PERCENTAGE, ODB, FULL,
 from mesh import MeshElementArray
 from regionToolset import Region
 
-def homogenize_stress(model_name, group_map, strain, E, nu, d,
+def export_vtk(odb_path, model_name, vtk_path):
+    reader = ODBReader(odb_path=odb_path,
+                       model_name=model_name,
+                       instance_names=["RVE-1"],
+                       )
+    reader.add_field_export_request("U", field_position="nodes")
+    reader.add_set_export_request("BOUNDARY_ELEMENTS", set_type="elements",
+                                  instance_name="RVE-1")
+    vtu_writer = BinaryWriter(vtk_path, clear_output_dir=False)
+    instance_models = list(reader.read_instances(step_name="Load",
+                                                 frame_index=-1))
+    instance_model = instance_models[0]
+    vtu_writer.write(instance_model)
+
+def homogenize_stress(model_name, group_map, strain, E, nu, d, vtk_path,
                       job_name="homogenization"):
     # write mesh into abaqus input file
     workdir = os.getcwd()
@@ -138,13 +159,15 @@ def homogenize_stress(model_name, group_map, strain, E, nu, d,
     # run averaging procedure
     sig = average_stress(odb, "RVE-1", "Load")
     
+    # export as vtk
+    export_vtk(odb_path, job_name + "_{}".format(10/lc), vtk_path)
+    
     return sig
     
 # ---------------------------------------------------------------
 # set working directory
 workdir = os.path.join(base_path, 
-                       "Institute for Mechanics/abqhom/examples",
-                       "lattice_3d/abq")
+                       "abqhom/examples/lattice_3d/abq")
 if not os.path.isdir(workdir):
     os.mkdir(workdir)
 os.chdir(workdir)
@@ -153,10 +176,15 @@ os.chdir(workdir)
 result_path = os.path.join(workdir, "..", "results")
 if not os.path.isdir(result_path):
     os.mkdir(result_path)
+    
+# create folder to store vtk files
+vtk_path = os.path.join(workdir, "..", "vtk_output")
+if not os.path.isdir(vtk_path):
+    os.mkdir(vtk_path)
 
 # RVE size
 dx = dy = dz = 10
-lc = 5
+lc = 1.25
 
 # macroscopic strain
 eps_star = 0.2
@@ -165,11 +193,14 @@ eps_star = 0.2
 model_name, group_map = simple_RVE_3d(dx=dx, dy=dy, dz=dz, lc=lc)
 
 # homogenization routine
-n_samples = 1#1000
+n_samples = 1  # 1000
 for i in range(n_samples):
-    E = random.uniform(0.01, 300.0)
-    nu = random.uniform(0.0, 0.5)
-    ar = random.uniform(0.01, 1.0)
+    # E = random.uniform(0.01, 300.0)
+    # nu = random.uniform(0.0, 0.5)
+    # ar = random.uniform(0.01, 1.0)
+    E = 210.0
+    nu = 0.3
+    ar = 0.15
     
     d = ar*lc  # strut diameter
     
@@ -187,10 +218,10 @@ for i in range(n_samples):
     
         # compute volume average of stress tensor
         print("\n------------------------------")
-        print("Run case {}.".format(case))
+        print("Run case {}.".format(case + 1))
         print("strain = " + str(eps.round(4).tolist()))
-        job_name = "effective_material_2d_{}".format(case)
-        sig = homogenize_stress(model_name, group_map, eps, E, nu, d,
+        job_name = "effective_material_3d_{}".format(case)
+        sig = homogenize_stress(model_name, group_map, eps, E, nu, d, vtk_path,
                                 job_name=job_name)
         print("stress = " + str(sig.round(4).tolist()))
         
