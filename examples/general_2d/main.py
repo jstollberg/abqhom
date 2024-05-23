@@ -99,7 +99,7 @@ plane_strain = True
 # RVE size
 dx = dy = 10
 radius = dx/4
-lc = 1
+lc = 0.4
 
 # macroscopic strain
 eps_star = 0.2
