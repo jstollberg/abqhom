@@ -2,15 +2,15 @@ import os
 import sys
 import numpy as np
 
-# import gmsh and homogenization package
 base_path = "C:/Users/jonat/Documents/"
 gmsh_path = os.path.join(base_path, "gmsh", "lib")
-foamhom_path = os.path.join(base_path, 
-                            "Institute for Mechanics", 
-                            "abqhom", 
-                            "src")
+abqhom_path = os.path.join(base_path,
+                           "abqhom",
+                           "src")
 sys.path.append(gmsh_path)
-sys.path.append(foamhom_path)
+sys.path.append(abqhom_path)
+
+# import abaqus homogenization tools
 from abqhom.RVE import write_abq_input, finalize_model
 from abqhom.abq import average_stress, apply_periodic_bc
 from abqhom.utils import reuss, voigt

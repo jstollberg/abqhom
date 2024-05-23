@@ -3,7 +3,6 @@ import sys
 import numpy as np
 import random
 
-# import gmsh and homogenization package
 base_path = "C:/Users/jonat/Documents/"
 gmsh_path = os.path.join(base_path, "gmsh", "lib")
 abqhom_path = os.path.join(base_path,
@@ -21,8 +20,13 @@ from abqhom.utils import export_csv_file
 from abqhom.examples import simple_RVE_3d
 
 # import paraqus to export vtk files
-from paraqus.abaqus import ODBReader
-from paraqus.writers import BinaryWriter
+paraqus_installed = False
+try:
+    from paraqus.abaqus import ODBReader
+    from paraqus.writers import BinaryWriter
+    paraqus_installes = True
+except:
+    continue
 
 # import abaqus modules
 from abaqus import Mdb, mdb, session
@@ -160,7 +164,8 @@ def homogenize_stress(model_name, group_map, strain, E, nu, d, vtk_path,
     sig = average_stress(odb, "RVE-1", "Load")
     
     # export as vtk
-    export_vtk(odb_path, job_name + "_{}".format(10/lc), vtk_path)
+    if paraqus_installed:
+        export_vtk(odb_path, job_name + "_{}".format(10/lc), vtk_path)
     
     return sig
     
@@ -195,19 +200,10 @@ model_name, group_map = simple_RVE_3d(dx=dx, dy=dy, dz=dz, lc=lc)
 # homogenization routine
 n_samples = 1  # 1000
 for i in range(n_samples):
-    # E = random.uniform(0.01, 300.0)
-    # nu = random.uniform(0.0, 0.5)
-    # ar = random.uniform(0.01, 1.0)
-    E = 210.0
-    nu = 0.3
-    ar = 0.15
-    
+    E = random.uniform(0.01, 300.0)
+    nu = random.uniform(0.0, 0.5)
+    ar = random.uniform(0.01, 1.0)
     d = ar*lc  # strut diameter
-    
-    E = 210.0
-    nu = 0.3
-    ar = 0.1
-    d = ar*lc
     
     C = np.empty((6,6))
     for case in range(6):
