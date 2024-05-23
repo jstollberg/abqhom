@@ -85,7 +85,7 @@ def homogenize_stress(model_name, group_map, strain, E, nu, plane_strain=True,
 # ---------------------------------------------------------------
 # set working directory
 workdir = os.path.join(base_path, 
-                       "Institute for Mechanics/abqhom/examples",
+                       "abqhom/examples",
                        "general_2d/abq")
 if not os.path.isdir(workdir):
     os.mkdir(workdir)

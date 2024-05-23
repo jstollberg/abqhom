@@ -128,14 +128,14 @@ def hole_RVE_2d(model_name="RVE", x=0.0, y=0.0, dx=1.0, dy=1.0, radius=0.25,
     gmsh.model.occ.synchronize()
     
     # create map containing information on mesh periodicity and physical groups
-    group_map = {"POINT_1": [1], 
-                 "POINT_2": [2], 
-                 "POINT_3": [4], 
-                 "POINT_4": [3],
-                 "EDGE_1": [1],
-                 "EDGE_2": [3],
-                 "EDGE_3": [4],
-                 "EDGE_4": [2]}
+    group_map = {"POINT_1": [6], 
+                 "POINT_2": [7], 
+                 "POINT_3": [9], 
+                 "POINT_4": [8],
+                 "EDGE_1": [6],
+                 "EDGE_2": [8],
+                 "EDGE_3": [9],
+                 "EDGE_4": [7]}
     
     add_boundary_groups(model_name, group_map)
     add_periodic_constraints(model_name, group_map, dx, dy)

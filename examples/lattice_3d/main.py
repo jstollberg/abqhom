@@ -26,7 +26,7 @@ try:
     from paraqus.writers import BinaryWriter
     paraqus_installes = True
 except:
-    continue
+    pass
 
 # import abaqus modules
 from abaqus import Mdb, mdb, session
