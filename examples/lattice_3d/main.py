@@ -3,7 +3,8 @@ import sys
 import numpy as np
 import random
 
-base_path = "C:/Users/jonat/Documents/"
+base_path = "C:/Users/lemji/Documents/"
+"""
 gmsh_path = os.path.join(base_path, "gmsh", "lib")
 abqhom_path = os.path.join(base_path,
                            "abqhom",
@@ -12,8 +13,10 @@ paraqus_path = os.path.join(base_path, "paraqus", "src")
 sys.path.append(gmsh_path)
 sys.path.append(abqhom_path)
 sys.path.append(paraqus_path)
+"""
 
 # import abaqus homogenization tools
+import gmsh
 from abqhom.RVE import write_abq_input, finalize_model
 from abqhom.abq import average_stress, apply_periodic_bc
 from abqhom.utils import export_csv_file
@@ -22,9 +25,9 @@ from abqhom.examples import simple_RVE_3d
 # import paraqus to export vtk files
 paraqus_installed = False
 try:
-    from paraqus.abaqus import ODBReader
+    from paraqus.abaqus import OdbReader
     from paraqus.writers import BinaryWriter
-    paraqus_installes = True
+    paraqus_installed = True
 except:
     pass
 
@@ -36,7 +39,7 @@ from mesh import MeshElementArray
 from regionToolset import Region
 
 def export_vtk(odb_path, model_name, vtk_path):
-    reader = ODBReader(odb_path=odb_path,
+    reader = OdbReader(odb_path=odb_path,
                        model_name=model_name,
                        instance_names=["RVE-1"],
                        )
@@ -172,7 +175,7 @@ def homogenize_stress(model_name, group_map, strain, E, nu, d, vtk_path,
 # ---------------------------------------------------------------
 # set working directory
 workdir = os.path.join(base_path, 
-                       "abqhom/examples/lattice_3d/abq")
+                       "abqhom_example")
 if not os.path.isdir(workdir):
     os.mkdir(workdir)
 os.chdir(workdir)
@@ -189,13 +192,14 @@ if not os.path.isdir(vtk_path):
 
 # RVE size
 dx = dy = dz = 10
-lc = 1.25
+lc = 5
 
 # macroscopic strain
 eps_star = 0.2
 
 # create geometry in gmsh
 model_name, group_map = simple_RVE_3d(dx=dx, dy=dy, dz=dz, lc=lc)
+gmsh.fltk.run()
 
 # homogenization routine
 n_samples = 1  # 1000
