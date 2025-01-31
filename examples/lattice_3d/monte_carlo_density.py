@@ -6,7 +6,7 @@ from abqhom.examples import simple_RVE_3d
 from abqhom.utils import export_csv_file
 
 # set working directory
-base_path = "C:/Users/jonat/Documents/"
+base_path = "C:/Users/lemji/Documents/"
 workdir = os.path.join(base_path, 
                        "Institute for Mechanics/abqhom/examples",
                        "lattice_foam_3d")

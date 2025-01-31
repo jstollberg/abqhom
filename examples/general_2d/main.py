@@ -2,7 +2,7 @@ import os
 import sys
 import numpy as np
 
-base_path = "C:/Users/jonat/Documents/"
+base_path = "C:/Users/lemji/Documents/"
 gmsh_path = os.path.join(base_path, "gmsh", "lib")
 abqhom_path = os.path.join(base_path,
                            "abqhom",
@@ -85,8 +85,8 @@ def homogenize_stress(model_name, group_map, strain, E, nu, plane_strain=True,
 # ---------------------------------------------------------------
 # set working directory
 workdir = os.path.join(base_path, 
-                       "abqhom/examples",
-                       "general_2d/abq")
+                       "abqhom_example"
+                       )
 if not os.path.isdir(workdir):
     os.mkdir(workdir)
 os.chdir(workdir)

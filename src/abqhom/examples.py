@@ -163,38 +163,37 @@ def hole_RVE_3d(model_name="RVE", x=0.0, y=0.0, z=0.0, dx=1.0, dy=1.0, dz=1.0,
     gmsh.model.add(model_name)
 
     # create geometry
-    gmsh.model.occ.addBox(x - dx/2, y - dy/2, z - dz/2, dx, dy, dz)
-    gmsh.model.occ.addCylinder(x, y, z - dz/2, 0.0, 0.0, dz, radius)
+    gmsh.model.occ.addBox(x - dx/2, y - dy/2, z - dz/2, dx, dy, dz,1)
+    gmsh.model.occ.addCylinder(x, y, z - dz/2, 0.0, 0.0, dz, radius,2)
     gmsh.model.occ.cut([(3, 1)], [(3, 2)])
     gmsh.model.occ.synchronize()
-    
     # create map containing information on mesh periodicity and physical groups
-    group_map = {"POINT_1": [1], 
-                 "POINT_2": [2], 
-                 "POINT_3": [4], 
-                 "POINT_4": [3],
-                 "POINT_5": [6],
-                 "POINT_6": [5],
-                 "POINT_7": [9],
-                 "POINT_8": [7],
-                 "EDGE_1": [1],
-                 "EDGE_2": [4],
-                 "EDGE_3": [3],
-                 "EDGE_4": [2],
-                 "EDGE_5": [6],
-                 "EDGE_6": [13],
-                 "EDGE_7": [12],
-                 "EDGE_8": [9],
-                 "EDGE_9": [5],
-                 "EDGE_10": [7],
-                 "EDGE_11": [11],
-                 "EDGE_12": [8],
-                 "FACE_1": [1],
-                 "FACE_2": [6],
-                 "FACE_3": [2],
-                 "FACE_4": [4],
-                 "FACE_5": [5],
-                 "FACE_6": [3]}
+    group_map = {"POINT_1": [11],
+                 "POINT_2": [12],
+                 "POINT_3": [14],
+                 "POINT_4": [13],
+                 "POINT_5": [16],
+                 "POINT_6": [15],
+                 "POINT_7": [18],
+                 "POINT_8": [17],
+                 "EDGE_1": [16],
+                 "EDGE_2": [19],
+                 "EDGE_3": [18],
+                 "EDGE_4": [17],
+                 "EDGE_5": [21],
+                 "EDGE_6": [27],
+                 "EDGE_7": [26],
+                 "EDGE_8": [24],
+                 "EDGE_9": [20],
+                 "EDGE_10": [22],
+                 "EDGE_11": [25],
+                 "EDGE_12": [23],
+                 "FACE_1": [8],
+                 "FACE_2": [13],
+                 "FACE_3": [9],
+                 "FACE_4": [11],
+                 "FACE_5": [12],
+                 "FACE_6": [10]}
     
     add_boundary_groups(model_name, group_map)
     add_periodic_constraints(model_name, group_map, dx, dy, dz)
@@ -212,7 +211,7 @@ def hole_RVE_3d(model_name="RVE", x=0.0, y=0.0, z=0.0, dx=1.0, dy=1.0, dz=1.0,
     if gui:
         gmsh.fltk.run()
 
-    return model_name, group_map
+    return model_name,group_map
 
 def simple_RVE_2d(model_name="RVE", x=0.0, y=0.0, dx=1.0, dy=1.0, lc=None, 
                   gui=False):
@@ -309,3 +308,4 @@ def simple_RVE_3d(model_name="RVE", x=0.0, y=0.0, z=0.0, dx=1.0, dy=1.0,
         gmsh.fltk.run()
     
     return model_name, group_map
+hole_RVE_3d(gui=True)
