@@ -22,9 +22,9 @@ from abqhom.examples import simple_RVE_3d
 # import paraqus to export vtk files
 paraqus_installed = False
 try:
-    from paraqus.abaqus import ODBReader
+    from paraqus.abaqus import OdbReader
     from paraqus.writers import BinaryWriter
-    paraqus_installes = True
+    paraqus_installed = True
 except:
     pass
 
@@ -36,7 +36,7 @@ from mesh import MeshElementArray
 from regionToolset import Region
 
 def export_vtk(odb_path, model_name, vtk_path):
-    reader = ODBReader(odb_path=odb_path,
+    reader = OdbReader(odb_path=odb_path,
                        model_name=model_name,
                        instance_names=["RVE-1"],
                        )
