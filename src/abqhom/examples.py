@@ -308,4 +308,4 @@ def simple_RVE_3d(model_name="RVE", x=0.0, y=0.0, z=0.0, dx=1.0, dy=1.0,
         gmsh.fltk.run()
     
     return model_name, group_map
-hole_RVE_3d(gui=True)
+fancy_RVE_3d(gui=True)

@@ -22,6 +22,7 @@ from abqhom.abq import average_stress, apply_periodic_bc
 from abqhom.utils import export_csv_file
 from abqhom.examples import simple_RVE_3d
 from abqhom.Essay import *
+from abqhom.geo import *
 
 # import paraqus to export vtk files
 paraqus_installed = False
@@ -199,7 +200,7 @@ lc = 5
 eps_star = 0.2
 
 # create geometry in gmsh
-model_name, group_map = hole_RVE_3d(dx=dx, dy=dy, dz=dz, lc=lc,radius=2.5)
+model_name, group_map = assemble(dx=dx, dy=dy, dz=dz, lc=lc,parts=["Cubic","AFCC"],ACC=True)
 gmsh.fltk.run()
 
 # homogenization routine
