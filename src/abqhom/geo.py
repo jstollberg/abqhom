@@ -507,12 +507,186 @@ def assemble(model_name="Assembly", x=0.0, y=0.0, z=0.0, dx=1.0, dy=1.0,
             gmsh.option.setNumber("Mesh.MeshSizeMax", lc)
 
         # create mesh using Delauny algorithm
-        gmsh.option.setNumber("Mesh.Algorithm3D", 1)
-        gmsh.model.mesh.generate(3)
+        #gmsh.option.setNumber("Mesh.Algorithm3D", 1)
+        gmsh.model.mesh.generate(2)
 
 
         if gui:
             gmsh.fltk.run()
 
         return model_name, group_map
-assemble(lc=5,gui=True,parts=["BCC","FCC"],ACC=True)
+#assemble(lc=5,gui=True,parts=[],ACC=True)
+
+def final_probe(model_name="RVE", x=0.0, y=0.0, z=0.0, dx=1.0, dy=1.0,
+             dz=1.0, lc=None, gui=False):
+    if not gmsh.isInitialized():
+        gmsh.initialize()
+    gmsh.model.add(model_name)
+    Dx, Dy, Dz = dx / 2, dy / 2, dz / 2
+
+    gmsh.model.occ.addPoint(x - Dx, y - Dy, z + Dz, lc, 1)
+    gmsh.model.occ.addPoint(x - Dx, y - Dy, z - Dz, lc, 2)
+    gmsh.model.occ.addPoint(x - Dx, y + Dy, z - Dz, lc, 3)
+    gmsh.model.occ.addPoint(x - Dx, y + Dy, z + Dz, lc, 4)
+    gmsh.model.occ.addPoint(x + Dx, y - Dy, z + Dz, lc, 5)
+    gmsh.model.occ.addPoint(x + Dx, y - Dy, z - Dz, lc, 6)
+    gmsh.model.occ.addPoint(x + Dx, y + Dy, z - Dz, lc, 7)
+    gmsh.model.occ.addPoint(x + Dx, y + Dy, z + Dz, lc, 8)
+
+    gmsh.model.occ.addLine(1, 2, 1)
+    gmsh.model.occ.addLine(2, 3, 2)
+    gmsh.model.occ.addLine(3, 4, 3)
+    gmsh.model.occ.addLine(4, 1, 4)
+    gmsh.model.occ.addLine(5, 6, 5)
+    gmsh.model.occ.addLine(6, 7, 6)
+    gmsh.model.occ.addLine(7, 8, 7)
+    gmsh.model.occ.addLine(8, 5, 8)
+    gmsh.model.occ.addLine(2, 6, 9)
+    gmsh.model.occ.addLine(1, 5, 10)
+    gmsh.model.occ.addLine(3, 7, 11)
+    gmsh.model.occ.addLine(4, 8, 12)
+
+
+    gmsh.model.occ.addLine(4, 6,13)
+    gmsh.model.occ.addLine(3, 5,14)
+    gmsh.model.occ.addLine(1, 7,15)
+    gmsh.model.occ.addLine(2, 8,16)
+
+    gmsh.model.occ.addPoint(x - Dx, y, z, lc, 9)
+    gmsh.model.occ.addPoint(x + Dx, y, z, lc,10)
+    gmsh.model.occ.addPoint(x, y - Dy, z, lc,11)
+    gmsh.model.occ.addPoint(x, y + Dy, z, lc, 12)
+    gmsh.model.occ.addPoint(x, y, z - Dz, lc, 13)
+    gmsh.model.occ.addPoint(x, y, z + Dz, lc,14)
+
+    #Face_1
+    gmsh.model.occ.addLine(9,1,17)
+    gmsh.model.occ.addLine(9,2,18)
+    gmsh.model.occ.addLine(9,3,19)
+    gmsh.model.occ.addLine(9,4,20)
+
+    gmsh.model.occ.addCurveLoop([17,18,1],1)
+    gmsh.model.occ.addCurveLoop([18,19,2],2)
+    gmsh.model.occ.addCurveLoop([19,20,3],3)
+    gmsh.model.occ.addCurveLoop([20,17,4],4)
+
+
+
+    #Face_2
+    gmsh.model.occ.addLine(10,5,21)
+    gmsh.model.occ.addLine(10,6,22)
+    gmsh.model.occ.addLine(10,7,23)
+    gmsh.model.occ.addLine(10,8,24)
+
+    gmsh.model.occ.addCurveLoop([21,22,5],5)
+    gmsh.model.occ.addCurveLoop([22,23,6],6)
+    gmsh.model.occ.addCurveLoop([23,24,7],7)
+    gmsh.model.occ.addCurveLoop([24,21,8],8)
+
+
+
+    #Face_3
+    gmsh.model.occ.addLine(11,1,25)
+    gmsh.model.occ.addLine(11,2,26)
+    gmsh.model.occ.addLine(11,6,27)
+    gmsh.model.occ.addLine(11,5,28)
+
+    gmsh.model.occ.addCurveLoop([25,26,1],9)
+    gmsh.model.occ.addCurveLoop([26,27,9],10)
+    gmsh.model.occ.addCurveLoop([27,28,5],11)
+    gmsh.model.occ.addCurveLoop([28,25,10],12)
+
+
+    #Face_4
+    gmsh.model.occ.addLine(12,8,29)
+    gmsh.model.occ.addLine(12,4,30)
+    gmsh.model.occ.addLine(12,3,31)
+    gmsh.model.occ.addLine(12,7,32)
+
+    gmsh.model.occ.addCurveLoop([30,31,3],13)
+    gmsh.model.occ.addCurveLoop([31,32,11],14)
+    gmsh.model.occ.addCurveLoop([32,29,7],15)
+    gmsh.model.occ.addCurveLoop([29,30,12],16)
+
+    #Face_5
+    gmsh.model.occ.addLine(13,2,33)
+    gmsh.model.occ.addLine(13,3,34)
+    gmsh.model.occ.addLine(13,7,35)
+    gmsh.model.occ.addLine(13,6,36)
+
+    gmsh.model.occ.addCurveLoop([33,34,2],17)
+    gmsh.model.occ.addCurveLoop([34,35,11],18)
+    gmsh.model.occ.addCurveLoop([35,36,6],19)
+    gmsh.model.occ.addCurveLoop([36,33,9],20)
+
+    #Face_6
+    gmsh.model.occ.addLine(14,1,37)
+    gmsh.model.occ.addLine(14,4,38)
+    gmsh.model.occ.addLine(14,8,39)
+    gmsh.model.occ.addLine(14,5,40)
+
+    gmsh.model.occ.addCurveLoop([37,38,4],21)
+    gmsh.model.occ.addCurveLoop([38,39,12],22)
+    gmsh.model.occ.addCurveLoop([39,40,8],23)
+    gmsh.model.occ.addCurveLoop([40,37,10],24)
+
+    Surfaces=[0]*24
+    for i in range (1,25):
+        gmsh.model.occ.addSurfaceFilling(i,i)
+        Surfaces[i-1]=i
+    """
+    for i in range (1,7):
+        gmsh.model.occ.fuse([(2,4*i-3),(2,4*i-2),(2,4*i-1)],[(2,4*i)],tag=24+i,removeTool=False,removeObject=False)
+    """
+
+    gmsh.model.occ.addSurfaceLoop(Surfaces,1)
+    gmsh.model.occ.addVolume([1],1)
+
+    gmsh.model.occ.synchronize()
+
+
+
+    # create map containing information on mesh periodicity and physical groups
+    group_map = {"POINT_1": [1],
+                 "POINT_2": [2],
+                 "POINT_3": [3],
+                 "POINT_4": [4],
+                 "POINT_5": [5],
+                 "POINT_6": [6],
+                 "POINT_7": [7],
+                 "POINT_8": [8],
+                 "EDGE_1": [1],
+                 "EDGE_2": [2],
+                 "EDGE_3": [3],
+                 "EDGE_4": [4],
+                 "EDGE_5": [5],
+                 "EDGE_6": [6],
+                 "EDGE_7": [7],
+                 "EDGE_8": [8],
+                 "EDGE_9": [9],
+                 "EDGE_10": [10],
+                 "EDGE_11": [11],
+                 "EDGE_12": [12],
+                 "FACE_1": [1,2,3,4],
+                 "FACE_2":[5,6,7,8],
+                 "FACE_3": [9,10,11,12],
+                 "FACE_4": [13,14,15,16],
+                 "FACE_5": [17,18,19,20],
+                 "FACE_6": [21,22,23,24],
+                 }
+    add_boundary_groups(model_name, group_map)
+    add_periodic_constraints(model_name, group_map, dx, dy, dz)
+    # set mesh size
+    if lc is not None:
+        gmsh.option.setNumber("Mesh.MeshSizeFromPoints", 0)
+        gmsh.option.setNumber("Mesh.MeshSizeMin", lc)
+        gmsh.option.setNumber("Mesh.MeshSizeMax", lc)
+
+    gmsh.option.setNumber("Mesh.Algorithm3D", 1)
+    gmsh.model.mesh.generate(3)
+
+    if gui:
+        gmsh.fltk.run()
+
+    return model_name, group_map
+final_probe(lc=5,gui=True)

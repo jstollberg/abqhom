@@ -71,9 +71,9 @@ def homogenize_stress(model_name, group_map, strain, E, nu, d, vtk_path,
     
     # create material, boundary elements will be assigned half stiffness
     material1 = model.Material(name="strut_material_edges")
-    material1.Elastic(table=((0.25*E, nu), ))
+    material1.Elastic(table=((1e-6*E, nu), ))
     material2 = model.Material(name="strut_material_faces")
-    material2.Elastic(table=((0.5*E, nu), ))
+    material2.Elastic(table=((5*1e-7*E, nu), ))
     material3 = model.Material(name="strut_material_volume")
     material3.Elastic(table=((E, nu), ))
     
@@ -200,7 +200,7 @@ lc = 5
 eps_star = 0.2
 
 # create geometry in gmsh
-model_name, group_map = assemble(dx=dx, dy=dy, dz=dz, lc=lc,parts=["Cubic","AFCC"],ACC=True)
+model_name, group_map = assemble(dx=dx, dy=dy, dz=dz, lc=lc,parts=["BCC","AFCC"],ACC=False)
 gmsh.fltk.run()
 
 # homogenization routine

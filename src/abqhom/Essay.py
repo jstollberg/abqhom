@@ -65,7 +65,7 @@ def model_Body_centered_cube_RVE(model_name="BCC", x=0.0, y=0.0, z=0.0, dx=1.0, 
     gmsh.option.setNumber("Mesh.Algorithm3D", 1)
     gmsh.model.mesh.generate(3)
 
-    gmsh.write("{}.geo".format(model_name))
+
 
     if gui:
         gmsh.fltk.run()
@@ -1145,3 +1145,4 @@ def assemble_models(model_name="Assembly",model_names=[],lc=None,gui=False):
     return model_name,group_map
 
 #assemble_models(model_names=["C:/Users/lemji/OneDrive/Bureau/khedma/BCC","C:/Users/lemji/OneDrive/Bureau/khedma/FCC"],lc=5,gui=True)
+model_Body_centered_cube_RVE(lc=5,gui=True)
