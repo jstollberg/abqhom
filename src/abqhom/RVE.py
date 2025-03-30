@@ -3,6 +3,423 @@ import gmsh
 import os
 from collections import OrderedDict
 
+
+POINT_GROUPS = ("POINT_1", "POINT_2", "POINT_3", "POINT_4",
+                "POINT_5", "POINT_6", "POINT_7", "POINT_8")
+EDGE_GROUPS = ("EDGE_1", "EDGE_2", "EDGE_3", "EDGE_4", "EDGE_5", "EDGE_6",
+               "EDGE_7", "EDGE_8", "EDGE_9", "EDGE_10", "EDGE_11", "EDGE_12")
+FACE_GROUPS = ("FACE_1", "FACE_2", "FACE_3", "FACE_4", "FACE_5", "FACE_6")
+
+# Periodic pairs of groups, keys are masters, values are slaves
+PERIODIC_PAIRS = {"EDGE_1":  "EDGE_3",
+                  "EDGE_3":  "EDGE_7",
+                  "EDGE_7":  "EDGE_5",
+                  "EDGE_2":  "EDGE_4",
+                  "EDGE_4":  "EDGE_8",
+                  "EDGE_8":  "EDGE_6",
+                  "EDGE_9":  "EDGE_10",
+                  "EDGE_10": "EDGE_11",
+                  "EDGE_11": "EDGE_12",
+                  "FACE_1":  "FACE_2",
+                  "FACE_3":  "FACE_4",
+                  "FACE_5":  "FACE_6"}
+
+# Groups forming the boundary of a higher-dimensional group
+BOUNDARY_CONNECTIVITY = {"POINT_1": [],
+                         "POINT_2": [],
+                         "POINT_3": [],
+                         "POINT_4": [],
+                         "POINT_5": [],
+                         "POINT_6": [],
+                         "POINT_7": [],
+                         "POINT_8": [],
+                         "EDGE_1":  ["POINT_1", "POINT_2"],
+                         "EDGE_2":  ["POINT_2", "POINT_3"],
+                         "EDGE_3":  ["POINT_3", "POINT_4"],
+                         "EDGE_4":  ["POINT_4", "POINT_1"],
+                         "EDGE_5":  ["POINT_5", "POINT_6"],
+                         "EDGE_6":  ["POINT_6", "POINT_7"],
+                         "EDGE_7":  ["POINT_7", "POINT_8"],
+                         "EDGE_8":  ["POINT_8", "POINT_5"],
+                         "EDGE_9":  ["POINT_1", "POINT_5"],
+                         "EDGE_10": ["POINT_2", "POINT_6"],
+                         "EDGE_11": ["POINT_3", "POINT_7"],
+                         "EDGE_12": ["POINT_4", "POINT_8"],
+                         "FACE_1":  ["EDGE_1", "EDGE_2", "EDGE_3", "EDGE_4"],
+                         "FACE_2":  ["EDGE_5", "EDGE_6", "EDGE_7", "EDGE_8"],
+                         "FACE_3":  ["EDGE_1", "EDGE_9", "EDGE_5", "EDGE_10"],
+                         "FACE_4":  ["EDGE_3", "EDGE_12", "EDGE_7", "EDGE_11"],
+                         "FACE_5":  ["EDGE_9", "EDGE_4", "EDGE_12", "EDGE_8"],
+                         "FACE_6":  ["EDGE_10", "EDGE_2", "EDGE_11", "EDGE_6"]}
+
+
+def initialize_model():
+    """
+    Initialize the Gmsh API.
+
+    Returns
+    -------
+    None.
+
+    """
+    gmsh.initialize()
+
+
+def finalize_model():
+    """
+    Finalize the Gmsh API.
+
+    Returns
+    -------
+    None.
+
+    """
+    gmsh.finalize()
+
+
+def show_gmsh_gui(model_name=None):
+    """
+    Open the Gmsh user interface.
+
+    Parameters
+    ----------
+    model_name : str, optional
+        Name of the model to show in the GUI. The default is None.
+
+    Returns
+    -------
+    None.
+
+    """
+    current = gmsh.model.get_current()
+    if model_name is not None:
+        gmsh.model.set_current(model_name)
+    gmsh.fltk.run()
+    gmsh.model.set_current(current)
+
+
+def get_model_dimension(model_name):
+    """
+    Get the geometric dimension of a Gmsh model.
+
+    2d models need to be created in the x-y-plane in advance.
+
+    Parameters
+    ----------
+    model_name : str
+        Name of the Gmsh model.
+
+    Returns
+    -------
+    dim : int
+        The model dimension.
+
+    """
+    current = gmsh.model.get_current()
+    gmsh.model.set_current(model_name)
+
+    # Compute the geometric dimension of the model
+    bounding_box = np.array(gmsh.model.get_bounding_box(-1, -1)).reshape(2, -1)
+    dx, dy, dz = bounding_box[1] - bounding_box[0]
+    dim = 3
+    for dd in (dx, dy, dz):
+        if np.isclose(dd, 0):
+            dim -= 1
+
+    gmsh.model.set_current(current)
+    return dim
+
+
+def add_boundary_groups(model_name, group_map):
+    """
+    Add physical groups for boundary entities to the Gmsh model.
+
+    Parameters
+    ----------
+    model_name : str
+        Name of the Gmsh model.
+    group_map : dict
+        Map from group names to group entities considering mesh periodicity.
+
+    Returns
+    -------
+    None.
+
+    """
+    current = gmsh.model.get_current()
+    gmsh.model.set_current(model_name)
+
+    # Make sure all keys are in upper case
+    for key in list(group_map.keys()):
+        group_map[key.upper()] = group_map.pop(key)
+
+    # Add physical groups to model
+    for name, (dim, entities) in group_map.items():
+        tag = gmsh.model.add_physical_group(dim, entities)
+        gmsh.model.set_physical_name(dim, tag, name)
+
+    gmsh.model.set_current(current)
+
+
+def add_periodic_constraints(model_name, group_map):
+    """
+    Add periodic mesh constraints to the Gmsh model.
+
+    Parameters
+    ----------
+    model_name : str
+        Name of the Gmsh model.
+    group_map : dict
+        Map from group names to group entities considering mesh periodicity.
+
+    Returns
+    -------
+    None.
+
+    """
+    def translation(axis, distance):
+        if axis not in {1, 2, 3}:
+            raise ValueError("axis can only be 1 (x), 2 (y) or 3 (z)")
+        transformation = [1, 0, 0, 0,
+                          0, 1, 0, 0,
+                          0, 0, 1, 0,
+                          0, 0, 0, 1]
+        transformation[(axis - 1)*4 + 3] = distance
+        return transformation
+
+    bounding_box = np.array(gmsh.model.get_bounding_box(-1, -1)).reshape(2, -1)
+    dx, dy, dz = bounding_box[1] - bounding_box[0]
+
+    transformation_map = {"EDGE_1":  (2, dy),
+                          "EDGE_3":  (3, dz),
+                          "EDGE_7":  (2, -dy),
+                          "EDGE_2":  (1, -dx),
+                          "EDGE_4":  (3, dz),
+                          "EDGE_8":  (1, dx),
+                          "EDGE_9":  (1, dx),
+                          "EDGE_10": (2, dy),
+                          "EDGE_11": (1, -dx),
+                          "FACE_1":  (3, dz),
+                          "FACE_3":  (2, dy),
+                          "FACE_5":  (1, dx)}
+
+    # Activate the requested model
+    current = gmsh.model.getCurrent()
+    gmsh.model.setCurrent(model_name)
+
+    # Define periodic mesh contraints
+    for master, slave in PERIODIC_PAIRS.items():
+        if master not in group_map.keys() or slave not in group_map.keys():
+            continue
+
+        dim = group_map[master][0]
+        if dim not in (1, 2):
+            raise ValueError("periodic mesh constraints are supported for 1d "
+                             "and 2d entities only")
+
+        gmsh.model.mesh.set_periodic(dim,
+                                     group_map[slave][1],
+                                     group_map[master][1],
+                                     translation(*transformation_map[master]))
+
+    # Restore previous model
+    gmsh.model.setCurrent(current)
+
+
+def build_node_sets(model_name, group_map):
+    """
+    Build a dictionary that contains all node sets.
+
+    Parameters
+    ----------
+    model_name : str
+        Name of the Gmsh model.
+    group_map : dict
+        Map from group names to group entities considering mesh periodicity.
+
+    Returns
+    -------
+    node_sets : dict
+        Map froum group names to group nodes. The order of the nodes preserves
+        periodic coupling.
+
+    """
+
+    def recursively_assign_nodes(group_map, boundary_groups, node_sets):
+        """Assign nodes to the respective boundary faces, edges and points."""
+        for group in boundary_groups:
+            dim_tags = group_map.get(group)
+            if dim_tags is None:
+                continue
+
+            # In case of a point group there are no periodic contraints
+            dim, entities = dim_tags
+            if group in POINT_GROUPS:
+                entity = entities[0]
+                node = gmsh.model.mesh.get_nodes(dim, entity, True)[0][0]
+                node_sets[(dim, entity)][node] = 0
+                return node_sets
+
+            # In case of lines and faces evaluate the periodic mesh contraints
+            for slave_entity in entities:
+                (master_entity,
+                 slave_nodes,
+                 master_nodes,
+                 _) = gmsh.model.mesh.get_periodic_nodes(dim,
+                                                         slave_entity,
+                                                         True)
+
+                # Skip if the processed entity is actually the master
+                if master_entity == slave_entity:
+                    continue
+
+                # Assign nodes and their indices in the periodic sets to the
+                # dictionary for storage
+                master_node_set = node_sets[(dim, master_entity)]
+                slave_node_set = node_sets[(dim, slave_entity)]
+                if len(master_node_set) > 0:
+                    for master_node, slave_node in zip(master_nodes,
+                                                       slave_nodes):
+                        slave_node_set[slave_node] = master_node_set[
+                            master_node]
+
+                elif len(slave_node_set) > 0:
+                    for master_node, slave_node in zip(master_nodes,
+                                                       slave_nodes):
+                        master_node_set[master_node] = slave_node_set[
+                            slave_node]
+
+                else:
+                    for index, (master_node, slave_node) in enumerate(
+                            zip(master_nodes, slave_nodes)):
+                        master_node_set[master_node] = index
+                        slave_node_set[slave_node] = index
+
+            # Move on to the boundary of the processed group
+            boundary = BOUNDARY_CONNECTIVITY[group]
+            node_sets = recursively_assign_nodes(group_map,
+                                                 boundary,
+                                                 node_sets)
+
+        return node_sets
+
+    def remove_boundary_nodes(parent, children, node_sets):
+        """Remove nodes on the boundary of an entity from its node set."""
+        for child in children:
+            node_sets[parent] = np.setdiff1d(node_sets[parent],
+                                             node_sets[child])
+            node_sets = remove_boundary_nodes(parent,
+                                              BOUNDARY_CONNECTIVITY[child],
+                                              node_sets)
+        return node_sets
+
+    def add_physical_groups(group_map, node_sets):
+        """Add physical groups that were set while creating the model."""
+        physical_groups = gmsh.model.get_physical_groups()
+        for dim, tag in physical_groups:
+            name = gmsh.model.get_physical_name(dim, tag)
+            if name in group_map.keys():
+                continue
+            nodes, _ = gmsh.model.mesh.get_nodes_for_physical_group(dim, tag)
+            node_sets[name] = np.array(nodes)
+        return node_sets
+
+    # Activate the requested model
+    current = gmsh.model.getCurrent()
+    gmsh.model.setCurrent(model_name)
+
+    # Define boundary groups of highest dimension in the model
+    dim = get_model_dimension(model_name)
+    if dim == 3:
+        boundary = FACE_GROUPS
+    elif dim == 2:
+        boundary = EDGE_GROUPS
+    else:
+        raise ValueError("only 2d and 3d models are supported")
+
+    # Initialize node sets
+    node_sets = {(dim, tag): {} for (dim, entities) in group_map.values()
+                 for tag in entities}
+
+    # Assign nodes to sets
+    node_sets = recursively_assign_nodes(group_map, boundary, node_sets)
+
+    # Store node sets in arrays such that periodic pairs are preserved and
+    # make sure nodes appear only once per set
+    node_sets_per_group = {}
+    for group, (dim, entities) in group_map.items():
+        nodes = []
+        for entity in entities:
+            sorter = np.argsort(node_sets[(dim, entity)].values())
+            nodes.extend(np.array(node_sets[(dim, entity)].keys())[sorter])
+        node_sets_per_group[group] = np.unique(nodes)
+    node_sets = node_sets_per_group
+
+    # Remove nodes being part of the boundary of a group
+    for group in group_map.keys():
+        node_sets = remove_boundary_nodes(group,
+                                          BOUNDARY_CONNECTIVITY[group],
+                                          node_sets)
+
+    # Add additional sets collecting nodes for points, edges and faces
+    boundary_nodes = []
+    for group_collection, collection_name in zip(
+            (POINT_GROUPS, EDGE_GROUPS, FACE_GROUPS),
+            ("POINT_NODES", "EDGE_NODES", "FACE_NODES")):
+        collection_nodes = []
+        for group in group_collection:
+            nodes = node_sets.get(group)
+            if nodes is None:
+                continue
+
+            collection_nodes.extend(nodes)
+            boundary_nodes.extend(nodes)
+        node_sets[collection_name] = np.array(collection_nodes)
+
+    # Mark boundary nodes and inner nodes
+    node_sets["BOUNDARY_NODES"] = np.array(boundary_nodes)
+    node_sets["INNER_NODES"] = np.setdiff1d(gmsh.model.mesh.getNodes()[0],
+                                            boundary_nodes)
+
+    # Add further physical groups that were set while creating the model
+    node_sets = add_physical_groups(group_map, node_sets)
+
+    # Restore previous model
+    gmsh.model.setCurrent(current)
+
+    return node_sets
+
+
+def build_element_sets(model_name, group_map):
+    all_groups = gmsh.model.get_physical_groups()
+    for group in all_groups:
+        gmsh.model.get_entities_for_physical_group(*group)
+
+
+def write_mesh_to_abaqus_input():
+    pass
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 GROUP_TO_DIM = {"POINT_1": 0,
                 "POINT_2": 0,
                 "POINT_3": 0,
@@ -173,76 +590,85 @@ def add_boundary_groups(model_name, group_map):
         group_map[key.upper()] = group_map.pop(key)
 
     # add physical groups to model
-    for name, entities in group_map.items():
-        dim = GROUP_TO_DIM[name]
+    for name, (dim, entities) in group_map.items():
+        # dim = GROUP_TO_DIM[name]
         tag = gmsh.model.addPhysicalGroup(dim, entities)
         gmsh.model.setPhysicalName(dim, tag, name)
 
     gmsh.model.setCurrent(current)
 
-def add_periodic_constraints(model_name, group_map, dx, dy, dz=None):
-    """
-    Add periodic mesh constraints to the Gmsh model.
+# def add_periodic_constraints(model_name, group_map, dx, dy, dz=None):
+#     """
+#     Add periodic mesh constraints to the Gmsh model.
 
-    Parameters
-    ----------
-    model_name : str
-        Name of the Gmsh model.
-    group_map : dict
-        Map from group names to group entities considering mesh periodicity.
-    dx : float
-        Size of the RVE in x-direction.
-    dy : float
-        Size of the RVE in y-direction.
-    dz : float, optional
-        Size of the RVE in z-direction. The default is None.
+#     Parameters
+#     ----------
+#     model_name : str
+#         Name of the Gmsh model.
+#     group_map : dict
+#         Map from group names to group entities considering mesh periodicity.
+#     dx : float
+#         Size of the RVE in x-direction.
+#     dy : float
+#         Size of the RVE in y-direction.
+#     dz : float, optional
+#         Size of the RVE in z-direction. The default is None.
 
-    Returns
-    -------
-    None.
+#     Returns
+#     -------
+#     None.
 
-    """
-    current = gmsh.model.getCurrent()
-    gmsh.model.setCurrent(model_name)
+#     """
+#     current = gmsh.model.getCurrent()
+#     gmsh.model.setCurrent(model_name)
 
-    # apply periodic constraints on model boundary
-    dim = gmsh.model.getDimension()
-    if dim == 2:
-        transformation = [1, 0, 0, dx,
-                          0, 1, 0, 0,
-                          0, 0, 1, 0,
-                          0, 0, 0, 1]
-        gmsh.model.mesh.setPeriodic(1, group_map["EDGE_2"],
-                                    group_map["EDGE_4"], transformation)
-        transformation = [1, 0, 0, 0,
-                          0, 1, 0, dy,
-                          0, 0, 1, 0,
-                          0, 0, 0, 1]
-        gmsh.model.mesh.setPeriodic(1, group_map["EDGE_3"],
-                                    group_map["EDGE_1"], transformation)
+#     # apply periodic constraints on model boundary
+#     if dz is None:
+#         transformation = [1, 0, 0, dx,
+#                           0, 1, 0, 0,
+#                           0, 0, 1, 0,
+#                           0, 0, 0, 1]
+#         gmsh.model.mesh.setPeriodic(group_map["EDGE_4"][0],
+#                                     group_map["EDGE_2"][1],
+#                                     group_map["EDGE_4"][1],
+#                                     transformation)
+#         transformation = [1, 0, 0, 0,
+#                           0, 1, 0, dy,
+#                           0, 0, 1, 0,
+#                           0, 0, 0, 1]
+#         gmsh.model.mesh.setPeriodic(group_map["EDGE_1"][0],
+#                                     group_map["EDGE_3"][1],
+#                                     group_map["EDGE_1"][1],
+#                                     transformation)
 
-    elif dim == 3:
-        transformation = [1, 0, 0, dx,
-                          0, 1, 0, 0,
-                          0, 0, 1, 0,
-                          0, 0, 0, 1]
-        gmsh.model.mesh.setPeriodic(2, group_map["FACE_2"],
-                                    group_map["FACE_1"], transformation)
-        transformation = [1, 0, 0, 0,
-                          0, 1, 0, dy,
-                          0, 0, 1, 0,
-                          0, 0, 0, 1]
-        gmsh.model.mesh.setPeriodic(2, group_map["FACE_4"],
-                                    group_map["FACE_3"], transformation)
-        transformation = [1, 0, 0, 0,
-                          0, 1, 0, 0,
-                          0, 0, 1, dz,
-                          0, 0, 0, 1]
-        gmsh.model.mesh.setPeriodic(2, group_map["FACE_6"],
-                                    group_map["FACE_5"], transformation)
+#     else:
+#         transformation = [1, 0, 0, dx,
+#                           0, 1, 0, 0,
+#                           0, 0, 1, 0,
+#                           0, 0, 0, 1]
+#         gmsh.model.mesh.setPeriodic(group_map["FACE_1"][0],
+#                                     group_map["FACE_2"][1],
+#                                     group_map["FACE_1"][1],
+#                                     transformation)
+#         transformation = [1, 0, 0, 0,
+#                           0, 1, 0, dy,
+#                           0, 0, 1, 0,
+#                           0, 0, 0, 1]
+#         gmsh.model.mesh.setPeriodic(group_map["FACE_3"][0],
+#                                     group_map["FACE_4"][1],
+#                                     group_map["FACE_3"][1],
+#                                     transformation)
+#         transformation = [1, 0, 0, 0,
+#                           0, 1, 0, 0,
+#                           0, 0, 1, dz,
+#                           0, 0, 0, 1]
+#         gmsh.model.mesh.setPeriodic(group_map["FACE_5"][0],
+#                                     group_map["FACE_6"][1],
+#                                     group_map["FACE_5"][1],
+#                                     transformation)
 
-    # restore previous model
-    gmsh.model.setCurrent(current)
+#     # restore previous model
+#     gmsh.model.setCurrent(current)
 
 def _get_periodic_nodes(dim, tag, include_higher_order_nodes=False):
     """
@@ -271,10 +697,13 @@ def _get_periodic_nodes(dim, tag, include_higher_order_nodes=False):
 
     """
     entities = gmsh.model.getEntitiesForPhysicalGroup(dim, tag)
+    print(gmsh.model.getPhysicalName(dim, tag))
 
     node_tags = []
     node_tags_master = []
     for e in entities:
+        print(dim, e)
+        print(gmsh.model.mesh.get_nodes(dim, e, True)[0])
         # read periodic contraints
         (tag_master,
          slave_nodes,
@@ -283,6 +712,10 @@ def _get_periodic_nodes(dim, tag, include_higher_order_nodes=False):
                             .getPeriodicNodes(dim, e,
                                               include_higher_order_nodes))
         tag_master = gmsh.model.getPhysicalGroupsForEntity(dim, tag_master)[0]
+
+        print(slave_nodes)
+        print(master_nodes)
+
         node_tags.extend(slave_nodes)
         node_tags_master.extend(master_nodes)
 
@@ -367,7 +800,7 @@ def create_boundary_sets(model_name, group_map):
                     indices = np.flatnonzero(np.isin(parent_nodes, nodes[0]))
                     vals = [node_sets[parent_name][i] for i in indices]
                     node_sets[name] = np.hstack((node_sets.get(name, []),
-                                                  vals))
+                                                 vals))
 
             # call recursive function for child group
             recursively_build_node_sets(g, node_sets, group_map)
@@ -380,11 +813,67 @@ def create_boundary_sets(model_name, group_map):
     gmsh.model.setCurrent(model_name)
 
     node_sets = {}
-    dim = gmsh.model.getDimension()
+    # dim = gmsh.model.getDimension()
+
+    element_types = gmsh.model.mesh.get_elements()[0]
+    element_dim = max([gmsh.model.mesh.get_element_properties(t)[1]
+                       for t in element_types])
+
+    dim = min(element_dim, 2)
     groups = gmsh.model.getPhysicalGroups(dim - 1)
+
+    dim = 3
+    # if dim == 3:
+    #     boundary_groups = ["FACE_1", "FACE_2", "FACE_3",
+    #                        "FACE_4", "FACE_5", "FACE_6"]
+    # elif dim == 2:
+    #     boundary_groups = ["EDGE_1", "EDGE_2", "EDGE_3", "EDGE_4"]
+    # else:
+    #     ValueError("only 2d and 3d RVEs are supported")
+
+    # for group_name in boundary_groups:
+    #     entities = group_map[group_name][1]
+
+
+    #     entities = gmsh.model.getEntitiesForPhysicalGroup(dim, tag)
+
+    #     node_tags = []
+    #     node_tags_master = []
+    #     for e in entities:
+    #         # read periodic contraints
+    #         (tag_master,
+    #          slave_nodes,
+    #          master_nodes,
+    #          transformation) = (gmsh.model.mesh
+    #                             .getPeriodicNodes(dim, e,
+    #                                               include_higher_order_nodes))
+    #         tag_master = gmsh.model.getPhysicalGroupsForEntity(dim, tag_master)[0]
+
+    #         print(slave_nodes)
+    #         print(master_nodes)
+
+    #         node_tags.extend(slave_nodes)
+    #         node_tags_master.extend(master_nodes)
+
+    #     # make sure only unique nodes are read
+    #     _, unique_slave = np.unique(node_tags, return_index=True)
+    #     _, unique_master = np.unique(node_tags_master, return_index=True)
+    #     node_tags = np.array(node_tags)[np.sort(unique_slave)]
+    #     node_tags_master = np.array(node_tags_master)[np.sort(unique_master)]
+
+
+
     for g in groups:
         # read periodic contraints
         tag_master, slave, master, _ = _get_periodic_nodes(*g)
+
+        slave_name = gmsh.model.getPhysicalName(*g)
+        master_name = gmsh.model.getPhysicalName(dim - 1, tag_master)
+        # print(slave_name)
+        # print(master_name)
+        # print(tag_master, slave, master)
+
+
         if tag_master == g[1]:
             continue
 
@@ -420,7 +909,7 @@ def find_boundary_elements(model_name, group_map, el_tags, conn):
     for d in range(1, dim):
         for group in gmsh.model.getPhysicalGroups(d):
             group_name = gmsh.model.getPhysicalName(*group)
-            if group_name not in boundary_sets.keys():
+            if group_name not in group_map.keys():#boundary_sets.keys():
                 continue
 
             for entity in gmsh.model.getEntitiesForPhysicalGroup(*group):
@@ -512,6 +1001,8 @@ def write_abq_input(model_name, group_map, file_name, abq_el_type,
     boundary_sets = create_boundary_sets(model_name, group_map)
     boundary_element_sets = find_boundary_elements(model_name, group_map,
                                                    el_tags, conn)
+
+    print(boundary_element_sets)
 
     # initialize abaqus input file
     file_name, extension = os.path.splitext(file_name)
