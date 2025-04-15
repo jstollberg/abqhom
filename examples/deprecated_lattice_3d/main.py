@@ -17,7 +17,7 @@ sys.path.append(paraqus_path)
 from abqhom.RVE import write_abq_input, finalize_model
 from abqhom.abq import average_stress, apply_periodic_bc
 from abqhom.utils import export_csv_file
-from abqhom.examples import cubic_BCC_3d
+from abqhom.examples import simple_RVE_3d, fancy_RVE_3d
 
 # import paraqus to export vtk files
 paraqus_installed = False
@@ -63,8 +63,6 @@ def homogenize_stress(model_name, group_map, strain, E, nu, d, vtk_path,
     model = mdb.models[model_name]
     RVE = model.parts["RVE"]
     volume_elements = RVE.sets["VOLUME_ELEMENTS"]
-
-    return None
 
     # create material, boundary elements will be assigned half stiffness
     material1 = model.Material(name="strut_material_edges")
@@ -171,11 +169,10 @@ def homogenize_stress(model_name, group_map, strain, E, nu, d, vtk_path,
 
     return sig
 
-
 # ---------------------------------------------------------------
 # set working directory
 workdir = os.path.join(base_path,
-                       "abqhom/examples/test/abq")
+                       "abqhom/examples/lattice_3d/abq")
 if not os.path.isdir(workdir):
     os.mkdir(workdir)
 os.chdir(workdir)
@@ -192,55 +189,49 @@ if not os.path.isdir(vtk_path):
 
 # RVE size
 dx = dy = dz = 10
-lc = 10
+lc = 1.25
 
 # macroscopic strain
 eps_star = 0.2
 
 # create geometry in gmsh
-model_name, group_map = cubic_BCC_3d(dx=dx, dy=dy, dz=dz, lc=lc, gui=True)
-
-
-from abqhom.RVE import build_node_sets
-node_sets = build_node_sets(model_name, group_map)
-for key, value in node_sets.items():
-    print(key, ":", list(value))
-
+# model_name, group_map = simple_RVE_3d(dx=dx, dy=dy, dz=dz, lc=lc)
+model_name, group_map = fancy_RVE_3d(dx=dx, dy=dy, dz=dz, radius=dx/4, lc=lc)
 
 # homogenization routine
-# n_samples = 1  # 1000
-# for i in range(n_samples):
-#     E = random.uniform(0.01, 300.0)
-#     nu = random.uniform(0.0, 0.5)
-#     ar = random.uniform(0.01, 1.0)
-#     d = ar*lc  # strut diameter
+n_samples = 1  # 1000
+for i in range(n_samples):
+    E = random.uniform(0.01, 300.0)
+    nu = random.uniform(0.0, 0.5)
+    ar = random.uniform(0.01, 1.0)
+    d = ar*lc  # strut diameter
 
-#     C = np.empty((6,6))
-#     for case in range(6):
-#         eps = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-#         if case == 3:
-#             eps_star *= 2
-#         eps[case] = eps_star
+    C = np.empty((6,6))
+    for case in range(1):
+        eps = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        if case == 3:
+            eps_star *= 2
+        eps[case] = eps_star
 
-#         # compute volume average of stress tensor
-#         print("\n------------------------------")
-#         print("Run case {}.".format(case + 1))
-#         print("strain = " + str(eps.round(4).tolist()))
-#         job_name = "effective_material_3d_{}".format(case)
-#         sig = homogenize_stress(model_name, group_map, eps, E, nu, d, vtk_path,
-#                                 job_name=job_name)
-#         print("stress = " + str(sig.round(4).tolist()))
+        # compute volume average of stress tensor
+        print("\n------------------------------")
+        print("Run case {}.".format(case + 1))
+        print("strain = " + str(eps.round(4).tolist()))
+        job_name = "effective_material_3d_{}".format(case)
+        sig = homogenize_stress(model_name, group_map, eps, E, nu, d, vtk_path,
+                                job_name=job_name)
+        print("stress = " + str(sig.round(4).tolist()))
 
-#         # compute effective stiffness tensor
-#         C[:,case] = sig/eps_star
+        # compute effective stiffness tensor
+        C[:,case] = sig/eps_star
 
-#     print("\n------------------------------")
-#     print("Effective constitutive matrix:")
-#     print(C.round(4))
+    print("\n------------------------------")
+    print("Effective constitutive matrix:")
+    print(C.round(4))
 
-#     # export material tensor
-#     csv_path = os.path.join(result_path, "result_{}_{}_{}.csv".format(ar, E, nu))
-#     export_csv_file(C, csv_path)
+    # export material tensor
+    csv_path = os.path.join(result_path, "result_{}_{}_{}.csv".format(ar, E, nu))
+    export_csv_file(C, csv_path)
 
 # finalize gmsh model
 finalize_model()

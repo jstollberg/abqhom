@@ -1,0 +1,38 @@
+<Description>
+   ABQcaeG.exe / rank 0 / thread 0  encountered an unhandled exception
+
+</Description>
+
+<Context>
+   ABQcaeG
+</Context>
+
+<Callstack>
+  1)  KERNELBASE.dll              RaiseException                          
+  2)  VCRUNTIME140_1.dll        unknown                                 
+</Callstack>
+
+<Memory>
+   <Current>            0 GB </Current>
+   <Resident>           0 GB </Resident>
+   <Physical>          31 GB </Physical>
+   <Limit>              0 GB </Limit>
+   <Accessible>        31 GB </Accessible>
+   <Available>         15 GB </Available>
+   <Allocator>            DL </Allocator>
+</Memory>
+
+<Swap>
+       <Size>          33 GB </Size>
+       <Used>          17 GB </Used>
+       <Free>          16 GB </Free>
+</Swap>
+
+<Directories>
+  <current> C:\Users\jonat\Documents\abqhom\examples\general_3d </current> <free>    681 GB </free>   <used>    270 GB </used> 
+     <temp> C:\Users\jonat\AppData\Local\Temp </temp>    <free>    681 GB </free>
+</Directories>
+
+<Installation>
+</Installation>
+
