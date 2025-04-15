@@ -1,138 +1,65 @@
 import os
 import numpy as np
 
-def voigt_to_strain_tensor(strain):
-    """
-    Convert strain tensor from Voigt notation to tensor notation.
 
-    Parameters
-    ----------
-    strain : numpy.ndarray
-        Strain tensor in Voigt notation.
+def voigt_to_tensor(voigt_tensor, quantity):
+    quantity = quantity.upper()
+    if quantity not in {"STRESS", "STRAIN"}:
+        raise ValueError("Supported quantities are 'STRESS' and 'STRAIN'.")
 
-    Returns
-    -------
-    eps : numpy.ndarray
-        Strain tensor in symbolic notation.
+    if voigt_tensor.shape == (6,):
+        xx, yy, zz = voigt_tensor[0:3]
+        yz, xz, xy = voigt_tensor[3::]
 
-    """
-    if strain.shape == (6,):
-        eps_xx, eps_yy, eps_zz = strain[0:3]
-        eps_yz, eps_xz, eps_xy = strain[3::]/2
-        
-        eps = np.array([[eps_xx, eps_xy, eps_xz],
-                        [eps_xy, eps_yy, eps_yz],
-                        [eps_xz, eps_yz, eps_zz]])
-        
-    elif strain.shape == (3,):
-        eps_xx, eps_yy = strain[0:2]
-        eps_xy = strain[2]/2
-        
-        eps = np.array([[eps_xx, eps_xy],
-                        [eps_xy, eps_yy]])
-        
+        if quantity == "STRAIN":
+            yz, xz, xy = 0.5*yz, 0.5*xz, 0.5*xy
+
+        tensor = np.array([[xx, xy, xz], [xy, yy, yz], [xz, yz, zz]])
+        return tensor
+
+    elif voigt_tensor.shape == (3,):
+        xx, yy = voigt_tensor[0:2]
+        xy = tensor[2]
+
+        if quantity == "STRAIN":
+            xy = 0.5*xy
+
+        tensor = np.array([[xx, xy], [xy, yy]])
+        return tensor
+
     else:
-        raise ValueError("strain must be provided in Voigt notation")
-        
-    return eps
+        raise ValueError("The shape of the provided tensor is invalid.")
 
-def voigt_to_stress_tensor(stress):
-    """
-    Convert stress tensor in Voigt notation to tensor notation.
 
-    Parameters
-    ----------
-    stress : numpy.ndarray
-        Stress tensor in Voigt notation.
+def tensor_to_voigt(tensor, quantity):
+    quantity = quantity.upper()
+    if quantity not in {"STRESS", "STRAIN"}:
+        raise ValueError("Supported quantities are 'STRESS' and 'STRAIN'.")
 
-    Returns
-    -------
-    sig : numpy.ndarray
-        Stress tensor in symbolic notation.
+    if not np.allclose(tensor, tensor.T):
+        raise ValueError("The provided tensor is not symmetric.")
 
-    """
-    if stress.shape == (6,):
-        sig_xx, sig_yy, sig_zz, sig_yz, sig_xz, sig_xy = stress
-        
-        sig = np.array([[sig_xx, sig_xy, sig_xz],
-                        [sig_xy, sig_yy, sig_yz],
-                        [sig_xz, sig_yz, sig_zz]])
-        
-    elif stress.shape == (3,):
-        sig_xx, sig_yy, sig_xy = stress
-        
-        sig = np.array([[sig_xx, sig_xy],
-                        [sig_xy, sig_yy]])
-        
+    if tensor.shape == (3, 3):
+        xx, yy, zz = tensor[0, 0], tensor[1, 1], tensor[2, 2]
+        yz, xz, xy = tensor[1, 2], tensor[0, 2], tensor[0, 1]
+
+        voigt_tensor = np.array([xx, yy, zz, yz, xz, xy])
+        if quantity == "STRAIN":
+            voigt_tensor[3::] *= 2
+        return voigt_tensor
+
+    elif tensor.shape == (2, 2):
+        xx, yy = tensor[0, 0], tensor[1, 1]
+        xy = tensor[0, 1]
+
+        voigt_tensor = np.array([xx, yy, xy])
+        if quantity == "STRAIN":
+            voigt_tensor[2] *= 2
+        return voigt_tensor
+
     else:
-        raise ValueError("stress must be provided in Voigt notation")
-        
-    return sig
-        
-def strain_tensor_to_voigt(strain):
-    """
-    Convert strain tensor from tensor notation to Voigt notation.
+        raise ValueError("The shape of the provided tensor is invalid.")
 
-    Parameters
-    ----------
-    strain : numpy.ndarray
-        Strain tensor in symbolic notation.
-
-    Returns
-    -------
-    eps : numpy.ndarray
-        Strain tensor in Voigt notation.
-
-    """
-    if strain.shape == (3,3):
-        eps_xx, eps_yy, eps_zz = strain[0,0], strain[1,1], strain[2,2]
-        eps_yz, eps_xz, eps_xy = strain[1,2], strain[0,2], strain[0,1]
-        
-        eps = np.array([eps_xx, eps_yy, eps_zz, eps_yz, eps_xz, eps_xy])
-        eps[3::] *= 0.5
-        
-    elif strain.shape == (2,2):
-        eps_xx, eps_yy = strain[0,0], strain[1,1]
-        eps_xy = strain[0,1]
-        
-        eps = np.array([eps_xx, eps_yy, 0.5*eps_xy])
-        
-    else:
-        raise ValueError("input has wrong shape")
-        
-    return eps
-        
-def stress_tensor_to_voigt(stress):
-    """
-    Convert stress tensor from tensor notation to Voigt notation.
-
-    Parameters
-    ----------
-    stress : numpy.ndarray
-        Stress tensor in symbolic notation.
-
-    Returns
-    -------
-    sig : numpy.ndarray
-        Stress tensor in Voigt notation.
-
-    """
-    if stress.shape == (3,3):
-        sig_xx, sig_yy, sig_zz = stress[0,0], stress[1,1], stress[2,2]
-        sig_yz, sig_xz, sig_xy = stress[1,2], stress[0,2], stress[0,1]
-        
-        sig = np.array([sig_xx, sig_yy, sig_zz, sig_yz, sig_xz, sig_xy])
-        
-    elif stress.shape == (2,2):
-        sig_xx, sig_yy = stress[0,0], stress[1,1]
-        sig_xy = stress[0,1]
-        
-        sig = np.array([sig_xx, sig_yy, sig_xy])
-        
-    else:
-        raise ValueError("input has wrong shape")
-        
-    return sig
 
 def reuss(vol1, C1, C2):
     """
@@ -157,6 +84,7 @@ def reuss(vol1, C1, C2):
     C = np.linalg.inv(C_inv)
     return C
 
+
 def voigt(vol1, C1, C2):
     """
     Compute the homogenized stiffness tensor after Voigt.
@@ -179,6 +107,7 @@ def voigt(vol1, C1, C2):
     C = vol1*C1 + (1 - vol1)*C2
     return C
 
+
 def export_csv_file(C, path):
     """
     Dump an array into a csv file.
@@ -198,7 +127,8 @@ def export_csv_file(C, path):
     path, extension = os.path.splitext(path)
     path += ".csv"
     np.savetxt(path, C, delimiter=",")
-    
+
+
 def read_csv_file(path, dtype=None):
     """
     Read a csv file into an array.
@@ -218,6 +148,7 @@ def read_csv_file(path, dtype=None):
     """
     array = np.loadtxt(path, delimiter=",", dtype=dtype)
     return array
+
 
 def find_all_files(path, extension=None):
     """
@@ -239,7 +170,7 @@ def find_all_files(path, extension=None):
     if extension is None:
         files = [os.path.join(path, file) for file in os.listdir(path)]
         return files
-    
-    files = [os.path.join(path, file) for file in os.listdir(path) 
+
+    files = [os.path.join(path, file) for file in os.listdir(path)
              if file.endswith(extension)]
     return files
