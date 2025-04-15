@@ -306,7 +306,7 @@ class AbaqusRVE():
                                       region=region,
                                       u1=u1, u2=u2, u3=u3)
 
-        def apply_periodic_rotations(self):
+        def apply_periodic_rotations():
             """Apply periodic boundary conditions to rotational DOFs."""
 
             # Make a list of all periodically connected pairs of groups
