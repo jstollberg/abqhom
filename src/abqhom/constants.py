@@ -3,6 +3,12 @@ Collection of constants for the abqhom package.
 
 """
 
+try:
+    import paraqus
+    PARAQUS_INSTALLED = True
+except ImportError:
+    PARAQUS_INSTALLED = False
+
 # Physical groups on the RVE boundary
 POINT_GROUPS = ["POINT_1", "POINT_2", "POINT_3", "POINT_4",
                 "POINT_5", "POINT_6", "POINT_7", "POINT_8"]
@@ -86,3 +92,20 @@ ABAQUS_CONNECTIVITY_ORDER = {
     18: [0, 1, 2, 3, 4, 5, 7, 9,
          7, 12, 14, 12, 8, 10, 11],           # 15-node 2nd prism
                              }
+
+# Abaqus element types with rotational degrees of freedom
+ELEMENTS_ROTATIONAL_DOFS = {
+    # Beam elements
+    "B21", "B21H", "B22", "B22H", "B23", "B23H", "PIPE21", "PIPE21H", "PIPE22",
+    "PIPE22H",
+
+    # Frame elements
+    "FRAME2D", "FRAME3D",
+
+    # Elbow elements
+    "ELBOW31", "ELBOW32", "ELBOW31B", "ELBOW31C",
+
+    # Shell elements
+    "STRI3", "S3", "S3R", "S3RS", "STRI64", "S4", "S4R", "S4RSW", "S4R5",
+    "S8R", "S8R5", "S9R5"
+    }
