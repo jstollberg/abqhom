@@ -6,7 +6,7 @@ computational homogenization with Abaqus.
 
 import os
 import numpy as np
-from abqhom.utils import voigt_to_tensor
+from abqhom.utils import voigt_to_tensor, tensor_to_voigt
 from abaqus import Mdb, mdb, session
 from regionToolset import Region
 from mesh import MeshNodeArray, MeshElementArray
@@ -606,7 +606,7 @@ class AbaqusRVE():
                                                    method=N1_COSINES,
                                                    n1=normal)
 
-    def export_to_vtk(self, path, field_outputs=[], sets=[], clear=True):
+    def export_to_vtk(self, path, field_outputs=[], sets=[], clear=False):
         """
         Export the simulation results to VTK file format.
 
@@ -623,7 +623,7 @@ class AbaqusRVE():
             The sets that shall be exported. The default is [].
         clear : bool, optional
             If True, the output folder will be cleared if it already exists.
-            The default is True.
+            The default is False.
 
         Returns
         -------
@@ -634,7 +634,7 @@ class AbaqusRVE():
             raise ImportError("Paraqus is needed for the VTK export.")
 
         if not os.path.isdir(path):
-            os.mkdir(path)
+            os.makedirs(path)
 
         if self.odb is None:
             self.open_odb_file()
@@ -761,6 +761,7 @@ class AbaqusRVE():
 
         # Divide the stress by the RVE volume
         stress /= np.prod(deltas)
+        stress = tensor_to_voigt(stress, "STRESS")
 
         self.close_odb_file()
         return stress
