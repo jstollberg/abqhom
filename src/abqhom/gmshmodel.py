@@ -84,6 +84,10 @@ class GmshRVE():
         self._model_name = model_name
         self._node_sets = {}
         self._element_sets = {}
+
+        for name, (_, entities) in boundary_map.items():
+            if len(entities) == 0:
+                boundary_map.pop(name)
         self._boundary_map = boundary_map
 
         if not gmsh.is_initialized():
@@ -123,9 +127,13 @@ class GmshRVE():
         bounding_box = np.array(gmsh.model.get_bounding_box(-1, -1))
         bounding_box = bounding_box.reshape(2, -1)
         delta_x, delta_y, delta_z = bounding_box[1] - bounding_box[0]
+
+        max_delta = max(delta_x, delta_y, delta_z)
+        min_deltas = [delta_x, delta_y, delta_z]
+        min_deltas.remove(max_delta)
         dim = 3
-        for i in (delta_x, delta_y, delta_z):
-            if np.isclose(i, 0):
+        for i in min_deltas:
+            if i/max_delta < 1e-5:
                 dim -= 1
 
         gmsh.model.set_current(current)
@@ -196,6 +204,7 @@ class GmshRVE():
         gmsh.model.set_current(current)
 
     def build_boundary_map(self):
+        raise NotImplementedError("The method is not available yet.")
 
         dim = self.model_dimension
         entities = gmsh.model.get_entities(dim - 1)
@@ -409,7 +418,8 @@ class GmshRVE():
 
             for child in children:
                 node_sets[parent] = np.setdiff1d(node_sets[parent],
-                                                 node_sets[child])
+                                                 node_sets[child],
+                                                 assume_unique=True)
                 node_sets = remove_boundary_nodes(parent,
                                                   BOUNDARY_CONNECTIVITY[child],
                                                   node_sets)
@@ -454,7 +464,8 @@ class GmshRVE():
                 sorter = np.argsort(node_sets[(dim, entity)].values())
                 nodes.extend(np.array(
                     list(node_sets[(dim, entity)].keys()))[sorter])
-            node_sets_per_group[group] = np.unique(nodes)
+            _, indices = np.unique(nodes, return_index=True)
+            node_sets_per_group[group] = np.array(nodes)[np.sort(indices)]
         node_sets = node_sets_per_group
 
         # Remove nodes being part of the boundary of a group
