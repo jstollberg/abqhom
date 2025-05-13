@@ -184,10 +184,17 @@ class AbaqusRVE():
     def _get_bounding_box(self):
         """Compute the bounding box of the Abaqus model."""
 
-        x_min, y_min, z_min = (self.instance.sets["NSET_POINT_1"].nodes[0]
-                               .coordinates)
-        x_max, y_max, z_max = (self.instance.sets["NSET_POINT_7"].nodes[0]
-                               .coordinates)
+        if self.model_dimension == THREE_D:
+            x_min, y_min, z_min = (self.instance.sets["NSET_POINT_1"].nodes[0]
+                                   .coordinates)
+            x_max, y_max, z_max = (self.instance.sets["NSET_POINT_7"].nodes[0]
+                                   .coordinates)
+        else:  # TWO_D_PLANAR
+            x_min, y_min, z_min = (self.instance.sets["NSET_POINT_1"].nodes[0]
+                                   .coordinates)
+            x_max, y_max, z_max = (self.instance.sets["NSET_POINT_3"].nodes[0]
+                                   .coordinates)
+
         return x_min, y_min, z_min, x_max, y_max, z_max
 
     def _collect_element_types(self):
@@ -335,6 +342,8 @@ class AbaqusRVE():
 
         # Apply Dirichlet BC to corner points
         for point in POINT_GROUPS:
+            if "NSET_" + point not in RVE_sets:
+                continue
             region = RVE_sets["NSET_" + point]
             x = np.array(region.nodes[0].coordinates)
 
@@ -352,11 +361,10 @@ class AbaqusRVE():
                     or "NSET_" + slave not in RVE_sets):
                 continue
 
-            x_minus = RVE_sets["NSET_" + master].nodes[0].coordinates
-            x_plus = RVE_sets["NSET_" + slave].nodes[0].coordinates
+            x_minus = RVE_sets["NSET_" + master].nodes[0].coordinates[0:dim]
+            x_plus = RVE_sets["NSET_" + slave].nodes[0].coordinates[0:dim]
             distance = np.array(x_plus) - np.array(x_minus)
-            direction = np.invert(np.isclose(distance, 0)).astype(int)
-            direction = (direction == 1).nonzero()[0][0]
+            direction = np.argmax(np.abs(distance))
 
             # Create a reference point for the RHS of the equation
             reference_point = "REFERENCE_POINT_X{}".format(direction + 1)
@@ -619,8 +627,10 @@ class AbaqusRVE():
             Path to the folder in which the files will be stored.
         field_outputs : list[str], optional
             The field outputs that shall be exported. The default is [].
-        sets : list[tr], optional
-            The sets that shall be exported. The default is [].
+        sets : list[str], optional
+            The sets that shall be exported. Invariants can be requested
+            in the form of a list element of length 2, e.g. ("S", "MISES").
+            The default is [].
         clear : bool, optional
             If True, the output folder will be cleared if it already exists.
             The default is False.
@@ -645,7 +655,10 @@ class AbaqusRVE():
                            model_name=self.model_name,
                            instance_names=[self.model_name])
         for i in field_outputs:
-            reader.add_field_export_request(i)
+            if len(i) > 1:
+                reader.add_field_export_request(i[0], invariant=i[1])
+            else:
+                reader.add_field_export_request(i)
 
         for i in sets:
             if i.startswith("NSET"):
@@ -705,7 +718,7 @@ class AbaqusRVE():
         Returns
         -------
         stress : numpy.ndarray[flot]
-            DESCRIPTION.
+            The averaged stress tensor in 2d or 3d Voigt notation.
 
         """
         self.open_odb_file()
@@ -761,6 +774,7 @@ class AbaqusRVE():
 
         # Divide the stress by the RVE volume
         stress /= np.prod(deltas)
+        stress = 0.5*(stress + stress.T)
         stress = tensor_to_voigt(stress, "STRESS")
 
         self.close_odb_file()
