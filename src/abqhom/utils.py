@@ -1,3 +1,8 @@
+"""
+Collection of utility functions for the abqhom package.
+
+"""
+
 import os
 import numpy as np
 
