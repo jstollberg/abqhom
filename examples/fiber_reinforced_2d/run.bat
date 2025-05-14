@@ -1,1 +1,1 @@
-abaqus cae noGUI=main.py
+abaqus cae script=main.py

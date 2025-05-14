@@ -16,12 +16,13 @@ import gmsh
 # Import homogenization tools
 from abqhom.gmshmodel import GmshRVE
 from abqhom.abqmodel import AbaqusRVE
+from abqhom.utils import reuss, voigt, export_to_csv_file
 
 
 def create_geometry(model_name, dx=1.0, dy=1.0, fiber_fraction=0.2):
     # Compute fiber radius from volume fraction
     radius = np.sqrt((fiber_fraction*dx*dy)/(2*np.pi))
-    if radius > np.sqrt((dx/2)**2 + (dy/2)**2)/2:
+    if radius >= np.sqrt((dx/2)**2 + (dy/2)**2)/2:
         raise ValueError("Fibers overlap.")
 
     # Initialize Gmsh and add a new model
@@ -113,6 +114,15 @@ def create_geometry(model_name, dx=1.0, dy=1.0, fiber_fraction=0.2):
     return boundary_map
 
 
+def isotropic_stiffness_tensor(E, nu):
+    C = np.array([[1 - nu, nu, 0.0],
+                  [nu, 1 - nu, 0.0],
+                  [0.0, 0.0, 0.5*(1 - 2*nu)]])
+    C *= E/((1 + nu)*(1 - 2*nu))
+
+    return C
+
+
 # ---------------------------------------------------------------
 # Set working directory
 workdir = os.path.join(base_path,
@@ -121,22 +131,28 @@ if not os.path.isdir(workdir):
     os.mkdir(workdir)
 os.chdir(workdir)
 
-# Create folder to store results
+# Create folders to store results
 result_path = os.path.join(workdir, "..", "results")
 if not os.path.isdir(result_path):
-    os.mkdir(result_path)
+    os.makedirs(os.path.join(result_path, "reuss"))
+    os.makedirs(os.path.join(result_path, "voigt"))
+    os.makedirs(os.path.join(result_path, "numerical"))
 
 # RVE size
 dx = dy = 10.0
-fiber_fraction = 0.5
+fiber_fraction = 0.7  # Change the volume fraction of the fibers here
+
+# Boundary conditions
+boundary_conditions = "PERIODIC"  # PERIODIC or DIRICHLET
 
 # Material parameters for CFRP: Young's modulus - Poisson's ratio
 parameters = {"MATRIX": [3.5, 0.35],   # Epoxy matrix
               "FIBER":  [230.0, 0.2]}  # Carbon fibers
 
 # Name folder to store VTK files
-vtk_path = os.path.join(workdir, "..", "vtk_output", fiber_fraction)
+vtk_path = os.path.join(workdir, "..", "vtk_output", str(fiber_fraction))
 
+# ---------------------------------------------------------------
 # Run homogenization routine
 C = np.empty((3, 3))
 for i in range(3):
@@ -169,10 +185,15 @@ for i in range(3):
     step_name = "LOAD"
     unit_cell.model.StaticStep(name=step_name, previous="Initial")
 
-    # Apply periodic boundary conditions and run analysis
+    # Apply boundary conditions and run analysis
     strain_3d = np.array([strain[0], strain[1], 0.0, 0.0, 0.0, strain[2]])
-    unit_cell.apply_periodic_BC(step_name, strain_3d)
-    # unit_cell.apply_affine_displacement_BC(step_name, strain_3d)
+    if boundary_conditions.upper() == "PERIODIC":
+        unit_cell.apply_periodic_BC(step_name, strain_3d)
+    elif boundary_conditions.upper() == "DIRICHLET":
+        unit_cell.apply_affine_displacement_BC(step_name, strain_3d)
+    else:
+        raise RuntimeError("Invalid boundary conditions.")
+
     unit_cell.run_analysis(field_outputs=["NFORC", "U", "S"])
     stress = unit_cell.compute_averaged_stress(step_name)
     print("Stress = " + str(stress.round(3).tolist()))
@@ -181,14 +202,34 @@ for i in range(3):
     C[:, i] = stress/strain[i]
 
     # Export to VTK
-    unit_cell.export_to_vtk(vtk_path, field_outputs=["U", ("S", "MISES")])
+    unit_cell.export_to_vtk(vtk_path, field_outputs=["U", ("S", "MISES")],
+                            sets=["ELSET_MATRIX", "ELSET_FIBER"])
+
+gmsh.finalize()
 
 print("\n------------------------------")
 print("Effective constitutive matrix:")
 print(C.round(3))
 
-print >> sys.__stdout__, "\n------------------------------"
-print >> sys.__stdout__, "Effective constitutive matrix:"
-print >> sys.__stdout__, C.round(3)
+# Compute Reuss and Voigt bounds
+C_matrix = isotropic_stiffness_tensor(*parameters["MATRIX"])
+C_fiber = isotropic_stiffness_tensor(*parameters["FIBER"])
+C_reuss = reuss(fiber_fraction, C_fiber, C_matrix)
+C_voigt = voigt(fiber_fraction, C_fiber, C_matrix)
 
-gmsh.finalize()
+# Compute eigenvalues for comparison
+eigen_reuss = np.sort(np.linalg.eig(C_reuss)[0])
+eigen_voigt = np.sort(np.linalg.eig(C_voigt)[0])
+eigen_numerical = np.sort(np.linalg.eig(C)[0])
+
+# Export eigenvalues
+file = str(fiber_fraction) + ".csv"
+export_to_csv_file(eigen_reuss, os.path.join(result_path, "reuss", file))
+export_to_csv_file(eigen_voigt, os.path.join(result_path, "voigt", file))
+export_to_csv_file(eigen_voigt, os.path.join(result_path, "numerical", file))
+
+print("\n------------------------------")
+print("Eigenvalues:")
+print("Voigt upper bound:     " + str(eigen_voigt.round(3).tolist()))
+print("Numerical:             " + str(eigen_numerical.round(3).tolist()))
+print("Reuss lower bound:     " + str(eigen_reuss.round(3).tolist()))
