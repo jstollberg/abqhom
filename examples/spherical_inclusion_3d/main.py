@@ -37,7 +37,7 @@ def create_geometry(model_name, dx=1.0, dy=1.0, dz=1.0,
     x = y = z = 0.0
 
     # Create the model
-    gmsh.model.occ.add_box(x - dx/2, y - dy/2, z - dz/2, dx, dy, dz)
+    gmsh.model.occ.add_box(x - dx/2.0, y - dy/2.0, z - dz/2.0, dx, dy, dz)
     gmsh.model.occ.add_sphere(x, y, z, radius)
     gmsh.model.occ.cut([(3, 1)], [(3, 2)])
     gmsh.model.occ.add_surface_loop([7])
@@ -109,6 +109,8 @@ if not os.path.isdir(result_path):
     os.makedirs(os.path.join(result_path, "voigt"))
     os.makedirs(os.path.join(result_path, "numerical"))
 
+debug_geometry = False
+
 # RVE size
 dx = dy = dz = 10.0
 inclusion_fraction = 0.3  # Change the volume fraction of the inclusion here
@@ -116,7 +118,7 @@ inclusion_fraction = 0.3  # Change the volume fraction of the inclusion here
 # Boundary conditions
 boundary_conditions = "PERIODIC"  # PERIODIC or DIRICHLET
 
-# Material parameters for CFRP: Young's modulus - Poisson's ratio
+# Material parameters: Young's modulus - Poisson's ratio
 parameters = {"MATRIX":     [3.5, 0.35],   # Epoxy matrix
               "INCLUSION":  [230.0, 0.2]}  # Carbon inclusion
 
@@ -141,6 +143,10 @@ for i in range(6):
     unit_cell.generate_mesh(element_size=1.25)
     input_file = unit_cell.write_to_abaqus_input()
     unit_cell.build_node_sets()
+
+    if debug_geometry:
+        gmsh.fltk.run()
+        break
 
     # Load the model into Abaqus
     unit_cell = AbaqusRVE(unit_cell, input_file)

@@ -138,6 +138,8 @@ if not os.path.isdir(result_path):
     os.makedirs(os.path.join(result_path, "voigt"))
     os.makedirs(os.path.join(result_path, "numerical"))
 
+debug_geometry = False
+
 # RVE size
 dx = dy = 10.0
 fiber_fraction = 0.7  # Change the volume fraction of the fibers here
@@ -170,6 +172,10 @@ for i in range(3):
     unit_cell.generate_mesh(element_size=0.4)
     input_file = unit_cell.write_to_abaqus_input()
     unit_cell.build_node_sets()
+
+    if debug_geometry:
+        gmsh.fltk.run()
+        break
 
     # Load the model into Abaqus
     unit_cell = AbaqusRVE(unit_cell, input_file)
