@@ -685,8 +685,6 @@ class AbaqusRVE():
                 for frame in reader.get_frame_indices(step_name):
                     instance_model = list(reader.read_instances(
                         step_name=step_name, frame_index=frame))[0]
-                    print("hier die keys:")
-                    print(instance_model.elements.groups.keys())
 
                     # Add diameter fields if assigned
                     element_tags = []
