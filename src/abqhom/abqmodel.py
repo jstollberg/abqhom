@@ -614,7 +614,8 @@ class AbaqusRVE():
                                                    method=N1_COSINES,
                                                    n1=normal)
 
-    def export_to_vtk(self, path, field_outputs=[], sets=[], clear=False):
+    def export_to_vtk(self, path, field_outputs=[], sets=[], radius={},
+                      clear=False):
         """
         Export the simulation results to VTK file format.
 
@@ -631,6 +632,8 @@ class AbaqusRVE():
             The sets that shall be exported. Invariants can be requested
             in the form of a list element of length 2, e.g. ("S", "MISES").
             The default is [].
+        diameters : dict{str, float}
+            DESCRIPTION
         clear : bool, optional
             If True, the output folder will be cleared if it already exists.
             The default is False.
@@ -660,14 +663,17 @@ class AbaqusRVE():
             else:
                 reader.add_field_export_request(i)
 
+        for i in radius.keys():
+            if i not in sets:
+                sets.append(i)
         for i in sets:
             if i.startswith("NSET"):
                 position = "NODES"
             elif i.startswith("ELSET"):
                 position = "ELEMENTS"
-                reader.add_set_export_request(i,
-                                              set_type=position,
-                                              instance_name=self.model_name)
+            reader.add_set_export_request(i,
+                                          set_type=position,
+                                          instance_name=self.model_name)
 
         # Run over steps and frames for the export
         vtu_writer = BinaryWriter(path, clear_output_dir=clear)
@@ -679,6 +685,22 @@ class AbaqusRVE():
                 for frame in reader.get_frame_indices(step_name):
                     instance_model = list(reader.read_instances(
                         step_name=step_name, frame_index=frame))[0]
+                    print("hier die keys:")
+                    print(instance_model.elements.groups.keys())
+
+                    # Add diameter fields if assigned
+                    element_tags = []
+                    radius_values = []
+                    for i, j in radius.items():
+                        group_elements = instance_model.elements.groups[
+                            self.model_name + "." + i]
+                        element_tags.extend(group_elements)
+                        radius_values.extend(
+                            np.full(group_elements.shape, j))
+                    instance_model.add_field("RADIUS", element_tags,
+                                             radius_values, "ELEMENTS",
+                                             "SCALAR")
+
                     writer.write(instance_model)
 
     def get_number_of_frames(self, step_name):
