@@ -150,34 +150,54 @@ parameters = {"CUBIC": [210.0, 0.3, 0.3],
 parameters["CUBIC"][0] *= 0.25
 parameters["FCC"][0] *= 0.5
 
-# Create geometry in Gmsh and dump it to an input file
-model_name, boundary_map = create_geometry(dx=dx, dy=dy, dz=dz)
-unit_cell = GmshRVE(model_name, boundary_map)
-unit_cell.generate_mesh(element_size=element_size)
-input_file = unit_cell.write_to_abaqus_input()
+# Run homogenization routine
+C = np.empty((6, 6))
+for i in range(6):
+    print("\n------------------------------")
+    print("Run case {}.".format(i + 1))
+    strain = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    strain[i] = 0.1 if i < 3 else 0.2
+    print("Strain = " + str(strain.round(3).tolist()))
 
-# Load the model into Abaqus
-unit_cell = AbaqusRVE(unit_cell, input_file)
+    # Create geometry in Gmsh and dump it to an input file
+    model_name = "RUC_{}".format(i + 1)
+    boundary_map = create_geometry(model_name, dx=dx, dy=dy, dz=dz)
+    unit_cell = GmshRVE(model_name, boundary_map)
+    unit_cell.generate_mesh(element_size=element_size)
+    input_file = unit_cell.write_to_abaqus_input()
+
+    # Load the model into Abaqus
+    unit_cell = AbaqusRVE(unit_cell, input_file)
+
+    # Assign material
+    for name in parameters:
+        E, nu, d = parameters[name]
+        material = unit_cell.model.Material(name=name)
+        material.Elastic(table=[[E, nu]])
+        unit_cell.assign_beam_section(name, name, "ELSET_" + name, 0.5*d)
+
+    # Define load step
+    step_name = "LOAD"
+    unit_cell.model.StaticStep(name=step_name, previous="Initial")
+
+    # Apply periodic boundary conditions and run analysis
+    unit_cell.apply_periodic_BC(step_name, strain)
+    unit_cell.run_analysis(field_outputs=["NFORC", "U"])
+    stress = unit_cell.compute_averaged_stress(step_name)
+    print("Stress = " + str(stress.round(4).tolist()))
+
+    # Compute effective stiffness tensor
+    C[:, i] = stress/strain[i]
+
+    # Export to VTK
+    unit_cell.export_to_vtk(vtk_path, field_outputs=["U"])
+
+print("\n------------------------------")
+print("Effective constitutive matrix:")
+print(C.round(3))
+
+print >> sys.__stdout__, "\n------------------------------"
+print >> sys.__stdout__, "Effective constitutive matrix:"
+print >> sys.__stdout__, C.round(3)
+
 gmsh.finalize()
-
-# Assign material
-for name in parameters:
-    E, nu, d = parameters[name]
-    material = unit_cell.model.Material(name=name)
-    material.Elastic(table=[[E, nu]])
-    unit_cell.assign_beam_section(name, name, "ELSET_" + name, 0.5*d)
-
-# Define load step
-step_name = "LOAD"
-unit_cell.model.StaticStep(name=step_name, previous="Initial")
-
-# Apply periodic boundary conditions and run analysis
-strain = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0]
-unit_cell.apply_periodic_BC(step_name, strain)
-unit_cell.run_analysis(field_outputs=["NFORC", "U"])
-stress = unit_cell.compute_averaged_stress(step_name)
-print("Averaged stress: ")
-print(stress)
-
-# Export to VTK
-unit_cell.export_to_vtk(vtk_path, field_outputs=["U"])
