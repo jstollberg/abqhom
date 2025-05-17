@@ -127,7 +127,7 @@ vtk_path = os.path.join(workdir, "..", "vtk_output")
 
 # RVE size
 dx = dy = dz = 10
-element_size = 10
+element_size = 1
 
 # Material parameters: Young's modulus - Poisson's ratio - diameter
 parameters = {"CUBIC": [210.0, 0.3, 0.3],
@@ -143,7 +143,7 @@ for i in range(6):
     print("Run case {}.".format(i + 1))
     strain = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
     strain[i] = 0.1 if i < 3 else 0.2
-    print("Strain = " + str(strain.round(4).tolist()))
+    print("Strain = " + str(strain.round(3).tolist()))
 
     # Create geometry in Gmsh and dump it to an input file
     model_name = "RUC_{}".format(i + 1)
@@ -180,10 +180,10 @@ for i in range(6):
 
 print("\n------------------------------")
 print("Effective constitutive matrix:")
-print(C.round(4))
+print(C.round(3))
 
 print >> sys.__stdout__, "\n------------------------------"
 print >> sys.__stdout__, "Effective constitutive matrix:"
-print >> sys.__stdout__, C.round(4)
+print >> sys.__stdout__, C.round(3)
 
 gmsh.finalize()
