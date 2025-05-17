@@ -262,10 +262,16 @@ class AbaqusRVE():
             u = np.dot(strain, x)
             u1, u2 = u[0], u[1]
             u3 = u[2] if self.model_dimension == THREE_D else UNSET
-            self.model.DisplacementBC(name="DIRICHLET_{}".format(node.label),
-                                      createStepName=step_name,
-                                      region=region,
-                                      u1=u1, u2=u2, u3=u3)
+
+            name = "DIRICHLET_{}".format(node.label)
+            if name not in self.model.boundaryConditions:
+                self.model.DisplacementBC(name=name,
+                                          createStepName=step_name,
+                                          region=region,
+                                          u1=u1, u2=u2, u3=u3)
+            else:
+                bc = self.model.boundaryConditions[name]
+                bc.setValuesInStep(stepName=step_name, u1=u1, u2=u2, u3=u3)
 
     def apply_periodic_BC(self, step_name, strain):
         """
