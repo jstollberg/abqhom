@@ -15,3 +15,5 @@ __pycache__/
 *.rec
 *.vtu
 *.pvd
+*.keep
+*.exception
