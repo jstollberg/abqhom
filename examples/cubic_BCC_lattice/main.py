@@ -176,7 +176,10 @@ for i in range(6):
     C[:, i] = stress/strain[i]
 
     # Export to VTK
-    unit_cell.export_to_vtk(vtk_path, field_outputs=["U"])
+    unit_cell.export_to_vtk(
+        vtk_path, field_outputs=["U"],
+        radius={"ELSET_CUBIC": 0.5*parameters["CUBIC"][2],
+                "ELSET_BCC": 0.5*parameters["BCC"][2]})
 
 print("\n------------------------------")
 print("Effective constitutive matrix:")
