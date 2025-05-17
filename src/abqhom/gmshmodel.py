@@ -351,6 +351,8 @@ class GmshRVE():
             for group in boundary_groups:
                 dim_tags = self._boundary_map.get(group)
                 if dim_tags is None:
+                    boundary = BOUNDARY_CONNECTIVITY[group]
+                    node_sets = recursively_assign_nodes(boundary, node_sets)
                     continue
 
                 # In case of a point group there are no periodic contraints
