@@ -178,13 +178,15 @@ for i in range(6):
     strain[i] = 0.1 if i < 3 else 0.2
     print("Strain = " + str(strain.round(3).tolist()))
     unit_cell.model.StaticStep(name=loading_step, previous="Initial")
-    unit_cell.apply_periodic_BC(loading_step, strain)
+    unit_cell.apply_affine_displacement_BC(loading_step, strain)
+    # unit_cell.apply_periodic_BC(loading_step, strain)
 
     # Define unloading step
     unloading_step = "UNLOADING"
     strain = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
     unit_cell.model.StaticStep(name=unloading_step, previous=loading_step)
-    unit_cell.apply_periodic_BC(unloading_step, strain)
+    unit_cell.apply_affine_displacement_BC(unloading_step, strain)
+    # unit_cell.apply_periodic_BC(unloading_step, strain)
 
     # Apply periodic boundary conditions and run analysis
     unit_cell.run_analysis(field_outputs=["NFORC", "U", "S", "EP"])
