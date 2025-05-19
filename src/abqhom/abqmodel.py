@@ -693,17 +693,18 @@ class AbaqusRVE():
                         step_name=step_name, frame_index=frame))[0]
 
                     # Add diameter fields if assigned
-                    element_tags = []
-                    radius_values = []
-                    for i, j in radius.items():
-                        group_elements = instance_model.elements.groups[
-                            self.model_name + "." + i]
-                        element_tags.extend(group_elements)
-                        radius_values.extend(
-                            np.full(group_elements.shape, j))
-                    instance_model.add_field("RADIUS", element_tags,
-                                             radius_values, "ELEMENTS",
-                                             "SCALAR")
+                    if len(radius.keys()) > 0:
+                        element_tags = []
+                        radius_values = []
+                        for i, j in radius.items():
+                            group_elements = instance_model.elements.groups[
+                                self.model_name + "." + i]
+                            element_tags.extend(group_elements)
+                            radius_values.extend(
+                                np.full(group_elements.shape, j))
+                        instance_model.add_field("RADIUS", element_tags,
+                                                 radius_values, "ELEMENTS",
+                                                 "SCALAR")
 
                     writer.write(instance_model)
 
