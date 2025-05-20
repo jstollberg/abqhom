@@ -27,20 +27,22 @@ def create_geometry(model_name, dx=1.0, dy=1.0, dz=1.0):
     x = y = z = 0.0
 
     # Add points on corners
-    point_1 = gmsh.model.geo.add_point(x - dx/2, y - dy/2, z - dz/2)
-    point_2 = gmsh.model.geo.add_point(x + dx/2, y - dy/2, z - dz/2)
-    point_3 = gmsh.model.geo.add_point(x + dx/2, y + dy/2, z - dz/2)
-    point_4 = gmsh.model.geo.add_point(x - dx/2, y + dy/2, z - dz/2)
-    point_5 = gmsh.model.geo.add_point(x - dx/2, y - dy/2, z + dz/2)
-    point_6 = gmsh.model.geo.add_point(x + dx/2, y - dy/2, z + dz/2)
-    point_7 = gmsh.model.geo.add_point(x + dx/2, y + dy/2, z + dz/2)
-    point_8 = gmsh.model.geo.add_point(x - dx/2, y + dy/2, z + dz/2)
+    point_1 = gmsh.model.geo.add_point(x - 0.5*dx, y - 0.5*dy, z - 0.5*dz)
+    point_2 = gmsh.model.geo.add_point(x + 0.5*dx, y - 0.5*dy, z - 0.5*dz)
+    point_3 = gmsh.model.geo.add_point(x + 0.5*dx, y + 0.5*dy, z - 0.5*dz)
+    point_4 = gmsh.model.geo.add_point(x - 0.5*dx, y + 0.5*dy, z - 0.5*dz)
+    point_5 = gmsh.model.geo.add_point(x - 0.5*dx, y - 0.5*dy, z + 0.5*dz)
+    point_6 = gmsh.model.geo.add_point(x + 0.5*dx, y - 0.5*dy, z + 0.5*dz)
+    point_7 = gmsh.model.geo.add_point(x + 0.5*dx, y + 0.5*dy, z + 0.5*dz)
+    point_8 = gmsh.model.geo.add_point(x - 0.5*dx, y + 0.5*dy, z + 0.5*dz)
 
     # Add points on surfaces
-    point_9 = gmsh.model.geo.add_point(x, y, z - dz/2)
-    point_10 = gmsh.model.geo.add_point(x, y, z + dz/2)
-    point_11 = gmsh.model.geo.add_point(x - dx/2, y, z)
-    point_12 = gmsh.model.geo.add_point(x + dx/2, y, z)
+    point_9 = gmsh.model.geo.add_point(x, y, z - 0.5*dz)
+    point_10 = gmsh.model.geo.add_point(x, y, z + 0.5*dz)
+    point_11 = gmsh.model.geo.add_point(x - 0.5*dx, y, z)
+    point_12 = gmsh.model.geo.add_point(x + 0.5*dx, y, z)
+    point_13 = gmsh.model.geo.add_point(x, y - 0.5*dy, z)
+    point_14 = gmsh.model.geo.add_point(x, y + 0.5*dy, z)
 
     # Add lines on edges
     edge_1 = gmsh.model.geo.add_line(point_1, point_2)
@@ -73,6 +75,14 @@ def create_geometry(model_name, dx=1.0, dy=1.0, dz=1.0):
     edge_26 = gmsh.model.geo.add_line(point_2, point_12)
     edge_27 = gmsh.model.geo.add_line(point_3, point_12)
     edge_28 = gmsh.model.geo.add_line(point_7, point_12)
+    edge_29 = gmsh.model.geo.add_line(point_1, point_13)
+    edge_30 = gmsh.model.geo.add_line(point_2, point_13)
+    edge_31 = gmsh.model.geo.add_line(point_6, point_13)
+    edge_32 = gmsh.model.geo.add_line(point_5, point_13)
+    edge_33 = gmsh.model.geo.add_line(point_4, point_14)
+    edge_34 = gmsh.model.geo.add_line(point_3, point_14)
+    edge_35 = gmsh.model.geo.add_line(point_7, point_14)
+    edge_36 = gmsh.model.geo.add_line(point_8, point_14)
 
     gmsh.model.geo.synchronize()
 
@@ -99,8 +109,8 @@ def create_geometry(model_name, dx=1.0, dy=1.0, dz=1.0):
                     "EDGE_12": (1, [edge_12]),
                     "FACE_1": (1, [edge_13, edge_14, edge_15, edge_16]),
                     "FACE_2": (1, [edge_17, edge_18, edge_19, edge_20]),
-                    "FACE_3": (1, []),
-                    "FACE_4": (1, []),
+                    "FACE_3": (1, [edge_29, edge_30, edge_31, edge_32]),
+                    "FACE_4": (1, [edge_33, edge_34, edge_35, edge_36]),
                     "FACE_5": (1, [edge_21, edge_22, edge_23, edge_24]),
                     "FACE_6": (1, [edge_25, edge_26, edge_27, edge_28])
                     }
@@ -113,7 +123,8 @@ def create_geometry(model_name, dx=1.0, dy=1.0, dz=1.0):
 
     fcc_entities = [edge_13, edge_14, edge_15, edge_16, edge_17, edge_18,
                     edge_19, edge_20, edge_21, edge_22, edge_23, edge_24,
-                    edge_25, edge_26, edge_27, edge_28]
+                    edge_25, edge_26, edge_27, edge_28, edge_29, edge_30,
+                    edge_31, edge_32, edge_33, edge_34, edge_35, edge_36]
     fcc = gmsh.model.add_physical_group(1, fcc_entities)
     gmsh.model.set_physical_name(1, fcc, "FCC")
 
