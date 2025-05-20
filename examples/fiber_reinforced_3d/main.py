@@ -203,7 +203,6 @@ for i in range(6):
     unit_cell = GmshRVE(model_name, boundary_map)
     unit_cell.generate_mesh(element_size=1.25)
     input_file = unit_cell.write_to_abaqus_input()
-    unit_cell.build_node_sets()
 
     if debug_geometry:
         gmsh.fltk.run()
