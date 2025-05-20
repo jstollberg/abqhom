@@ -31,14 +31,14 @@ def create_geometry(model_name, dx=1.0, dy=1.0, dz=1.0):
     x = y = z = 0.0
 
     # Add points on corners and in the center
-    point_1 = gmsh.model.geo.add_point(x - dx/2, y - dy/2, z - dz/2)
-    point_2 = gmsh.model.geo.add_point(x + dx/2, y - dy/2, z - dz/2)
-    point_3 = gmsh.model.geo.add_point(x + dx/2, y + dy/2, z - dz/2)
-    point_4 = gmsh.model.geo.add_point(x - dx/2, y + dy/2, z - dz/2)
-    point_5 = gmsh.model.geo.add_point(x - dx/2, y - dy/2, z + dz/2)
-    point_6 = gmsh.model.geo.add_point(x + dx/2, y - dy/2, z + dz/2)
-    point_7 = gmsh.model.geo.add_point(x + dx/2, y + dy/2, z + dz/2)
-    point_8 = gmsh.model.geo.add_point(x - dx/2, y + dy/2, z + dz/2)
+    point_1 = gmsh.model.geo.add_point(x - 0.5*dx, y - 0.5*dy, z - 0.5*dz)
+    point_2 = gmsh.model.geo.add_point(x + 0.5*dx, y - 0.5*dy, z - 0.5*dz)
+    point_3 = gmsh.model.geo.add_point(x + 0.5*dx, y + 0.5*dy, z - 0.5*dz)
+    point_4 = gmsh.model.geo.add_point(x - 0.5*dx, y + 0.5*dy, z - 0.5*dz)
+    point_5 = gmsh.model.geo.add_point(x - 0.5*dx, y - 0.5*dy, z + 0.5*dz)
+    point_6 = gmsh.model.geo.add_point(x + 0.5*dx, y - 0.5*dy, z + 0.5*dz)
+    point_7 = gmsh.model.geo.add_point(x + 0.5*dx, y + 0.5*dy, z + 0.5*dz)
+    point_8 = gmsh.model.geo.add_point(x - 0.5*dx, y + 0.5*dy, z + 0.5*dz)
     point_9 = gmsh.model.geo.add_point(x, y, z)
 
     # Add lines on edges
