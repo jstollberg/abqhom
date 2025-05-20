@@ -17,9 +17,7 @@ from abqhom.gmshmodel import GmshRVE
 from abqhom.abqmodel import AbaqusRVE
 
 
-def create_geometry(dx=1.0, dy=1.0, dz=1.0):
-    model_name = "RUC"
-
+def create_geometry(model_name, dx=1.0, dy=1.0, dz=1.0):
     # Initialize Gmsh and add a new model
     if not gmsh.is_initialized():
         gmsh.initialize()
@@ -119,13 +117,13 @@ def create_geometry(dx=1.0, dy=1.0, dz=1.0):
     fcc = gmsh.model.add_physical_group(1, fcc_entities)
     gmsh.model.set_physical_name(1, fcc, "FCC")
 
-    return model_name, boundary_map
+    return boundary_map
 
 
 # ---------------------------------------------------------------
 # Set working directory
 workdir = os.path.join(base_path,
-                       "abqhom/examples/test/abq")
+                       "abqhom/examples/cubic_FCC_lattice/abq")
 if not os.path.isdir(workdir):
     os.mkdir(workdir)
 os.chdir(workdir)
@@ -140,7 +138,7 @@ vtk_path = os.path.join(workdir, "..", "vtk_output")
 
 # RVE size
 dx = dy = dz = 10
-element_size = 10
+element_size = 0.5
 
 # Material parameters: Young's modulus - Poisson's ratio - diameter
 parameters = {"CUBIC": [210.0, 0.3, 0.3],
