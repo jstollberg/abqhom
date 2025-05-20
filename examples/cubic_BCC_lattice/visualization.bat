@@ -1,0 +1,1 @@
+paraview --script=visualization.py
