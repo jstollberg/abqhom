@@ -130,8 +130,8 @@ dx = dy = dz = 10
 element_size = 1
 
 # Material parameters: Young's modulus - Poisson's ratio - diameter
-parameters = {"CUBIC": [210.0, 0.3, 0.3],
-              "BCC": [210.0, 0.3, 0.806*0.3]}
+parameters = {"CUBIC": [210.0, 0.3, 0.5],
+              "BCC": [210.0, 0.3, 1.0]}
 
 # Multiply stiffness with weight factors due to overlaps on edges and faces
 parameters["CUBIC"][0] *= 0.25
