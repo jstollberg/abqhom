@@ -85,7 +85,8 @@ class GmshRVE():
         self._node_sets = {}
         self._element_sets = {}
 
-        for name, (_, entities) in boundary_map.items():
+        initial_boundary_map = boundary_map.copy()
+        for name, (_, entities) in initial_boundary_map.items():
             if len(entities) == 0:
                 boundary_map.pop(name)
         self._boundary_map = boundary_map
