@@ -18,7 +18,6 @@ from abqhom.abqmodel import AbaqusRVE
 
 
 def create_geometry(model_name, dx=1.0, dy=1.0, dz=1.0):
-
     # Initialize Gmsh and add a new model
     if not gmsh.is_initialized():
         gmsh.initialize()
@@ -154,6 +153,7 @@ for i in range(6):
 
     # Load the model into Abaqus
     unit_cell = AbaqusRVE(unit_cell, input_file)
+    gmsh.finalize()
 
     # Assign material
     for name in parameters:
@@ -188,5 +188,3 @@ print(C.round(3))
 print >> sys.__stdout__, "\n------------------------------"
 print >> sys.__stdout__, "Effective constitutive matrix:"
 print >> sys.__stdout__, C.round(3)
-
-gmsh.finalize()
