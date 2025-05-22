@@ -64,7 +64,7 @@ class AbaqusRVE():
     >>> unit_cell.model.StaticStep(name="Load", previous="Initial")
     >>>
     >>> # Apply periodic boundary conditions and run analysis
-    >>> strain = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0]  # Shear strain in xy-plane
+    >>> strain = [0.0, 0.0, 0.0, 0.0, 0.0, 1.0]  # Shear strain in xy-plane
     >>> unit_cell.apply_periodic_BC("Load", strain)
     >>> unit_cell.run_analysis(field_outputs=["NFORC", "U", "S", "E"])
     >>>
@@ -638,8 +638,10 @@ class AbaqusRVE():
             The sets that shall be exported. Invariants can be requested
             in the form of a list element of length 2, e.g. ("S", "MISES").
             The default is [].
-        diameters : dict{str, float}
-            DESCRIPTION
+        radius : dict{str, float}, optional
+            A map from physical group names to the radius of lattice struts.
+            The radius will be exported as a cell field output such that
+            struts can be visualized in the correct size.
         clear : bool, optional
             If True, the output folder will be cleared if it already exists.
             The default is False.

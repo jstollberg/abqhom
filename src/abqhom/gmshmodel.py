@@ -28,13 +28,12 @@ class GmshRVE():
     ----------
     model_name : str
         The name of the Gmsh model.
-    node_sets : dict[str, numpy.ndarray]
+    node_sets : dict[str, numpy.ndarray[int]]
         A map from set names to set nodes for user-defined physical groups and
         further default node sets.
-    element_sets : dict[str, numpy.ndarray]
+    element_sets : dict[str, numpy.ndarray[int]]
         A map from set names to set elements for user-defined physical groups
-        and further default element sets
-        element sets
+        and further default element sets.
     model_dimension : int
         The geometric dimensionality of the model.
     mesh_dimension : int
