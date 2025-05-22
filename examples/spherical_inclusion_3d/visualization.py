@@ -43,6 +43,7 @@ def visualize_deformed_RVE(pvd_file):
 
     # Loop over all physical groups
     displays = []
+    groups = []
     for threshold_field in group_names:
 
         # Apply threshold for the current physical group
@@ -52,42 +53,48 @@ def visualize_deformed_RVE(pvd_file):
         threshold.LowerThreshold = 1.0
         threshold.UpperThreshold = 1.0
 
-        # Visualize beams or trusses as tubes
-        tube = threshold
-        if radius:
-            cell_to_point = simple.CellDatatoPointData(Input=threshold)
-            cell_to_point.UpdatePipeline()
+        groups.append(threshold)
 
-            surface = simple.ExtractSurface(Input=cell_to_point)
-            surface.UpdatePipeline()
-            tube = simple.Tube(Input=surface)
-            tube.UpdatePipeline()
-            tube.Scalars = ["POINTS", "RADIUS"]
-            tube.VaryRadius = "By Absolute Scalar"
-            tube.NumberofSides = 50
+    # Connect the physical groups
+    group_data_sets = simple.GroupDatasets(Input=groups)
+    group_data_sets.UpdatePipeline()
 
-        # Show the deformed structure if there is a displacement field
-        warp = tube
-        if deformation:
-            warp = simple.WarpByVector(Input=tube)
-            warp.UpdatePipeline()
-            warp.Vectors = ["POINTS", "U"]
+    # Visualize beams or trusses as tubes
+    tube = group_data_sets
+    if radius:
+        cell_to_point = simple.CellDatatoPointData(Input=group_data_sets)
+        cell_to_point.UpdatePipeline()
 
-        # Show the last time step (usually the deformed state)
-        animationScene = simple.GetAnimationScene()
-        animationScene.UpdateAnimationUsingDataTimeSteps()
-        timesteps = animationScene.TimeKeeper.TimestepValues
-        animationScene.AnimationTime = timesteps[-1]
-        warp.UpdatePipeline(time=timesteps[-1])
+        surface = simple.ExtractSurface(Input=cell_to_point)
+        surface.UpdatePipeline()
+        tube = simple.Tube(Input=surface)
+        tube.UpdatePipeline()
+        tube.Scalars = ["POINTS", "RADIUS"]
+        tube.VaryRadius = "By Absolute Scalar"
+        tube.NumberofSides = 50
 
-        # Show results
-        display = simple.Show(warp)
-        if deformation:
-            simple.ColorBy(display, ["POINTS", "U"])
-            display.RescaleTransferFunctionToDataRange(True)
-            display.SetScalarBarVisibility(simple.GetActiveView(), True)
+    # Show the deformed structure if there is a displacement field
+    warp = tube
+    if deformation:
+        warp = simple.WarpByVector(Input=tube)
+        warp.UpdatePipeline()
+        warp.Vectors = ["POINTS", "U"]
 
-        displays.append(display)
+    # Show the last time step (usually the deformed state)
+    animationScene = simple.GetAnimationScene()
+    animationScene.UpdateAnimationUsingDataTimeSteps()
+    timesteps = animationScene.TimeKeeper.TimestepValues
+    animationScene.AnimationTime = timesteps[-1]
+    warp.UpdatePipeline(time=timesteps[-1])
+
+    # Show results
+    display = simple.Show(warp)
+    if deformation:
+        simple.ColorBy(display, ["POINTS", "U"])
+        display.RescaleTransferFunctionToDataRange(True)
+        display.SetScalarBarVisibility(simple.GetActiveView(), True)
+
+    displays.append(display)
 
     simple.Render()
     return displays
