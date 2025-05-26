@@ -495,13 +495,11 @@ class GmshRVE():
                                                 node_sets["BOUNDARY_NODES"])
 
         # Add further physical groups that were set while creating the model
-        print(node_sets["EDGE_1"])
         node_sets = add_physical_groups(node_sets)
 
         # Assign sets to the object property and make sure nodes are integers
         for name in node_sets.keys():
             self.node_sets[name] = np.array(node_sets[name], dtype=int)
-        print(node_sets["EDGE_1"])
 
         # Restore previous model
         gmsh.model.set_current(current)
