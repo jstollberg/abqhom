@@ -669,7 +669,7 @@ class AbaqusRVE():
                            model_name=self.model_name,
                            instance_names=[self.model_name])
         for i in field_outputs:
-            if len(i) > 1:
+            if type(i) is not str and len(i) == 2:
                 reader.add_field_export_request(i[0], invariant=i[1])
             else:
                 reader.add_field_export_request(i)
