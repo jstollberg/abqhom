@@ -11,7 +11,7 @@ from abaqus import Mdb, mdb, session
 from regionToolset import Region
 from mesh import MeshNodeArray, MeshElementArray
 from abaqusConstants import (THREE_D, TWO_D_PLANAR, DEFORMABLE_BODY, ON, UNSET,
-                             CARTESIAN, N1_COSINES, DURING_ANALYSIS)
+                             CARTESIAN, N1_COSINES, DURING_ANALYSIS, TOTAL)
 from abqhom.constants import (POINT_GROUPS, EDGE_GROUPS, FACE_GROUPS,
                               PERIODIC_PAIRS, ELEMENTS_ROTATIONAL_DOFS,
                               PARAQUS_INSTALLED)
@@ -203,38 +203,52 @@ class AbaqusRVE():
         element_types = {str(element.type) for element in all_elements}
         return element_types
 
-    def apply_uniform_traction_BC(self, step_name, stress):
-        """
-        Apply uniform traction boundary conditions to the RVE model.
+    def _add_dirichlet_from_displacement_history(self, time_history, u_history,
+                                                 region, step_name, bc_name,
+                                                 amplitude_name):
+        """Add history-dependent Dirichlet boundary conditions."""
+        for i in range(3):
+            # Ignore z component for 2d models
+            if i == 2 and self.model_dimension != THREE_D:
+                continue
 
-        Parameters
-        ----------
-        step_name : str
-            The name of the step in which the boundary conditions are applied.
-        stress : numpy.ndarray[float]
-            The macroscopic stress tensor in full 3d Voigt notation, i.e. the
-            order of the components is [xx, yy, zz, yz, xz, xy].
+            # Add amplitude for the load history
+            amplitude_name += "_{}".format(i + 1)
+            data = np.vstack((time_history, u_history[:, i])).T
+            data = tuple([(t, v) for t, v in data])
+            self.model.TabularAmplitude(name=amplitude_name, timeSpan=TOTAL,
+                                        data=data)
 
-        Returns
-        -------
-        None.
+            # Add the boundary conditon
+            # The actual displacement value will be controlled by the
+            # amplitude, so just put a value of 1.0 here
+            bc_name += "_{}".format(i + 1)
+            assert bc_name not in self.model.boundaryConditions
+            u = [UNSET, UNSET, UNSET]
+            u[i] = 1.0
+            self.model.DisplacementBC(name=bc_name,
+                                      createStepName=step_name,
+                                      region=region,
+                                      amplitude=amplitude_name,
+                                      u1=u[0], u2=u[1], u3=u[2])
 
-        """
-
+    def apply_uniform_traction_BC(self, step_name, stress_history):
         raise NotImplementedError(
             "Uniform traction boundary conditions are not supported yet.")
 
-    def apply_affine_displacement_BC(self, step_name, strain):
+    def apply_affine_displacement_BC(self, initialization_step,
+                                     strain_history):
         """
         Apply affine displacement boundary conditions to the RVE model.
 
         Parameters
         ----------
-        step_name : str
-            The name of the step in which the boundary conditions are applied.
-        strain : numpy.ndarray[float]
-            The macroscopic strain tensor in full 3d Voigt notation, i.e. the
-            order of the components is [xx, yy, zz, 2yz, 2xz, 2xy].
+        initialization_step : str
+            The name of the step in which the boundary conditions are
+            initialized. The boundary conditions will be transferred to
+            subsequent steps
+        strain_history : LoadHistory
+            The load history containing time and strain data.
 
         Returns
         -------
@@ -245,35 +259,27 @@ class AbaqusRVE():
         if self._collect_element_types() <= ELEMENTS_ROTATIONAL_DOFS:
             raise NotImplementedError(
                 "Affine displacement boundary conditions are not supported "
-                + "yet for elements with rotational degrees of freedom. "
+                + "for elements with rotational degrees of freedom. "
                 + "Please use periodic boundary conditions.")
 
-        if not np.array(strain).shape == (6,):
-            raise ValueError(
-                "Strain must be provided in full 3d Voigt notation.")
-        strain = voigt_to_tensor(np.array(strain), "STRAIN")
+        time_history = strain_history.time
+        strain_history = np.array([voigt_to_tensor(i, "STRAIN")
+                                   for i in strain_history.load])
 
         # Apply Dirichlet boundary conditions on all boundary nodes
         boundary_nodes = self.instance.sets["NSET_BOUNDARY_NODES"]
         for node in boundary_nodes.nodes:
             region = Region(nodes=MeshNodeArray(nodes=[node]))
             x = np.array(node.coordinates)
+            u_history = np.dot(strain_history, x)
 
-            u = np.dot(strain, x)
-            u1, u2 = u[0], u[1]
-            u3 = u[2] if self.model_dimension == THREE_D else UNSET
+            amplitude_name = "DIRICHLET_{}".format(node.label)
+            bc_name = "DIRICHLET_{}".format(node.label)
+            self._add_dirichlet_from_displacement_history(
+                time_history, u_history, region, initialization_step, bc_name,
+                amplitude_name)
 
-            name = "DIRICHLET_{}".format(node.label)
-            if name not in self.model.boundaryConditions:
-                self.model.DisplacementBC(name=name,
-                                          createStepName=step_name,
-                                          region=region,
-                                          u1=u1, u2=u2, u3=u3)
-            else:
-                bc = self.model.boundaryConditions[name]
-                bc.setValuesInStep(stepName=step_name, u1=u1, u2=u2, u3=u3)
-
-    def apply_periodic_BC(self, step_name, strain):
+    def apply_periodic_BC(self, initialization_step, strain_history):
         """
         Apply periodic boundary conditions to the RVE model.
 
@@ -290,11 +296,9 @@ class AbaqusRVE():
         None.
 
         """
-
-        if not np.array(strain).shape == (6,):
-            raise ValueError(
-                "Strain must be provided in full 3d Voigt notation.")
-        strain = voigt_to_tensor(np.array(strain), "STRAIN")
+        time_history = strain_history.time
+        strain_history = np.array([voigt_to_tensor(i, "STRAIN")
+                                   for i in strain_history.load])
 
         def apply_dirichlet_BC_to_reference_point(direction):
             """Apply BCs to the reference points for periodic connections."""
@@ -311,13 +315,13 @@ class AbaqusRVE():
             region = assembly.instances[point_name].sets[set_name]
             x = np.array([0.0, 0.0, 0.0])
             x[direction - 1] = deltas[direction - 1]
-            u = np.dot(strain, x)
-            u1, u2 = u[0], u[1]
-            u3 = u[2] if self.model_dimension == THREE_D else UNSET
-            self.model.DisplacementBC(name="DIRICHLET_" + point_name,
-                                      createStepName=step_name,
-                                      region=region,
-                                      u1=u1, u2=u2, u3=u3)
+            u_history = np.dot(strain_history, x)
+
+            amplitude_name = "DIRICHLET_{}".format(point_name)
+            bc_name = "DIRICHLET_{}".format(point_name)
+            self._add_dirichlet_from_displacement_history(
+                time_history, u_history, region, initialization_step, bc_name,
+                amplitude_name)
 
         def apply_periodic_rotations():
             """Apply periodic boundary conditions to rotational DOFs."""
@@ -353,13 +357,12 @@ class AbaqusRVE():
             region = RVE_sets["NSET_" + point]
             x = np.array(region.nodes[0].coordinates)
 
-            u = np.dot(strain, x)
-            u1, u2 = u[0], u[1]
-            u3 = u[2] if dim == 3 else UNSET
-            self.model.DisplacementBC(name="DIRICHLET_" + point,
-                                      createStepName=step_name,
-                                      region=region,
-                                      u1=u1, u2=u2, u3=u3)
+            u_history = np.dot(strain_history, x)
+            amplitude_name = "DIRICHLET_{}".format(point)
+            bc_name = "DIRICHLET_{}".format(point)
+            self._add_dirichlet_from_displacement_history(
+                time_history, u_history, region, initialization_step, bc_name,
+                amplitude_name)
 
         # Add periodic coupling to edges and faces
         for master, slave in PERIODIC_PAIRS.items():
@@ -808,3 +811,64 @@ class AbaqusRVE():
 
         self.close_odb_file()
         return stress
+
+
+class LoadHistory():
+    """
+    An RVE representation to set up a homogenization problem in Abaqus.
+
+    Parameters
+    ----------
+    time : numpy.ndarray[float]
+        The time data of the load history
+    load : numpy.ndarray[float]
+        The load data containing strain or stress information in full 3d
+        Voigt notation. The order of the data is [xx, yy, zz, yz, xz, xy]
+        whereby the shear components for strains must be multiplied by 2.
+
+    Attributes
+    ----------
+    time : numpy.ndarray[float]
+        The time data of the load history
+    load : numpy.ndarray[float]
+        The load data containing strain or stress information in full 3d
+        Voigt notation. The order of the data is [xx, yy, zz, yz, xz, xy]
+        whereby the shear components for strains must be multiplied by 2.
+
+    Example
+    -------
+    >>> # Strain history for a plane strain problem
+    >>> def load_path(time):
+    >>>     strain = np.zeros((len(time), 6))
+    >>>     strain[:, 0] = np.sin(np.pi*time)
+    >>>     strain[:, 1] = time**2
+    >>>     strain[:, 5] = np.sin(2*np.pi*time)
+    >>>     return strain
+    >>>
+    >>> time = np.linspace(0.0, 1.0, 50)
+    >>> strain = 0.2*load_path(time)
+    >>> history = LoadHistory(time, strain)
+
+    """
+
+    def __init__(self, time, load):
+        if time.shape[0] != load.shape[0]:
+            raise ValueError(
+                "Time and load array do not have the same lengths")
+
+        if load.shape[1] != 6:
+            raise ValueError(
+                "Load array must be provided in full 3d Voigt notation.")
+
+        self._time = time
+        self._load = load
+
+    @property
+    def time(self):
+        """The time data of the load history."""
+        return self._time
+
+    @property
+    def load(self):
+        """The load data of the load history."""
+        return self._load
