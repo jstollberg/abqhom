@@ -14,7 +14,7 @@ import gmsh
 
 # Import homogenization tools
 from abqhom.gmshmodel import GmshRVE
-from abqhom.abqmodel import AbaqusRVE
+from abqhom.abqmodel import AbaqusRVE, LoadHistory
 
 
 def create_geometry(model_name, dx=1.0, dy=1.0, dz=1.0):
@@ -109,6 +109,15 @@ def create_geometry(model_name, dx=1.0, dy=1.0, dz=1.0):
     return boundary_map
 
 
+def load_path(time):
+    strain = np.zeros((len(time), 6))
+    strain[:, 0] = np.sin(np.pi*time)
+    strain[:, 1] = time**2
+    strain[:, 2] = -0.3*time
+    strain[:, 5] = np.sin(2*np.pi*time)
+    return strain
+
+
 # ---------------------------------------------------------------
 # Set working directory
 workdir = os.path.join(base_path,
@@ -129,6 +138,10 @@ vtk_path = os.path.join(workdir, "..", "vtk_output")
 dx = dy = dz = 10
 element_size = 1.2
 
+# Boundary conditions
+boundary_conditions = "PERIODIC"  # PERIODIC or DIRICHLET
+
+# Material parameters
 parameters = {"CUBIC_ELASTIC":  [215000, 0.3],
               "CUBIC_PLASTIC":  [[436.5791,     0.0], [473.5047, 3.33e-4],
                                  [488.653,  6.60e-4], [499.4512, 1.10e-3],
@@ -148,53 +161,54 @@ parameters = {"CUBIC_ELASTIC":  [215000, 0.3],
 
 parameters["CUBIC_ELASTIC"][0] *= 0.25
 
-# Run homogenization routine
-for i in range(6):
-    print("\n------------------------------")
-    print("Run case {}.".format(i + 1))
+# Create the load path for the strain
+time = np.linspace(0.0, 1.0, 50)
+strain = 0.2*load_path(time)
+history = LoadHistory(time, strain)
 
-    # Create geometry in Gmsh and dump it to an input file
-    model_name = "RUC_{}".format(i + 1)
-    boundary_map = create_geometry(model_name, dx=dx, dy=dy, dz=dz)
-    unit_cell = GmshRVE(model_name, boundary_map)
-    unit_cell.generate_mesh(element_size=element_size)
-    input_file = unit_cell.write_to_abaqus_input()
 
-    # Load the model into Abaqus
-    unit_cell = AbaqusRVE(unit_cell, input_file)
-    gmsh.finalize()
+# ---------------------------------------------------------------
+# Create geometry in Gmsh and dump it to an input file
+model_name = "RUC"
+boundary_map = create_geometry(model_name, dx=dx, dy=dy, dz=dz)
+unit_cell = GmshRVE(model_name, boundary_map)
+unit_cell.generate_mesh(element_size=element_size)
+input_file = unit_cell.write_to_abaqus_input()
 
-    # Assign material
-    for group in ("CUBIC", "BCC"):
-        material = unit_cell.model.Material(name=group)
-        material.Elastic(table=[parameters[group + "_ELASTIC"]])
-        material.Plastic(table=parameters[group + "_PLASTIC"])
-        unit_cell.assign_beam_section(group, group, "ELSET_" + group,
-                                      0.5*parameters[group + "_DIAMETER"][0])
+# Load the model into Abaqus
+unit_cell = AbaqusRVE(unit_cell, input_file)
+gmsh.finalize()
 
-    # Define loading step
-    loading_step = "LOADING"
-    strain = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-    strain[i] = 0.1 if i < 3 else 0.2
-    print("Strain = " + str(strain.round(3).tolist()))
-    unit_cell.model.StaticStep(name=loading_step, previous="Initial")
-    unit_cell.apply_affine_displacement_BC(loading_step, strain)
-    # unit_cell.apply_periodic_BC(loading_step, strain)
+# Assign material
+for group in ("CUBIC", "BCC"):
+    material = unit_cell.model.Material(name=group)
+    material.Elastic(table=[parameters[group + "_ELASTIC"]])
+    material.Plastic(table=parameters[group + "_PLASTIC"])
+    unit_cell.assign_beam_section(group, group, "ELSET_" + group,
+                                  0.5*parameters[group + "_DIAMETER"][0])
 
-    # Define unloading step
-    unloading_step = "UNLOADING"
-    strain = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-    unit_cell.model.StaticStep(name=unloading_step, previous=loading_step)
-    unit_cell.apply_affine_displacement_BC(unloading_step, strain)
-    # unit_cell.apply_periodic_BC(unloading_step, strain)
+# Define load step
+step_name = "LOAD"
+time_period = history.time[-1]
+unit_cell.model.StaticRiksStep(name=step_name, previous="Initial")
+# unit_cell.model.StaticStep(name=step_name, previous="Initial",
+#                            timePeriod=time_period, initialInc=0.01,
+#                            maxInc=0.01, minInc=1e-10)
 
-    # Apply periodic boundary conditions and run analysis
-    unit_cell.run_analysis(field_outputs=["NFORC", "U", "S", "EP"])
-    stress = unit_cell.compute_averaged_stress(loading_step)
-    print("Stress = " + str(stress.round(3).tolist()))
+# Apply boundary conditions and run analysis
+if boundary_conditions.upper() == "PERIODIC":
+    unit_cell.apply_periodic_BC(step_name, history)
+elif boundary_conditions.upper() == "DIRICHLET":
+    unit_cell.apply_affine_displacement_BC(step_name, history)
+else:
+    raise RuntimeError("Invalid boundary conditions.")
 
-    # Export to VTK
-    unit_cell.export_to_vtk(
-        vtk_path, field_outputs=["U"],
-        radius={"ELSET_CUBIC": 0.5*parameters["CUBIC_DIAMETER"][0],
-                "ELSET_BCC": 0.5*parameters["BCC_DIAMETER"][0]})
+unit_cell.run_analysis(field_outputs=["NFORC", "U", "S"])
+
+# Export to VTK
+print("Running VTK export...")
+unit_cell.export_to_vtk(
+    vtk_path, field_outputs=["U"],
+    radius={"ELSET_CUBIC": 0.5*parameters["CUBIC_DIAMETER"][0],
+            "ELSET_BCC": 0.5*parameters["BCC_DIAMETER"][0]})
+print("*** Finished ***")
