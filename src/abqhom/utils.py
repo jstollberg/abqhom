@@ -29,38 +29,46 @@ def voigt_to_tensor(voigt_tensor, quantity):
     if quantity not in {"STRESS", "STRAIN"}:
         raise ValueError("Supported quantities are 'STRESS' and 'STRAIN'.")
 
-    if voigt_tensor.shape == (6,):
-        xx, yy, zz = voigt_tensor[0:3]
-        yz, xz, xy = voigt_tensor[3::]
+    if len(voigt_tensor.shape) == 1:
+        voigt_tensor = np.expand_dims(voigt_tensor, 0)
 
-        if quantity == "STRAIN":
-            yz, xz, xy = 0.5*yz, 0.5*xz, 0.5*xy
+    tensor = []
+    for t in voigt_tensor:
+        if t.shape == (6,):
+            xx, yy, zz = t[0:3]
+            yz, xz, xy = t[3::]
 
-        tensor = np.array([[xx, xy, xz], [xy, yy, yz], [xz, yz, zz]])
-        return tensor
+            if quantity == "STRAIN":
+                yz, xz, xy = 0.5*yz, 0.5*xz, 0.5*xy
 
-    elif voigt_tensor.shape == (3,):
-        xx, yy = voigt_tensor[0:2]
-        xy = tensor[2]
+            tensor.append(np.array([[xx, xy, xz], [xy, yy, yz], [xz, yz, zz]]))
 
-        if quantity == "STRAIN":
-            xy = 0.5*xy
+        elif voigt_tensor.shape == (3,):
+            xx, yy = t[0:2]
+            xy = t[2]
 
-        tensor = np.array([[xx, xy], [xy, yy]])
-        return tensor
+            if quantity == "STRAIN":
+                xy = 0.5*xy
 
-    else:
-        raise ValueError("The shape of the provided tensor is invalid.")
+            tensor.append(np.array([[xx, xy], [xy, yy]]))
+
+        else:
+            raise ValueError("The shape of the provided tensor is invalid.")
+
+    tensor = np.array(tensor)
+    if tensor.shape[0] == 1:
+        tensor = tensor[0]
+    return tensor
 
 
 def tensor_to_voigt(tensor, quantity):
     """
-    Transform a tensor from symbolic tensor notation to Voigt notation.
+    Transform a sequence of tensors to Voigt notation.
 
     Parameters
     ----------
     tensor : numpy.ndarray[float]
-        The tensor in symbolic tensor notation.
+        The tensors in symbolic tensor notation.
     quantity : str
         The quantity that is described by the tensor. Currently supported are
         'STRESS' and 'STRAIN'.
@@ -68,36 +76,47 @@ def tensor_to_voigt(tensor, quantity):
     Returns
     -------
     tensor : numpy.ndarray[float]
-        The tensor in Voigt notation.
+        The tensors in Voigt notation.
 
     """
     quantity = quantity.upper()
     if quantity not in {"STRESS", "STRAIN"}:
         raise ValueError("Supported quantities are 'STRESS' and 'STRAIN'.")
 
-    if not np.allclose(tensor, tensor.T):
-        raise ValueError("The provided tensor is not symmetric.")
+    if len(tensor.shape) == 2:
+        tensor = np.expand_dims(tensor, 0)
 
-    if tensor.shape == (3, 3):
-        xx, yy, zz = tensor[0, 0], tensor[1, 1], tensor[2, 2]
-        yz, xz, xy = tensor[1, 2], tensor[0, 2], tensor[0, 1]
+    voigt = []
+    for t in tensor:
+        if not np.allclose(t, t.T):
+            raise ValueError("The provided tensor is not symmetric.")
 
-        voigt_tensor = np.array([xx, yy, zz, yz, xz, xy])
-        if quantity == "STRAIN":
-            voigt_tensor[3::] *= 2
-        return voigt_tensor
+        if t.shape == (3, 3):
+            xx, yy, zz = t[0, 0], t[1, 1], t[2, 2]
+            yz, xz, xy = t[1, 2], t[0, 2], t[0, 1]
 
-    elif tensor.shape == (2, 2):
-        xx, yy = tensor[0, 0], tensor[1, 1]
-        xy = tensor[0, 1]
+            voigt_tensor = np.array([xx, yy, zz, yz, xz, xy])
+            if quantity == "STRAIN":
+                voigt_tensor[3::] *= 2
+            voigt.append(voigt_tensor)
 
-        voigt_tensor = np.array([xx, yy, xy])
-        if quantity == "STRAIN":
-            voigt_tensor[2] *= 2
-        return voigt_tensor
+        elif t.shape == (2, 2):
+            xx, yy = t[0, 0], t[1, 1]
+            xy = t[0, 1]
 
-    else:
-        raise ValueError("The shape of the provided tensor is invalid.")
+            voigt_tensor = np.array([xx, yy, xy])
+            if quantity == "STRAIN":
+                voigt_tensor[2] *= 2
+            voigt.append(voigt_tensor)
+
+        else:
+            raise ValueError("The shape of the provided tensor is invalid.")
+
+    voigt = np.array(voigt)
+    if voigt.shape[0] == 1:
+        voigt = voigt[0]
+
+    return voigt
 
 
 def reuss(volume_fraction, C1, C2):
