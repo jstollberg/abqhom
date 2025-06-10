@@ -127,17 +127,17 @@ def isotropic_stiffness_tensor(E, nu):
 
 
 def load_path(time):
-    strain = np.zeros((len(time), 6))
-    strain[:, 0] = np.sin(np.pi*time)
-    strain[:, 1] = time**2
-    strain[:, 5] = np.sin(2*np.pi*time)
+    strain = np.zeros(6)
+    strain[0] = np.sin(np.pi*time)
+    strain[1] = time**2
+    strain[5] = np.sin(2*np.pi*time)
     return strain
 
 
 # ---------------------------------------------------------------
 # Set working directory
 workdir = os.path.join(base_path,
-                       "abqhom/examples/fiber_reinforced_2d_plasticity/abq")
+                       "abqhom/examples/fiber_reinforced_2d_plasticity/abq1")
 if not os.path.isdir(workdir):
     os.mkdir(workdir)
 os.chdir(workdir)
@@ -166,13 +166,12 @@ parameters = {"MATRIX_ELASTIC": [3.5, 0.35],
               "FIBER_PLASTIC":  [250e-3, 0.0]}
 
 # Name folder to store VTK files
-vtk_path = os.path.join(workdir, "..", "vtk_output", str(fiber_fraction))
+vtk_path = os.path.join(workdir, "..", "vtk_output1", str(fiber_fraction))
 
 # Create the load path for the strain
 n_steps = 1000
 time = np.linspace(0.0, 1.0, 50)
-strain = 0.2*load_path(time)
-history = LoadHistory(time, strain)
+history = LoadHistory(time, load_path)
 
 
 # ---------------------------------------------------------------
