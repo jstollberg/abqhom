@@ -263,8 +263,8 @@ class AbaqusRVE():
                 + "Please use periodic boundary conditions.")
 
         time_history = strain_history.time
-        strain_history = np.array([voigt_to_tensor(i, "STRAIN")
-                                   for i in strain_history.load])
+        strain_history = voigt_to_tensor(strain_history.collect_load_data(),
+                                         "STRAIN")
 
         # Apply Dirichlet boundary conditions on all boundary nodes
         boundary_nodes = self.instance.sets["NSET_BOUNDARY_NODES"]
@@ -297,8 +297,8 @@ class AbaqusRVE():
 
         """
         time_history = strain_history.time
-        strain_history = np.array([voigt_to_tensor(i, "STRAIN")
-                                   for i in strain_history.load])
+        strain_history = voigt_to_tensor(strain_history.collect_load_data(),
+                                         "STRAIN")
 
         def apply_dirichlet_BC_to_reference_point(direction):
             """Apply BCs to the reference points for periodic connections."""
@@ -821,47 +821,42 @@ class LoadHistory():
     ----------
     time : numpy.ndarray[float]
         The time data of the load history
-    load : numpy.ndarray[float]
-        The load data containing strain or stress information in full 3d
-        Voigt notation. The order of the data is [xx, yy, zz, yz, xz, xy]
-        whereby the shear components for strains must be multiplied by 2.
+    history : function
+        The stress or strain history function having a point of time as input
+        and returns the load in 3d Voigt notation, i.e. the order of the data
+        is [xx, yy, zz, yz, xz, xy]. The shear components for strains must be
+        multiplied by 2.
+
 
     Attributes
     ----------
     time : numpy.ndarray[float]
         The time data of the load history
-    load : numpy.ndarray[float]
-        The load data containing strain or stress information in full 3d
-        Voigt notation. The order of the data is [xx, yy, zz, yz, xz, xy]
-        whereby the shear components for strains must be multiplied by 2.
+    history : function
+        The stress or strain history function having a point of time as input
+        and returns the load in 3d Voigt notation, i.e. the order of the data
+        is [xx, yy, zz, yz, xz, xy]. The shear components for strains must be
+        multiplied by 2.
 
     Example
     -------
     >>> # Strain history for a plane strain problem
-    >>> def load_path(time):
-    >>>     strain = np.zeros((len(time), 6))
-    >>>     strain[:, 0] = np.sin(np.pi*time)
-    >>>     strain[:, 1] = time**2
-    >>>     strain[:, 5] = np.sin(2*np.pi*time)
+    >>> def strain_path(time):
+    >>>     strain = np.zeros(6)
+    >>>     strain[0] = np.sin(np.pi*time)
+    >>>     strain[1] = time**2
+    >>>     strain[5] = np.sin(2*np.pi*time)
     >>>     return strain
     >>>
     >>> time = np.linspace(0.0, 1.0, 50)
-    >>> strain = 0.2*load_path(time)
-    >>> history = LoadHistory(time, strain)
+    >>> history = LoadHistory(time, strain_path)
 
     """
 
-    def __init__(self, time, load):
-        if time.shape[0] != load.shape[0]:
-            raise ValueError(
-                "Time and load array do not have the same lengths")
-
-        if load.shape[1] != 6:
-            raise ValueError(
-                "Load array must be provided in full 3d Voigt notation.")
-
+    def __init__(self, time, history):
         self._time = time
-        self._load = load
+        self._history = history
+        self._index = 0
 
     @property
     def time(self):
@@ -869,6 +864,60 @@ class LoadHistory():
         return self._time
 
     @property
-    def load(self):
-        """The load data of the load history."""
-        return self._load
+    def history(self):
+        """The history function."""
+        return self._history
+
+    def __iter__(self):
+        self._index = 0
+        return self
+
+    def __next__(self):
+        if self._index >= len(self.time):
+            raise StopIteration
+
+        time = self.time[self._index]
+        load = self.history(time)
+        if load.shape != (6,):
+            raise ValueError(
+                "History must return the load in 3d Voigt notation.")
+        self._index += 1
+
+        return time, load
+
+    def __getitem__(self, i):
+        time = self.time[i]
+        load = self.history(time)
+        return time, load
+
+    def as_tuple(self):
+        """
+        Get all pairs of time and load at once as a tuple.
+
+        Returns
+        -------
+        data : tuple[tuple[float, float]]
+            The (time, load) pairs.
+
+        """
+        data = []
+        for t, v in self:
+            data.append((t, v))
+        data = tuple(data)
+        return data
+
+    def collect_load_data(self):
+        """
+        Get the load data at each point of time at once.
+
+        Returns
+        -------
+        data : numpy.ndarray[float]
+            DESCRIPTION.
+
+        """
+        data = []
+        for _, v in self:
+            data.append(v)
+        data = np.array(data)
+        return data
