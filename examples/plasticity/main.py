@@ -163,8 +163,7 @@ parameters["CUBIC_ELASTIC"][0] *= 0.25
 
 # Create the load path for the strain
 time = np.linspace(0.0, 1.0, 50)
-strain = 0.2*load_path(time)
-history = LoadHistory(time, strain)
+history = LoadHistory(time, load_path)
 
 
 # ---------------------------------------------------------------
