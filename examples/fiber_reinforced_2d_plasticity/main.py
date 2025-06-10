@@ -150,6 +150,7 @@ if not os.path.isdir(result_path):
     os.makedirs(os.path.join(result_path, "numerical"))
 
 debug_geometry = False
+export_vtk = True
 
 # RVE size
 dx = dy = 10.0
@@ -158,15 +159,17 @@ fiber_fraction = 0.5  # Change the volume fraction of the fibers here
 # Boundary conditions
 boundary_conditions = "PERIODIC"  # PERIODIC or DIRICHLET
 
-# Material parameters for CFRP: Young's modulus - Poisson's ratio
-parameters = {"MATRIX": [3.5, 0.35],   # Epoxy matrix
-              "FIBER":  [230.0, 0.2]}  # Carbon fibers
+# Material parameters:
+parameters = {"MATRIX_ELASTIC": [3.5, 0.35],
+              "MATRIX_PLASTIC": [70e-3, 0.0],
+              "FIBER_ELASTIC":  [230.0, 0.2],
+              "FIBER_PLASTIC":  [250e-3, 0.0]}
 
 # Name folder to store VTK files
 vtk_path = os.path.join(workdir, "..", "vtk_output", str(fiber_fraction))
 
 # Create the load path for the strain
-n_steps = 100
+n_steps = 1000
 time = np.linspace(0.0, 1.0, 50)
 strain = 0.2*load_path(time)
 history = LoadHistory(time, strain)
@@ -189,10 +192,12 @@ if debug_geometry:
 unit_cell = AbaqusRVE(unit_cell, input_file)
 
 # Assign material
-for name in parameters:
-    E, nu = parameters[name]
+for name in ("MATRIX", "FIBER"):
+    E, nu = parameters[name + "_ELASTIC"]
+    sig_y, eps_p = parameters[name + "_PLASTIC"]
     material = unit_cell.model.Material(name=name)
     material.Elastic(table=[[E, nu]])
+    material.Plastic(table=[[sig_y, eps_p]])
     unit_cell.assign_solid_section(name, name, "ELSET_" + name)
 
 # Define load step
@@ -211,10 +216,12 @@ elif boundary_conditions.upper() == "DIRICHLET":
 else:
     raise RuntimeError("Invalid boundary conditions.")
 
-unit_cell.run_analysis(field_outputs=["NFORC", "U", "S"])
+unit_cell.run_analysis(field_outputs=["NFORC", "U", "S", "PE", "PEEQ"])
 
 # Export to VTK
-print("Running VTK export...")
-unit_cell.export_to_vtk(vtk_path, field_outputs=["U", ("S", "MISES")],
-                        sets=["ELSET_MATRIX", "ELSET_FIBER"])
+if export_vtk:
+    print("Running VTK export...")
+    unit_cell.export_to_vtk(vtk_path,
+                            field_outputs=["U", ("S", "MISES"), "PEEQ"],
+                            sets=["ELSET_MATRIX", "ELSET_FIBER"])
 print("*** Finished ***")
