@@ -150,7 +150,7 @@ if not os.path.isdir(result_path):
     os.makedirs(os.path.join(result_path, "numerical"))
 
 debug_geometry = False
-export_vtk = True
+export_vtk = False
 
 # RVE size
 dx = dy = 10.0
@@ -201,7 +201,7 @@ for name in ("MATRIX", "FIBER"):
 
 # Define load step
 step_name = "LOAD"
-time_period = history.time[-1]
+time_period = history.time_data[-1]
 unit_cell.model.StaticStep(name=step_name, previous="Initial",
                            timePeriod=time_period, maxNumInc=n_steps,
                            timeIncrementationMethod=FIXED,
@@ -215,7 +215,7 @@ elif boundary_conditions.upper() == "DIRICHLET":
 else:
     raise RuntimeError("Invalid boundary conditions.")
 
-unit_cell.run_analysis(field_outputs=["NFORC", "U", "S", "PE", "PEEQ"])
+unit_cell.run_analysis(field_outputs=["NFORC", "U", "S", "E", "PE", "PEEQ"])
 
 # Export to VTK
 if export_vtk:
