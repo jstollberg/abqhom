@@ -188,7 +188,7 @@ for group in ("CUBIC", "BCC"):
 
 # Define load step
 step_name = "LOAD"
-time_period = history.time[-1]
+time_period = history.time_data[-1]
 unit_cell.model.StaticRiksStep(name=step_name, previous="Initial")
 # unit_cell.model.StaticStep(name=step_name, previous="Initial",
 #                            timePeriod=time_period, initialInc=0.01,
