@@ -173,7 +173,7 @@ class GmshRVE():
         descr += "\tmodel dimension : {}\n".format(self.model_dimension)
         descr += "\tmesh dimension  : {}\n".format(self.mesh_dimension)
         descr += "\tnode sets       : {}\n".format(len(self.node_sets))
-        descr += "\telement sets    : {}\n".format(len(self.element_sets))
+        descr += "\telement sets    : {}".format(len(self.element_sets))
         return descr
 
     def activate(self):
