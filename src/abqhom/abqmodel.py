@@ -112,6 +112,22 @@ class AbaqusRVE():
                                            part=self._part,
                                            dependent=ON)
 
+    def __del__(self):
+        del mdb.models[self.model_name]
+
+    def __str__(self):
+        dim = 3 if self.model_dimension == THREE_D else 2
+        descr = "AbaqusRVE '{}'\n".format(self.model_name)
+        descr += "\tmodel dimension       : {}\n".format(dim)
+        descr += "\t# steps               : {}\n".format(
+            len(self.model.steps))
+        descr += "\t# constraints         : {}\n".format(
+            len(self.model.constraints))
+        descr += "\t# boundary conditions : {}\n".format(
+            len(self.model.boundaryConditions))
+        descr += "\t# load conditions     : {}".format(len(self.model.loads))
+        return descr
+
     @property
     def model_name(self):
         """The name of the Abaqus model."""
@@ -241,12 +257,15 @@ class AbaqusRVE():
         """
         Apply affine displacement boundary conditions to the RVE model.
 
+        The boundary conditions will be transferred to all subsequent steps,
+        i.e. the strain history must be formulated w.r.t. the total simulation
+        time and not the step time.
+
         Parameters
         ----------
         initialization_step : str
             The name of the step in which the boundary conditions are
-            initialized. The boundary conditions will be transferred to
-            subsequent steps
+            initialized.
         strain_history : LoadHistory
             The load history containing time and strain data.
 
@@ -262,9 +281,8 @@ class AbaqusRVE():
                 + "for elements with rotational degrees of freedom. "
                 + "Please use periodic boundary conditions.")
 
-        time_history = strain_history.time
-        strain_history = voigt_to_tensor(strain_history.collect_load_data(),
-                                         "STRAIN")
+        time_history = strain_history.time_data
+        strain_history = voigt_to_tensor(strain_history.load_data, "STRAIN")
 
         # Apply Dirichlet boundary conditions on all boundary nodes
         boundary_nodes = self.instance.sets["NSET_BOUNDARY_NODES"]
@@ -283,22 +301,25 @@ class AbaqusRVE():
         """
         Apply periodic boundary conditions to the RVE model.
 
+        The boundary conditions will be transferred to all subsequent steps,
+        i.e. the strain history must be formulated w.r.t. the total simulation
+        time and not the step time.
+
         Parameters
         ----------
-        step_name : str
-            The name of the step in which the boundary conditions are applied.
-        strain : numpy.ndarray[float]
-            The macroscopic strain tensor in full 3d Voigt notation, i.e. the
-            order of the components is [xx, yy, zz, 2yz, 2xz, 2xy].
+        initialization_step : str
+            The name of the step in which the boundary conditions are
+            initialized.
+        strain_history : LoadHistory
+            The load history containing time and strain data.
 
         Returns
         -------
         None.
 
         """
-        time_history = strain_history.time
-        strain_history = voigt_to_tensor(strain_history.collect_load_data(),
-                                         "STRAIN")
+        time_history = strain_history.time_data
+        strain_history = voigt_to_tensor(strain_history.load_data, "STRAIN")
 
         def apply_dirichlet_BC_to_reference_point(direction):
             """Apply BCs to the reference points for periodic connections."""
@@ -629,7 +650,9 @@ class AbaqusRVE():
         Export the simulation results to VTK file format.
 
         The Python package 'Paraqus' needs to be installed to have this
-        function available.
+        function available:
+
+            https://github.com/InstituteOfMechanics/Paraqus/tree/main
 
         Parameters
         ----------
@@ -820,7 +843,7 @@ class LoadHistory():
     Parameters
     ----------
     time : numpy.ndarray[float]
-        The time data of the load history
+        The time data points of the load history
     history : function
         The stress or strain history function having a point of time as input
         and returns the load in 3d Voigt notation, i.e. the order of the data
@@ -830,13 +853,11 @@ class LoadHistory():
 
     Attributes
     ----------
-    time : numpy.ndarray[float]
-        The time data of the load history
-    history : function
-        The stress or strain history function having a point of time as input
-        and returns the load in 3d Voigt notation, i.e. the order of the data
-        is [xx, yy, zz, yz, xz, xy]. The shear components for strains must be
-        multiplied by 2.
+    time_data : numpy.ndarray[float]
+        The time data points of the load history
+    load_data : numpy.ndarray[float]
+        The load data points of the load history, i.e. the history evaluated
+        at the time data points.
 
     Example
     -------
@@ -850,49 +871,63 @@ class LoadHistory():
     >>>
     >>> time = np.linspace(0.0, 1.0, 50)
     >>> history = LoadHistory(time, strain_path)
+    >>> initial_strain = history(0.0)
 
     """
 
     def __init__(self, time, history):
+
+        if history(0).shape != (6,):
+            raise ValueError("The argument history must return a " +
+                             "numpyp.ndarray of shape (6,).")
+
         self._time = time
         self._history = history
         self._index = 0
 
     @property
-    def time(self):
-        """The time data of the load history."""
+    def time_data(self):
+        """The time data points of the load history."""
         return self._time
 
     @property
-    def history(self):
-        """The history function."""
-        return self._history
+    def load_data(self):
+        """The load data points of the load history."""
+        data = []
+        for _, v in self:
+            data.append(v)
+        data = np.array(data)
+        return data
 
     def __iter__(self):
         self._index = 0
         return self
 
     def __next__(self):
-        if self._index >= len(self.time):
+        if self._index >= len(self.time_data):
             raise StopIteration
 
-        time = self.time[self._index]
-        load = self.history(time)
-        if load.shape != (6,):
-            raise ValueError(
-                "History must return the load in 3d Voigt notation.")
+        time = self.time_data[self._index]
+        load = self(time)
         self._index += 1
 
         return time, load
 
     def __getitem__(self, i):
-        time = self.time[i]
-        load = self.history(time)
+        time = self.time_data[i]
+        load = self(time)
         return time, load
 
-    def as_tuple(self):
+    def __call__(self, time):
+        return self._history(time)
+
+    def __str__(self):
+        descr = "LoadHistory with {} data points\n".format(len(self.time_data))
+        return descr
+
+    def as_table(self):
         """
-        Get all pairs of time and load at once as a tuple.
+        Get all pairs of time and load at once as a table.
 
         Returns
         -------
@@ -904,20 +939,4 @@ class LoadHistory():
         for t, v in self:
             data.append((t, v))
         data = tuple(data)
-        return data
-
-    def collect_load_data(self):
-        """
-        Get the load data at each point of time at once.
-
-        Returns
-        -------
-        data : numpy.ndarray[float]
-            DESCRIPTION.
-
-        """
-        data = []
-        for _, v in self:
-            data.append(v)
-        data = np.array(data)
         return data
