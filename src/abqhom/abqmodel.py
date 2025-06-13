@@ -113,7 +113,10 @@ class AbaqusRVE():
                                            dependent=ON)
 
     def __del__(self):
-        del mdb.models[self.model_name]
+        try:
+            del mdb.models[self.model_name]
+        except Exception:
+            pass
 
     def __str__(self):
         dim = 3 if self.model_dimension == THREE_D else 2
