@@ -26,13 +26,14 @@ periodic = []
 reuss = []
 voigt = []
 volfracs = []
-for d, p, r, v in zip(files_drlt, files_periodic, files_reuss, files_voigt):
-    drlt.append(read_csv_file(d))
-    periodic.append(read_csv_file(p))
-    reuss.append(read_csv_file(r))
-    voigt.append(read_csv_file(v))
+for i in range(min(len(files_drlt), len(files_periodic),
+                   len(files_reuss), len(files_voigt))):
+    drlt.append(read_csv_file(files_drlt[i]))
+    periodic.append(read_csv_file(files_periodic[i]))
+    reuss.append(read_csv_file(files_reuss[i]))
+    voigt.append(read_csv_file(files_voigt[i]))
 
-    file_name = os.path.basename(d)
+    file_name = os.path.basename(files_drlt[i])
     volfrac, _ = os.path.splitext(file_name)
     volfracs.append(float(volfrac))
 
@@ -42,50 +43,34 @@ reuss = np.array(reuss)
 voigt = np.array(voigt)
 volfracs = np.array(volfracs)
 
-# Reorder eigenvalues
-eig3 = np.vstack((drlt[:, 0], periodic[:, 0], reuss[:, 0], voigt[:, 0]))
-eig2 = np.vstack((drlt[:, 1], periodic[:, 1], reuss[:, 1], voigt[:, 1]))
-eig1 = np.vstack((drlt[:, 2], periodic[:, 2], reuss[:, 2], voigt[:, 2]))
+# Extract eigenvalues
+eigs = []
+for i in range(3):
+    eigs.append(np.vstack((drlt[:, i], periodic[:, i],
+                           reuss[:, i], voigt[:, i])))
+eigs = eigs[::-1]
 
 # Set font size
 matplotlib.rcParams.update({"font.size": 14})
 
 # Plot first eigenvalue
-fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(36/2.54, 15/2.54),
-                                    dpi=300)
-ax1.plot(volfracs, eig1[2], "--", color="black", label="Reuss lower bound",
-         linewidth=3)
-ax1.plot(volfracs, eig1[3], ":", color="black", label="Voigt upper bound",
-         linewidth=3)
-ax1.plot(volfracs, eig1[0], marker=".", color="blue", label="Numerical (ADBC)",
-         linewidth=3, markersize=12)
-ax1.plot(volfracs, eig1[1], marker=".", color="red", label="Numerical (PBC)",
-         linewidth=3, markersize=12)
-ax1.set(xlabel="Fiber volume fraction", ylabel="First eigenvalue")
-ax1.legend()
+labels = ["First", "Second", "Third"]
+fig, axes = plt.subplots(1, 3, figsize=(36/2.54, 15/2.54), dpi=300)
 
-# Plot second eigenvalue
-ax2.plot(volfracs, eig2[2], "--", color="black", label="Reuss lower bound",
-         linewidth=3)
-ax2.plot(volfracs, eig2[3], ":", color="black", label="Voigt upper bound",
-         linewidth=3)
-ax2.plot(volfracs, eig2[0], marker=".", color="blue", label="Numerical (ADBC)",
-         linewidth=3, markersize=12)
-ax2.plot(volfracs, eig2[1], marker=".", color="red", label="Numerical (PBC)",
-         linewidth=3, markersize=12)
-ax2.set(xlabel="Fiber volume fraction", ylabel="Second eigenvalue")
+for ax, eig, label in zip(axes.flatten(), eigs, labels):
+    ax.plot(volfracs, eig[2], "--", color="black", label="Reuss lower bound",
+            linewidth=3)
+    ax.plot(volfracs, eig[3], ":", color="black", label="Voigt upper bound",
+            linewidth=3)
+    ax.plot(volfracs, eig[0], marker=".", color="blue",
+            label="Numerical (ADBC)", linewidth=3, markersize=12)
+    ax.plot(volfracs, eig[1], marker=".", color="red", label="Numerical (PBC)",
+            linewidth=3, markersize=12)
+    ax.set(xlabel="Fiber volume fraction", ylabel=label + " eigenvalue")
 
-# Plot third eigenvalue
-ax3.plot(volfracs, eig3[2], "--", color="black", label="Reuss lower bound",
-         linewidth=3)
-ax3.plot(volfracs, eig3[3], ":", color="black", label="Voigt upper bound",
-         linewidth=3)
-ax3.plot(volfracs, eig3[0], marker=".", color="blue", label="Numerical (ADBC)",
-         linewidth=3, markersize=12)
-ax3.plot(volfracs, eig3[1], marker=".", color="red", label="Numerical (PBC)",
-         linewidth=3, markersize=12)
-ax3.set(xlabel="Fiber volume fraction", ylabel="Third eigenvalue")
+    if label == "First":
+        ax.legend()
 
 fig.tight_layout()
-fig.savefig("eigenvalues.png")
+fig.savefig("reuss_voigt_bounds.png")
 plt.show()
