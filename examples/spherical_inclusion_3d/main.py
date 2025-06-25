@@ -14,8 +14,8 @@ for i in (gmsh_path, abqhom_path, paraqus_path):
 import gmsh
 
 # Import homogenization tools
-from abqhom.gmshmodel import GmshRVE
-from abqhom.abqmodel import AbaqusRVE
+from abqhom.gmshmodel import GmshRVE, Boundary
+from abqhom.abqmodel import AbaqusRVE, LoadHistory
 from abqhom.utils import reuss, voigt, export_to_csv_file
 
 
@@ -45,33 +45,35 @@ def create_geometry(model_name, dx=1.0, dy=1.0, dz=1.0,
     gmsh.model.occ.synchronize()
 
     # Create map containing information on mesh periodicity and physical groups
-    boundary_map = {"POINT_1": (0, [12]),
-                    "POINT_2": (0, [15]),
-                    "POINT_3": (0, [18]),
-                    "POINT_4": (0, [14]),
-                    "POINT_5": (0, [11]),
-                    "POINT_6": (0, [16]),
-                    "POINT_7": (0, [17]),
-                    "POINT_8": (0, [13]),
-                    "EDGE_1":  (1, [20]),
-                    "EDGE_2":  (1, [27]),
-                    "EDGE_3":  (1, [25]),
-                    "EDGE_4":  (1, [19]),
-                    "EDGE_5":  (1, [22]),
-                    "EDGE_6":  (1, [24]),
-                    "EDGE_7":  (1, [23]),
-                    "EDGE_8":  (1, [17]),
-                    "EDGE_9":  (1, [16]),
-                    "EDGE_10": (1, [21]),
-                    "EDGE_11": (1, [26]),
-                    "EDGE_12": (1, [18]),
-                    "FACE_1":  (2, [12]),
-                    "FACE_2":  (2, [10]),
-                    "FACE_3":  (2, [9]),
-                    "FACE_4":  (2, [11]),
-                    "FACE_5":  (2, [8]),
-                    "FACE_6":  (2, [13])
-                    }
+    # This is needed since automated generation is not possible for this
+    # example
+    boundary = {"POINT_1": [(0, 12)],
+                "POINT_2": [(0, 15)],
+                "POINT_3": [(0, 18)],
+                "POINT_4": [(0, 14)],
+                "POINT_5": [(0, 11)],
+                "POINT_6": [(0, 16)],
+                "POINT_7": [(0, 17)],
+                "POINT_8": [(0, 13)],
+                "EDGE_1":  [(1, 20)],
+                "EDGE_2":  [(1, 27)],
+                "EDGE_3":  [(1, 25)],
+                "EDGE_4":  [(1, 19)],
+                "EDGE_5":  [(1, 22)],
+                "EDGE_6":  [(1, 24)],
+                "EDGE_7":  [(1, 23)],
+                "EDGE_8":  [(1, 17)],
+                "EDGE_9":  [(1, 16)],
+                "EDGE_10": [(1, 21)],
+                "EDGE_11": [(1, 26)],
+                "EDGE_12": [(1, 18)],
+                "FACE_1":  [(2, 12)],
+                "FACE_2":  [(2, 10)],
+                "FACE_3":  [(2, 9)],
+                "FACE_4":  [(2, 11)],
+                "FACE_5":  [(2, 8)],
+                "FACE_6":  [(2, 13)]
+                }
 
     # Add physical groups
     matrix = gmsh.model.add_physical_group(3, [1])
@@ -79,7 +81,7 @@ def create_geometry(model_name, dx=1.0, dy=1.0, dz=1.0,
     matrix = gmsh.model.add_physical_group(3, [2])
     gmsh.model.set_physical_name(3, matrix, "INCLUSION")
 
-    return boundary_map
+    return boundary
 
 
 def isotropic_stiffness_tensor(E, nu):
@@ -131,17 +133,26 @@ C = np.empty((6, 6))
 for i in range(6):
     print("\n------------------------------")
     print("Run case {}.".format(i + 1))
-    strain = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-    strain[i] = 0.1 if i < 3 else 0.2
-    print("Strain = " + str(strain.round(3).tolist()))
+
+    # Define load history
+    strain_magnitude = 0.1 if i < 3 else 0.2
+
+    def strain_history(time):
+        strain = np.zeros(6)
+        strain[i] = strain_magnitude
+        return time*strain
+
+    history = LoadHistory(np.array([0.0, 1.0]), strain_history)
+    print("Strain = " + str(history(1.0).round(3).tolist()))
 
     # Create geometry in Gmsh and dump it to an input file
     model_name = "RVE_{}".format(i + 1)
-    boundary_map = create_geometry(model_name, dx=dx, dy=dy, dz=dz,
-                                   inclusion_fraction=inclusion_fraction)
-    unit_cell = GmshRVE(model_name, boundary_map)
+    boundary = create_geometry(model_name, dx=dx, dy=dy, dz=dz,
+                               inclusion_fraction=inclusion_fraction)
+    unit_cell = GmshRVE(model_name, Boundary(model_name, boundary,
+                                             enforce_periodic=True))
     unit_cell.generate_mesh(element_size=1.25)
-    input_file = unit_cell.write_to_abaqus_input()
+    input_file = unit_cell.write_abaqus_input()
 
     if debug_geometry:
         gmsh.fltk.run()
@@ -163,9 +174,9 @@ for i in range(6):
 
     # Apply boundary conditions and run analysis
     if boundary_conditions.upper() == "PERIODIC":
-        unit_cell.apply_periodic_BC(step_name, strain)
+        unit_cell.apply_periodic_BC(step_name, history)
     elif boundary_conditions.upper() == "DIRICHLET":
-        unit_cell.apply_affine_displacement_BC(step_name, strain)
+        unit_cell.apply_affine_displacement_BC(step_name, history)
     else:
         raise RuntimeError("Invalid boundary conditions.")
 
@@ -174,7 +185,7 @@ for i in range(6):
     print("Stress = " + str(stress.round(3).tolist()))
 
     # Compute effective stiffness tensor
-    C[:, i] = stress/strain[i]
+    C[:, i] = stress/strain_magnitude
 
     # Export to VTK
     unit_cell.export_to_vtk(vtk_path, field_outputs=["U", ("S", "MISES")],
@@ -201,7 +212,8 @@ eigen_numerical = np.sort(np.linalg.eig(C)[0])
 file = str(inclusion_fraction) + ".csv"
 export_to_csv_file(eigen_reuss, os.path.join(result_path, "reuss", file))
 export_to_csv_file(eigen_voigt, os.path.join(result_path, "voigt", file))
-export_to_csv_file(eigen_voigt, os.path.join(result_path, "numerical", file))
+export_to_csv_file(eigen_numerical, os.path.join(result_path, "numerical",
+                                                 file))
 
 print("\n------------------------------")
 print("Eigenvalues:")

@@ -1,6 +1,5 @@
 import os
 import sys
-import random
 import numpy as np
 
 base_path = "C:/Users/jonat/Documents/"
@@ -36,22 +35,18 @@ def create_geometry(model_name, dx=1.0, dy=1.0, fiber_fraction=0.2):
     x = y = 0.0
 
     # Create the model
-    point_1 = gmsh.model.occ.add_point(x - dx/2, y - dy/2, 0.0)
-    point_2 = gmsh.model.occ.add_point(x + dx/2, y - dy/2, 0.0)
-    point_3 = gmsh.model.occ.add_point(x + dx/2, y + dy/2, 0.0)
-    point_4 = gmsh.model.occ.add_point(x - dx/2, y + dy/2, 0.0)
-    point_5 = gmsh.model.occ.add_point(x - dx/2 + radius, y - dy/2, 0.0)
-    point_6 = gmsh.model.occ.add_point(x + dx/2 - radius, y - dy/2, 0.0)
-    point_7 = gmsh.model.occ.add_point(x + dx/2, y - dy/2 + radius, 0.0)
-    point_8 = gmsh.model.occ.add_point(x + dx/2, y + dy/2 - radius, 0.0)
-    point_9 = gmsh.model.occ.add_point(x + dx/2 - radius, y + dy/2, 0.0)
-    point_10 = gmsh.model.occ.add_point(x - dx/2 + radius, y + dy/2, 0.0)
-    point_11 = gmsh.model.occ.add_point(x - dx/2, y + dy/2 - radius, 0.0)
-    point_12 = gmsh.model.occ.add_point(x - dx/2, y - dy/2 + radius, 0.0)
-    point_13 = gmsh.model.occ.add_point(x - radius, y, 0.0)
-    point_14 = gmsh.model.occ.add_point(x + radius, y, 0.0)
-    point_15 = gmsh.model.occ.add_point(x, y - radius, 0.0)
-    point_16 = gmsh.model.occ.add_point(x, y + radius, 0.0)
+    point_1 = gmsh.model.occ.add_point(x - 0.5*dx, y - 0.5*dy, 0.0)
+    point_2 = gmsh.model.occ.add_point(x + 0.5*dx, y - 0.5*dy, 0.0)
+    point_3 = gmsh.model.occ.add_point(x + 0.5*dx, y + 0.5*dy, 0.0)
+    point_4 = gmsh.model.occ.add_point(x - 0.5*dx, y + 0.5*dy, 0.0)
+    point_5 = gmsh.model.occ.add_point(x - 0.5*dx + radius, y - 0.5*dy, 0.0)
+    point_6 = gmsh.model.occ.add_point(x + 0.5*dx - radius, y - 0.5*dy, 0.0)
+    point_7 = gmsh.model.occ.add_point(x + 0.5*dx, y - 0.5*dy + radius, 0.0)
+    point_8 = gmsh.model.occ.add_point(x + 0.5*dx, y + 0.5*dy - radius, 0.0)
+    point_9 = gmsh.model.occ.add_point(x + 0.5*dx - radius, y + 0.5*dy, 0.0)
+    point_10 = gmsh.model.occ.add_point(x - 0.5*dx + radius, y + 0.5*dy, 0.0)
+    point_11 = gmsh.model.occ.add_point(x - 0.5*dx, y + 0.5*dy - radius, 0.0)
+    point_12 = gmsh.model.occ.add_point(x - 0.5*dx, y - 0.5*dy + radius, 0.0)
 
     line_1 = gmsh.model.occ.add_line(point_1, point_5)
     line_2 = gmsh.model.occ.add_line(point_5, point_6)
@@ -70,16 +65,13 @@ def create_geometry(model_name, dx=1.0, dy=1.0, fiber_fraction=0.2):
     circle_2 = gmsh.model.occ.add_circle_arc(point_7, point_2, point_6)
     circle_3 = gmsh.model.occ.add_circle_arc(point_9, point_3, point_8)
     circle_4 = gmsh.model.occ.add_circle_arc(point_11, point_4, point_10)
-    circle_5 = gmsh.model.occ.add_circle_arc(point_13, point_15, point_14,
-                                             center=False)
-    circle_6 = gmsh.model.occ.add_circle_arc(point_14, point_16, point_13,
-                                             center=False)
+    circle_5 = gmsh.model.occ.add_circle(x, y, 0.0, radius)
 
     loop_1 = gmsh.model.occ.add_curve_loop([line_12, line_1, circle_1])
     loop_2 = gmsh.model.occ.add_curve_loop([line_3, line_4, circle_2])
     loop_3 = gmsh.model.occ.add_curve_loop([line_6, line_7, circle_3])
     loop_4 = gmsh.model.occ.add_curve_loop([line_9, line_10, circle_4])
-    loop_5 = gmsh.model.occ.add_curve_loop([circle_5, circle_6])
+    loop_5 = gmsh.model.occ.add_curve_loop([circle_5])
     loop_6 = gmsh.model.occ.add_curve_loop([
         line_2, circle_2, line_5, circle_3,
         line_8, circle_4, line_11, circle_1])
@@ -99,19 +91,6 @@ def create_geometry(model_name, dx=1.0, dy=1.0, fiber_fraction=0.2):
     fiber = gmsh.model.add_physical_group(2, [surface_1, surface_2, surface_3,
                                               surface_4, surface_5])
     gmsh.model.set_physical_name(2, fiber, "FIBER")
-
-    # Create map containing information on mesh periodicity and physical groups
-    boundary_map = {"POINT_1": (0, [point_1]),
-                    "POINT_2": (0, [point_2]),
-                    "POINT_3": (0, [point_3]),
-                    "POINT_4": (0, [point_4]),
-                    "EDGE_1":  (1, [line_1, line_2, line_3]),
-                    "EDGE_2":  (1, [line_4, line_5, line_6]),
-                    "EDGE_3":  (1, [line_9, line_8, line_7]),
-                    "EDGE_4":  (1, [line_12, line_11, line_10]),
-                    }
-
-    return boundary_map
 
 
 def isotropic_stiffness_tensor(E, nu):
@@ -157,7 +136,7 @@ if not os.path.isdir(result_path):
 for fiber_fraction in np.linspace(min_fiber_fraction,
                                   max_fiber_fraction,
                                   samples):
-    print("================================")
+    print("\n\n================================")
     print("Fiber volume fraction = " + str(fiber_fraction) + "\n")
 
     # Name folder to store VTK files
@@ -185,14 +164,14 @@ for fiber_fraction in np.linspace(min_fiber_fraction,
 
         # Create geometry in Gmsh and dump it to an input file
         model_name = "RVE_{}".format(i + 1)
-        boundary_map = create_geometry(model_name, dx=dx, dy=dy,
-                                       fiber_fraction=fiber_fraction)
-        unit_cell = GmshRVE(model_name, boundary_map)
+        create_geometry(model_name, dx=dx, dy=dy,
+                        fiber_fraction=fiber_fraction)
+        unit_cell = GmshRVE(model_name)
         unit_cell.generate_mesh(element_size=0.4)
-        input_file = unit_cell.write_to_abaqus_input()
+        input_file = unit_cell.write_abaqus_input()
 
         if debug_geometry:
-            gmsh.fltk.run()
+            unit_cell.show()
             break
 
         # Load the model into Abaqus

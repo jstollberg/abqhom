@@ -14,7 +14,7 @@ import gmsh
 
 # Import homogenization tools
 from abqhom.gmshmodel import GmshRVE
-from abqhom.abqmodel import AbaqusRVE
+from abqhom.abqmodel import AbaqusRVE, LoadHistory
 
 
 def create_geometry(model_name, dx=1.0, dy=1.0, dz=1.0):
@@ -66,35 +66,6 @@ def create_geometry(model_name, dx=1.0, dy=1.0, dz=1.0):
 
     gmsh.model.geo.synchronize()
 
-    # Create map containing information on mesh periodicity and physical groups
-    boundary_map = {"POINT_1": (0, [point_1]),
-                    "POINT_2": (0, [point_2]),
-                    "POINT_3": (0, [point_3]),
-                    "POINT_4": (0, [point_4]),
-                    "POINT_5": (0, [point_5]),
-                    "POINT_6": (0, [point_6]),
-                    "POINT_7": (0, [point_7]),
-                    "POINT_8": (0, [point_8]),
-                    "EDGE_1": (1, [edge_1]),
-                    "EDGE_2": (1, [edge_2]),
-                    "EDGE_3": (1, [edge_3]),
-                    "EDGE_4": (1, [edge_4]),
-                    "EDGE_5": (1, [edge_5]),
-                    "EDGE_6": (1, [edge_6]),
-                    "EDGE_7": (1, [edge_7]),
-                    "EDGE_8": (1, [edge_8]),
-                    "EDGE_9": (1, [edge_9]),
-                    "EDGE_10": (1, [edge_10]),
-                    "EDGE_11": (1, [edge_11]),
-                    "EDGE_12": (1, [edge_12]),
-                    "FACE_1": (2, []),
-                    "FACE_2": (2, []),
-                    "FACE_3": (2, []),
-                    "FACE_4": (2, []),
-                    "FACE_5": (2, []),
-                    "FACE_6": (2, [])
-                    }
-
     # Add physical groups for primitive unit cells
     cubic_entities = [edge_1, edge_2, edge_3, edge_4, edge_5, edge_6,
                       edge_7, edge_8, edge_9, edge_10, edge_11, edge_12]
@@ -104,8 +75,6 @@ def create_geometry(model_name, dx=1.0, dy=1.0, dz=1.0):
                     edge_19, edge_20]
     bcc = gmsh.model.add_physical_group(1, bcc_entities)
     gmsh.model.set_physical_name(1, bcc, "BCC")
-
-    return boundary_map
 
 
 # ---------------------------------------------------------------
@@ -140,16 +109,24 @@ C = np.empty((6, 6))
 for i in range(6):
     print("\n------------------------------")
     print("Run case {}.".format(i + 1))
-    strain = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-    strain[i] = 0.1 if i < 3 else 0.2
-    print("Strain = " + str(strain.round(3).tolist()))
+
+    # Define load history
+    strain_magnitude = 0.1 if i < 3 else 0.2
+
+    def strain_history(time):
+        strain = np.zeros(6)
+        strain[i] = strain_magnitude
+        return time*strain
+
+    history = LoadHistory(np.array([0.0, 1.0]), strain_history)
+    print("Strain = " + str(history(1.0).round(3).tolist()))
 
     # Create geometry in Gmsh and dump it to an input file
     model_name = "RUC_{}".format(i + 1)
-    boundary_map = create_geometry(model_name, dx=dx, dy=dy, dz=dz)
-    unit_cell = GmshRVE(model_name, boundary_map)
+    create_geometry(model_name, dx=dx, dy=dy, dz=dz)
+    unit_cell = GmshRVE(model_name)
     unit_cell.generate_mesh(element_size=element_size)
-    input_file = unit_cell.write_to_abaqus_input()
+    input_file = unit_cell.write_abaqus_input()
 
     # Load the model into Abaqus
     unit_cell = AbaqusRVE(unit_cell, input_file)
@@ -167,13 +144,13 @@ for i in range(6):
     unit_cell.model.StaticStep(name=step_name, previous="Initial")
 
     # Apply periodic boundary conditions and run analysis
-    unit_cell.apply_periodic_BC(step_name, strain)
+    unit_cell.apply_periodic_BC(step_name, history)
     unit_cell.run_analysis(field_outputs=["NFORC", "U"])
     stress = unit_cell.compute_averaged_stress(step_name)
     print("Stress = " + str(stress.round(4).tolist()))
 
     # Compute effective stiffness tensor
-    C[:, i] = stress/strain[i]
+    C[:, i] = stress/strain_magnitude
 
     # Export to VTK
     unit_cell.export_to_vtk(
@@ -184,7 +161,3 @@ for i in range(6):
 print("\n------------------------------")
 print("Effective constitutive matrix:")
 print(C.round(3))
-
-print >> sys.__stdout__, "\n------------------------------"
-print >> sys.__stdout__, "Effective constitutive matrix:"
-print >> sys.__stdout__, C.round(3)
