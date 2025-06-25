@@ -36,6 +36,8 @@ class AbaqusRVE():
     ----------
     model_name : str
         The name of the model.
+    periodic : bool
+        A flag to mark whether the model is periodic.
     model_dimension : abaqus.abaqusConstant
         The model dimension. The value can be THREE_D or TWO_D_PLANAR.
     model : abaqus.Model
@@ -48,12 +50,22 @@ class AbaqusRVE():
     odb : abaqus.Odb
         The Abaqus output database containing the analysis results.
 
-
     Example
     -------
-    >>> # Assume there exists a GmshRVE and an input file
-    >>> # Create an AbaqusRVE from that
-    >>> unit_cell = AbaqusRVE(gmsh_RVE, input_file)
+    >>> from abqhom.gmshmodel import GmshRVE
+    >>> from abqhom.abqmodel import AbaqusRVE, LoadHistory
+    >>>
+    >>> # Strain in x-direction
+    >>> def strain_path(time):
+    >>>     strain = np.zeros(6)
+    >>>     strain[0] = 0.1*time
+    >>>     return strain
+    >>>
+    >>> time = np.linspace(0.0, 1.0, 50)
+    >>> history = LoadHistory(time, strain_path)
+    >>>
+    >>> # Assume there exists a GmshRVE, create an AbaqusRVE from that
+    >>> unit_cell = AbaqusRVE(gmsh_RVE, "abaqus_input.inp")
     >>>
     >>> # Assign material and sections
     >>> material = unit_cell.model.Material(name="Steel")
@@ -64,8 +76,7 @@ class AbaqusRVE():
     >>> unit_cell.model.StaticStep(name="Load", previous="Initial")
     >>>
     >>> # Apply periodic boundary conditions and run analysis
-    >>> strain = [0.0, 0.0, 0.0, 0.0, 0.0, 1.0]  # Shear strain in xy-plane
-    >>> unit_cell.apply_periodic_BC("Load", strain)
+    >>> unit_cell.apply_periodic_BC("Load", history)
     >>> unit_cell.run_analysis(field_outputs=["NFORC", "U", "S", "E"])
     >>>
     >>> # Export the results to VTK file format
@@ -86,6 +97,7 @@ class AbaqusRVE():
         del mdb.models[default_model]
 
         self._model_name = gmsh_RVE.model_name
+        self._periodic = gmsh_RVE.periodic
         self._model_dimension = dim
         self._model = mdb.models[self._model_name]
         self._part = self._model.parts[self._model_name]
@@ -96,12 +108,13 @@ class AbaqusRVE():
         self._part.setValues(space=dim)
 
         # Add node sets
-        if len(gmsh_RVE.node_sets) == 0:
+        all_groups = POINT_GROUPS + EDGE_GROUPS + FACE_GROUPS
+        if not set(all_groups) == set(gmsh_RVE.node_sets.keys()):
             gmsh_RVE.build_node_sets()
         self._add_node_sets(gmsh_RVE.node_sets)
 
         # Add element sets
-        if len(gmsh_RVE.element_sets) == 0:
+        if not set(all_groups) == set(gmsh_RVE.node_sets.keys()):
             gmsh_RVE.build_element_sets()
         self._add_element_sets(gmsh_RVE.element_sets)
 
@@ -111,12 +124,6 @@ class AbaqusRVE():
         self._instance = assembly.Instance(name=self._model_name,
                                            part=self._part,
                                            dependent=ON)
-
-    def __del__(self):
-        try:
-            del mdb.models[self.model_name]
-        except Exception:
-            pass
 
     def __str__(self):
         dim = 3 if self.model_dimension == THREE_D else 2
@@ -131,10 +138,18 @@ class AbaqusRVE():
         descr += "\t# load conditions     : {}".format(len(self.model.loads))
         return descr
 
+    def __repr__(self):
+        return self.__str__()
+
     @property
     def model_name(self):
         """The name of the Abaqus model."""
         return self._model_name
+
+    @property
+    def periodic(self):
+        """Flag to mark whether the model is periodic."""
+        return self._periodic
 
     @property
     def model_dimension(self):
@@ -185,23 +200,26 @@ class AbaqusRVE():
                 self.part.SetFromElementLabels(name=set_name,
                                                elementLabels=set_items)
 
-    def _create_reference_point(self, direction):
-        """Create a reference points to apply the BCs in one direction."""
+    def get_bounding_box(self):
+        """
+        Compute the bounding box of the mesh.
 
-        coords = [0.0, 0.0, 0.0]
-        name = "REFERENCE_POINT_X{}".format(direction)
-        part = self.model.Part(dimensionality=self.model_dimension,
-                               name=name, type=DEFORMABLE_BODY)
-        point = self.model.parts[name].ReferencePoint(point=coords)
-        self.model.parts[name].Set(
-            name="POINT_BOUNDARY_CONDITIONS",
-            referencePoints=[self.model.parts[name]
-                             .referencePoints[point.id]])
-        self.model.rootAssembly.Instance(name=name, part=part,
-                                         dependent=ON)
+        Returns
+        -------
+        x_min : float
+            The minimum x-value of the bounding box.
+        y_min : float
+            The minimum y-value of the bounding box.
+        z_min : float
+            The minimum z-value of the bounding box.
+        x_max : float
+            The maximum x-value of the bounding box.
+        y_max : float
+            The maximum y-value of the bounding box.
+        z_max : float
+            The maximum z-value of the bounding box.
 
-    def _get_bounding_box(self):
-        """Compute the bounding box of the Abaqus model."""
+        """
 
         if self.model_dimension == THREE_D:
             x_min, y_min, z_min = (self.instance.sets["NSET_POINT_1"].nodes[0]
@@ -229,7 +247,7 @@ class AbaqusRVE():
         for i in range(3):
             # Ignore z component for 2d models
             if i == 2 and self.model_dimension != THREE_D:
-                continue
+                break
 
             # Add amplitude for the load history
             amplitude_name += "_{}".format(i + 1)
@@ -324,22 +342,30 @@ class AbaqusRVE():
         time_history = strain_history.time_data
         strain_history = voigt_to_tensor(strain_history.load_data, "STRAIN")
 
-        def apply_dirichlet_BC_to_reference_point(direction):
-            """Apply BCs to the reference points for periodic connections."""
+        def create_reference_point(master, slave):
+            """Create a reference points to connect master and slave."""
 
-            # Compute RVE size
-            bounding_box = np.array(self._get_bounding_box())
-            bounding_box = bounding_box.reshape(2, -1)
-            deltas = bounding_box[1] - bounding_box[0]
+            coords = [0.0, 0.0, 0.0]
+            point_name = "REFERENCE_POINT_{}_{}".format(master, slave)
+            part = self.model.Part(dimensionality=self.model_dimension,
+                                   name=point_name, type=DEFORMABLE_BODY)
+            point = self.model.parts[point_name].ReferencePoint(point=coords)
+            self.model.parts[point_name].Set(
+                name="REFERENCE_POINT",
+                referencePoints=[self.model.parts[point_name]
+                                 .referencePoints[point.id]])
+            self.model.rootAssembly.Instance(name=point_name, part=part,
+                                             dependent=ON)
+
+            # Compute the +/- coordinates of the resepctive groups
+            x_minus = RVE_sets["NSET_" + master].nodes[0].coordinates
+            x_plus = RVE_sets["NSET_" + slave].nodes[0].coordinates
 
             # Apply the boundary conditions
-            assembly = self.model.rootAssembly
-            point_name = "REFERENCE_POINT_X{}".format(direction)
-            set_name = "POINT_BOUNDARY_CONDITIONS"
-            region = assembly.instances[point_name].sets[set_name]
-            x = np.array([0.0, 0.0, 0.0])
-            x[direction - 1] = deltas[direction - 1]
-            u_history = np.dot(strain_history, x)
+            region = self.model.rootAssembly.instances[point_name].sets[
+                "REFERENCE_POINT"]
+            u_history = np.dot(strain_history,
+                               np.array(x_plus) - np.array(x_minus))
 
             amplitude_name = "DIRICHLET_{}".format(point_name)
             bc_name = "DIRICHLET_{}".format(point_name)
@@ -350,13 +376,8 @@ class AbaqusRVE():
         def apply_periodic_rotations():
             """Apply periodic boundary conditions to rotational DOFs."""
 
-            # Make a list of all periodically connected pairs of groups
-            all_pairs = {i: PERIODIC_PAIRS[i] for i in PERIODIC_PAIRS}
-            for i in range(len(POINT_GROUPS) - 1):
-                all_pairs[POINT_GROUPS[i]] = POINT_GROUPS[i + 1]
-
             # Apply equation constraints to rotational degrees of freedom
-            for master, slave in all_pairs.items():
+            for slave, master in PERIODIC_PAIRS.items():
                 if ("NSET_" + master not in self.instance.sets
                         or "NSET_" + slave not in self.instance.sets):
                     continue
@@ -370,48 +391,39 @@ class AbaqusRVE():
                     self.model.Equation(name="PBC_{}_{}_{}".format(
                         master, slave, dof), terms=terms)
 
+        if not self.periodic:
+            raise RuntimeError("The mesh is not suitable for periodic BCs.")
+
         # Define some shortcuts
         RVE_sets = self.instance.sets
         dim = 3 if self.model_dimension == THREE_D else 2
 
-        # Apply Dirichlet BC to corner points
-        for point in POINT_GROUPS:
-            if "NSET_" + point not in RVE_sets:
-                continue
-            region = RVE_sets["NSET_" + point]
-            x = np.array(region.nodes[0].coordinates)
-
-            u_history = np.dot(strain_history, x)
-            amplitude_name = "DIRICHLET_{}".format(point)
-            bc_name = "DIRICHLET_{}".format(point)
-            self._add_dirichlet_from_displacement_history(
-                time_history, u_history, region, initialization_step, bc_name,
-                amplitude_name)
+        # Apply Dirichlet BC to POINT_1 to avoid rigid body motions
+        region = RVE_sets["NSET_POINT_1"]
+        x = np.array(region.nodes[0].coordinates)
+        u_history = np.dot(strain_history, x)
+        amplitude_name = "DIRICHLET_POINT_1"
+        bc_name = "DIRICHLET_POINT_1"
+        self._add_dirichlet_from_displacement_history(
+            time_history, u_history, region, initialization_step, bc_name,
+            amplitude_name)
 
         # Add periodic coupling to edges and faces
-        for master, slave in PERIODIC_PAIRS.items():
+        for slave, master in PERIODIC_PAIRS.items():
             if ("NSET_" + master not in RVE_sets
                     or "NSET_" + slave not in RVE_sets):
                 continue
 
-            x_minus = RVE_sets["NSET_" + master].nodes[0].coordinates[0:dim]
-            x_plus = RVE_sets["NSET_" + slave].nodes[0].coordinates[0:dim]
-            distance = np.array(x_plus) - np.array(x_minus)
-            direction = np.argmax(np.abs(distance))
-
             # Create a reference point for the RHS of the equation
-            reference_point = "REFERENCE_POINT_X{}".format(direction + 1)
-            if reference_point not in self.model.parts:
-                self._create_reference_point(direction + 1)
-                apply_dirichlet_BC_to_reference_point(direction + 1)
+            create_reference_point(master, slave)
 
             for dof in range(1, dim + 1):
                 base_name = self.model_name + ".NSET_"
-                ref_set_name = reference_point + ".POINT_BOUNDARY_CONDITIONS"
+                ref_set_name = ("REFERENCE_POINT_{}_{}.REFERENCE_POINT"
+                                .format(master, slave))
                 terms = [[1.0, base_name + slave, dof],
                          [-1.0, base_name + master, dof],
-                         [-1.0*np.sign(distance[direction]),
-                          ref_set_name, dof]]
+                         [-1.0, ref_set_name, dof]]
 
                 self.model.Equation(name="PBC_{}_{}_{}".format(
                     master, slave, dof), terms=terms)
@@ -419,87 +431,6 @@ class AbaqusRVE():
         # Apply constraints also on rotational degrees of freedom
         if self._collect_element_types() <= ELEMENTS_ROTATIONAL_DOFS:
             apply_periodic_rotations()
-
-    def run_analysis(self, field_outputs=["NFORC"], history_outputs=[],
-                     **kwargs):
-        """
-        Create the job and run the finite element analysis in Abaqus.
-
-        Parameters
-        ----------
-        field_outputs : list[str], optional
-            The field outputs that shall be computed. The default is ["NFORC"].
-        history_outputs : list[str], optional
-            The history outputs that shall be computed. The default is [].
-        **kwargs :
-            Additional arguments that will be passed to the Abaqus job. See
-            the documentation of the Abaqus Job class for details.
-
-        Returns
-        -------
-        None.
-
-        """
-        # Remove defaults
-        if "F-Output-1" in self.model.fieldOutputRequests:
-            del self.model.fieldOutputRequests["F-Output-1"]
-        if "H-Output-1" in self.model.historyOutputRequests:
-            del self.model.historyOutputRequests["H-Output-1"]
-
-        # Request the field outputs
-        if len(field_outputs) > 0:
-            for step in self.model.steps.keys():
-                if step == "Initial":
-                    continue
-                self.model.FieldOutputRequest(name="FIELD_OUTPUT_" + step,
-                                              createStepName=step,
-                                              variables=field_outputs)
-
-        # Request the history outputs
-        if len(history_outputs) > 0:
-            for step in self.model.steps.keys():
-                if step == "Initial":
-                    continue
-                self.model.HistoryOutputRequest(name="HISTORY_OUTPUT_" + step,
-                                                createStepName=step,
-                                                variables=field_outputs)
-
-        # Create and run the job
-        job_name = "JOB_" + self.model_name
-        mdb.Job(name=job_name, model=self.model_name, **kwargs)
-        mdb.jobs[job_name].submit()
-        mdb.jobs[job_name].waitForCompletion()
-
-    def open_odb_file(self):
-        """
-        Open the output database file containing the simulation results.
-
-        Returns
-        -------
-        None.
-
-        """
-        odb_file = "JOB_" + self.model_name + ".odb"
-        if not os.path.isfile(odb_file):
-            raise FileNotFoundError(
-                "The file {} does not exist".format(odb_file))
-
-        if odb_file not in session.odbs.keys():
-            session.openOdb(name=odb_file)
-        self._odb = session.odbs[odb_file]
-
-    def close_odb_file(self):
-        """
-        Close the output database file.
-
-        Returns
-        -------
-        None.
-
-        """
-        if self._odb is not None:
-            self._odb.close()
-        self._odb = None
 
     def assign_solid_section(self, section_name, material_name,
                              element_set_name):
@@ -647,6 +578,87 @@ class AbaqusRVE():
                                                    method=N1_COSINES,
                                                    n1=normal)
 
+    def run_analysis(self, field_outputs=["NFORC"], history_outputs=[],
+                     **kwargs):
+        """
+        Create the job and run the finite element analysis in Abaqus.
+
+        Parameters
+        ----------
+        field_outputs : list[str], optional
+            The field outputs that shall be computed. The default is ["NFORC"].
+        history_outputs : list[str], optional
+            The history outputs that shall be computed. The default is [].
+        **kwargs :
+            Additional arguments that will be passed to the Abaqus job. See
+            the documentation of the Abaqus Job class for details.
+
+        Returns
+        -------
+        None.
+
+        """
+        # Remove defaults
+        if "F-Output-1" in self.model.fieldOutputRequests:
+            del self.model.fieldOutputRequests["F-Output-1"]
+        if "H-Output-1" in self.model.historyOutputRequests:
+            del self.model.historyOutputRequests["H-Output-1"]
+
+        # Request the field outputs
+        if len(field_outputs) > 0:
+            for step in self.model.steps.keys():
+                if step == "Initial":
+                    continue
+                self.model.FieldOutputRequest(name="FIELD_OUTPUT_" + step,
+                                              createStepName=step,
+                                              variables=field_outputs)
+
+        # Request the history outputs
+        if len(history_outputs) > 0:
+            for step in self.model.steps.keys():
+                if step == "Initial":
+                    continue
+                self.model.HistoryOutputRequest(name="HISTORY_OUTPUT_" + step,
+                                                createStepName=step,
+                                                variables=field_outputs)
+
+        # Create and run the job
+        job_name = "JOB_" + self.model_name
+        mdb.Job(name=job_name, model=self.model_name, **kwargs)
+        mdb.jobs[job_name].submit()
+        mdb.jobs[job_name].waitForCompletion()
+
+    def open_odb_file(self):
+        """
+        Open the output database file containing the simulation results.
+
+        Returns
+        -------
+        None.
+
+        """
+        odb_file = "JOB_" + self.model_name + ".odb"
+        if not os.path.isfile(odb_file):
+            raise FileNotFoundError(
+                "The file {} does not exist".format(odb_file))
+
+        if odb_file not in session.odbs.keys():
+            session.openOdb(name=odb_file)
+        self._odb = session.odbs[odb_file]
+
+    def close_odb_file(self):
+        """
+        Close the output database file.
+
+        Returns
+        -------
+        None.
+
+        """
+        if self._odb is not None:
+            self._odb.close()
+        self._odb = None
+
     def export_to_vtk(self, path, field_outputs=[], sets=[], radius={},
                       clear=False):
         """
@@ -739,7 +751,9 @@ class AbaqusRVE():
 
                     writer.write(instance_model)
 
-    def get_number_of_frames(self, step_name):
+        self.close_odb_file()
+
+    def get_number_of_frames(self, step_name, close=False):
         """
         Return the number of frames for a given step.
 
@@ -747,6 +761,9 @@ class AbaqusRVE():
         ----------
         step_name : str
             The name of the step.
+        close : bool, optional
+            If True, the ODB file will be closed after getting the number of
+            frames. The default is False.
 
         Returns
         -------
@@ -756,6 +773,7 @@ class AbaqusRVE():
         """
         self.open_odb_file()
         n_frames = len(self.odb.steps[step_name].frames)
+        self.close_odb_file()
         return n_frames
 
     def compute_averaged_stress(self, step_name, frame=-1):
@@ -782,7 +800,7 @@ class AbaqusRVE():
         self.open_odb_file()
 
         dim = 3 if self.model_dimension == THREE_D else 2
-        bounding_box = np.array(self._get_bounding_box())
+        bounding_box = np.array(self.get_bounding_box())
         bounding_box = bounding_box.reshape(2, -1)
         deltas = bounding_box[1] - bounding_box[0]
         deltas = deltas[0:dim]
@@ -864,6 +882,8 @@ class LoadHistory():
 
     Example
     -------
+    >>> from abqhom.abqmodel import LoadHistory
+    >>>
     >>> # Strain history for a plane strain problem
     >>> def strain_path(time):
     >>>     strain = np.zeros(6)
@@ -879,7 +899,6 @@ class LoadHistory():
     """
 
     def __init__(self, time, history):
-
         if history(0).shape != (6,):
             raise ValueError("The argument history must return a " +
                              "numpyp.ndarray of shape (6,).")
@@ -927,6 +946,9 @@ class LoadHistory():
     def __str__(self):
         descr = "LoadHistory with {} data points\n".format(len(self.time_data))
         return descr
+
+    def __repr__(self):
+        return self.__str__()
 
     def as_table(self):
         """

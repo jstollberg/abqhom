@@ -3,6 +3,8 @@ Collection of constants for the abqhom package.
 
 """
 
+from collections import OrderedDict
+
 try:
     import paraqus
     PARAQUS_INSTALLED = True
@@ -16,19 +18,47 @@ EDGE_GROUPS = ["EDGE_1", "EDGE_2", "EDGE_3", "EDGE_4", "EDGE_5", "EDGE_6",
                "EDGE_7", "EDGE_8", "EDGE_9", "EDGE_10", "EDGE_11", "EDGE_12"]
 FACE_GROUPS = ["FACE_1", "FACE_2", "FACE_3", "FACE_4", "FACE_5", "FACE_6"]
 
-# Periodic pairs of groups, keys are masters, values are slaves
-PERIODIC_PAIRS = {"EDGE_1":  "EDGE_3",
-                  "EDGE_3":  "EDGE_7",
-                  "EDGE_7":  "EDGE_5",
+# Periodic pairs of groups, keys are slaves, values are masters
+PERIODIC_PAIRS = {"POINT_2": "POINT_1",
+                  "POINT_3": "POINT_1",
+                  "POINT_4": "POINT_1",
+                  "POINT_5": "POINT_1",
+                  "POINT_6": "POINT_1",
+                  "POINT_7": "POINT_1",
+                  "POINT_8": "POINT_1",
+                  "EDGE_3":  "EDGE_1",
+                  "EDGE_5":  "EDGE_1",
+                  "EDGE_7":  "EDGE_1",
                   "EDGE_2":  "EDGE_4",
-                  "EDGE_4":  "EDGE_8",
-                  "EDGE_8":  "EDGE_6",
-                  "EDGE_9":  "EDGE_10",
-                  "EDGE_10": "EDGE_11",
-                  "EDGE_11": "EDGE_12",
-                  "FACE_1":  "FACE_2",
-                  "FACE_3":  "FACE_4",
-                  "FACE_5":  "FACE_6"}
+                  "EDGE_6":  "EDGE_4",
+                  "EDGE_8":  "EDGE_4",
+                  "EDGE_10": "EDGE_9",
+                  "EDGE_11": "EDGE_9",
+                  "EDGE_12": "EDGE_9",
+                  "FACE_2":  "FACE_1",
+                  "FACE_4":  "FACE_3",
+                  "FACE_6":  "FACE_5"}
+
+# Offset axex between master and slave groups
+SLAVE_GROUPS_OFFSET_AXES = {"POINT_2": [0],
+                            "POINT_3": [0, 1],
+                            "POINT_4": [1],
+                            "POINT_5": [2],
+                            "POINT_6": [0, 2],
+                            "POINT_7": [0, 1, 2],
+                            "POINT_8": [1, 2],
+                            "EDGE_3":  [1],
+                            "EDGE_5":  [2],
+                            "EDGE_7":  [1, 2],
+                            "EDGE_2":  [0],
+                            "EDGE_6":  [0, 2],
+                            "EDGE_8":  [2],
+                            "EDGE_10": [0],
+                            "EDGE_11": [0, 1],
+                            "EDGE_12": [1],
+                            "FACE_2":  [2],
+                            "FACE_4":  [1],
+                            "FACE_6":  [0]}
 
 # Groups forming the boundary of a higher-dimensional group
 BOUNDARY_CONNECTIVITY = {"POINT_1": [],
