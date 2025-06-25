@@ -705,7 +705,6 @@ class Boundary(UserDict):
         if len(args) == 0 and len(kwargs) == 0:
             try:
                 self._build_boundary()
-                self._check_for_periodicity()
             except Exception:
                 raise RuntimeError(
                     "Automatic boundary generation not possible. Please "
