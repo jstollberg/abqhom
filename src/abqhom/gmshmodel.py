@@ -437,6 +437,8 @@ class GmshRVE():
         physical_groups = gmsh.model.get_physical_groups()
         for dim, tag in physical_groups:
             name = gmsh.model.get_physical_name(dim, tag)
+            if len(name) == 0:
+                continue
             if name not in self.boundary:
                 nodes, _ = gmsh.model.mesh.get_nodes_for_physical_group(dim,
                                                                         tag)
@@ -471,11 +473,16 @@ class GmshRVE():
         # Add all sets containing elements of the highest available dimension
         for group in relevant_groups:
             name = gmsh.model.get_physical_name(*group)
+            if len(name) == 0:
+                continue
             entities = gmsh.model.get_entities_for_physical_group(*group)
             for entity in entities:
                 elements = gmsh.model.mesh.get_elements(group[0], entity)[1]
                 elements = [e for el_type in elements for e in el_type]
                 element_sets[name].extend(elements)
+
+        # Make sure the elements only appear once in the sets
+        for name in element_sets.keys():
             element_sets[name] = np.unique(element_sets[name])
 
         # Add a set for all elements in the model
