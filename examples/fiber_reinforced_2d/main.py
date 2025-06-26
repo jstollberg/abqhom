@@ -34,63 +34,31 @@ def create_geometry(model_name, dx=1.0, dy=1.0, fiber_fraction=0.2):
     # Center point should be coordinate system origin
     x = y = 0.0
 
-    # Create the model
-    point_1 = gmsh.model.occ.add_point(x - 0.5*dx, y - 0.5*dy, 0.0)
-    point_2 = gmsh.model.occ.add_point(x + 0.5*dx, y - 0.5*dy, 0.0)
-    point_3 = gmsh.model.occ.add_point(x + 0.5*dx, y + 0.5*dy, 0.0)
-    point_4 = gmsh.model.occ.add_point(x - 0.5*dx, y + 0.5*dy, 0.0)
-    point_5 = gmsh.model.occ.add_point(x - 0.5*dx + radius, y - 0.5*dy, 0.0)
-    point_6 = gmsh.model.occ.add_point(x + 0.5*dx - radius, y - 0.5*dy, 0.0)
-    point_7 = gmsh.model.occ.add_point(x + 0.5*dx, y - 0.5*dy + radius, 0.0)
-    point_8 = gmsh.model.occ.add_point(x + 0.5*dx, y + 0.5*dy - radius, 0.0)
-    point_9 = gmsh.model.occ.add_point(x + 0.5*dx - radius, y + 0.5*dy, 0.0)
-    point_10 = gmsh.model.occ.add_point(x - 0.5*dx + radius, y + 0.5*dy, 0.0)
-    point_11 = gmsh.model.occ.add_point(x - 0.5*dx, y + 0.5*dy - radius, 0.0)
-    point_12 = gmsh.model.occ.add_point(x - 0.5*dx, y - 0.5*dy + radius, 0.0)
+    # Construct basic geometry
+    rectangle = gmsh.model.occ.add_rectangle(x - 0.5*dx, y - 0.5*dy, 0.0,
+                                             dx, dy)
+    circle_1 = gmsh.model.occ.add_disk(x, y, 0.0, radius, radius)
+    circle_2 = gmsh.model.occ.add_disk(x - 0.5*dx, y - 0.5*dy, 0.0,
+                                       radius, radius)
+    circle_3 = gmsh.model.occ.add_disk(x + 0.5*dx, y - 0.5*dy, 0.0,
+                                       radius, radius)
+    circle_4 = gmsh.model.occ.add_disk(x + 0.5*dx, y + 0.5*dy, 0.0,
+                                       radius, radius)
+    circle_5 = gmsh.model.occ.add_disk(x - 0.5*dx, y + 0.5*dy, 0.0,
+                                       radius, radius)
 
-    line_1 = gmsh.model.occ.add_line(point_1, point_5)
-    line_2 = gmsh.model.occ.add_line(point_5, point_6)
-    line_3 = gmsh.model.occ.add_line(point_6, point_2)
-    line_4 = gmsh.model.occ.add_line(point_2, point_7)
-    line_5 = gmsh.model.occ.add_line(point_7, point_8)
-    line_6 = gmsh.model.occ.add_line(point_8, point_3)
-    line_7 = gmsh.model.occ.add_line(point_3, point_9)
-    line_8 = gmsh.model.occ.add_line(point_9, point_10)
-    line_9 = gmsh.model.occ.add_line(point_10, point_4)
-    line_10 = gmsh.model.occ.add_line(point_4, point_11)
-    line_11 = gmsh.model.occ.add_line(point_11, point_12)
-    line_12 = gmsh.model.occ.add_line(point_12, point_1)
-
-    circle_1 = gmsh.model.occ.add_circle_arc(point_5, point_1, point_12)
-    circle_2 = gmsh.model.occ.add_circle_arc(point_7, point_2, point_6)
-    circle_3 = gmsh.model.occ.add_circle_arc(point_9, point_3, point_8)
-    circle_4 = gmsh.model.occ.add_circle_arc(point_11, point_4, point_10)
-    circle_5 = gmsh.model.occ.add_circle(x, y, 0.0, radius)
-
-    loop_1 = gmsh.model.occ.add_curve_loop([line_12, line_1, circle_1])
-    loop_2 = gmsh.model.occ.add_curve_loop([line_3, line_4, circle_2])
-    loop_3 = gmsh.model.occ.add_curve_loop([line_6, line_7, circle_3])
-    loop_4 = gmsh.model.occ.add_curve_loop([line_9, line_10, circle_4])
-    loop_5 = gmsh.model.occ.add_curve_loop([circle_5])
-    loop_6 = gmsh.model.occ.add_curve_loop([
-        line_2, circle_2, line_5, circle_3,
-        line_8, circle_4, line_11, circle_1])
-
-    surface_1 = gmsh.model.occ.add_plane_surface([loop_1])
-    surface_2 = gmsh.model.occ.add_plane_surface([loop_2])
-    surface_3 = gmsh.model.occ.add_plane_surface([loop_3])
-    surface_4 = gmsh.model.occ.add_plane_surface([loop_4])
-    surface_5 = gmsh.model.occ.add_plane_surface([loop_5])
-    surface_6 = gmsh.model.occ.add_plane_surface([loop_6, loop_5])
-
+    # Perform boolean operations
+    fibers, _ = gmsh.model.occ.intersect(
+        [(2, circle_1), (2, circle_2), (2, circle_3), (2, circle_4),
+         (2, circle_5)], [(2, rectangle)], removeTool=False)
+    matrix, _ = gmsh.model.occ.cut([(2, rectangle)], fibers, removeTool=False)
     gmsh.model.occ.synchronize()
 
     # Add physical groups
-    matrix = gmsh.model.add_physical_group(2, [surface_6])
+    matrix = gmsh.model.add_physical_group(2, [i for _, i in matrix])
     gmsh.model.set_physical_name(2, matrix, "MATRIX")
-    fiber = gmsh.model.add_physical_group(2, [surface_1, surface_2, surface_3,
-                                              surface_4, surface_5])
-    gmsh.model.set_physical_name(2, fiber, "FIBER")
+    fibers = gmsh.model.add_physical_group(2, [i for _, i in fibers])
+    gmsh.model.set_physical_name(2, fibers, "FIBER")
 
 
 def isotropic_stiffness_tensor(E, nu):
@@ -173,7 +141,7 @@ for fiber_fraction in np.linspace(min_fiber_fraction,
 
         if debug_geometry:
             unit_cell.show()
-            break
+            sys.exit()
 
         # Load the model into Abaqus
         unit_cell = AbaqusRVE(unit_cell, input_file)
