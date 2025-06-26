@@ -732,14 +732,12 @@ class AbaqusRVE():
         for i in element_sets:
             if not i.startswith("ELSET_"):
                 i = "ELSET_{}".format(i)
-            reader.add_set_export_request(i,
-                                          set_type="ELEMENTS",
+            reader.add_set_export_request(i, set_type="ELEMENTS",
                                           instance_name=self.model_name)
         for i in node_sets:
             if not i.startswith("NSET_"):
                 i = "NSET_{}".format(i)
-            reader.add_set_export_request(i,
-                                          set_type="NODES",
+            reader.add_set_export_request(i, set_type="NODES",
                                           instance_name=self.model_name)
 
         # Run over steps and frames for the export
