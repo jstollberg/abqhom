@@ -156,7 +156,7 @@ for i in range(6):
 
     if debug_geometry:
         gmsh.fltk.run()
-        break
+        sys.exit()
 
     # Load the model into Abaqus
     unit_cell = AbaqusRVE(unit_cell, input_file)
