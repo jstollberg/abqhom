@@ -237,6 +237,7 @@ class AbaqusRVE():
 
     def _collect_element_types(self):
         """Create a set containing the names of all occuring element types."""
+
         all_elements = self.part.sets["ELSET_ALL_ELEMENTS"].elements
         element_types = {str(element.type) for element in all_elements}
         return element_types
@@ -245,6 +246,7 @@ class AbaqusRVE():
                                                  region, step_name, bc_name,
                                                  amplitude_name):
         """Add history-dependent Dirichlet boundary conditions."""
+
         for i in range(3):
             # Ignore z component for 2d models
             if i == 2 and self.model_dimension != THREE_D:
@@ -340,6 +342,7 @@ class AbaqusRVE():
         None.
 
         """
+
         time_history = strain_history.time_data
         strain_history = voigt_to_tensor(strain_history.load_data, "STRAIN")
 
@@ -509,6 +512,7 @@ class AbaqusRVE():
         None.
 
         """
+
         raise NotImplementedError("Shell sections are not supported yet.")
 
     def assign_truss_section(self, section_name, material_name,
@@ -540,6 +544,7 @@ class AbaqusRVE():
 
     def _assign_general_section(self, section_name, element_set_name):
         """Assign a material section to a given element set."""
+
         if element_set_name not in self.part.sets:
             element_set_name = "ELSET_{}".format(element_set_name)
         region = self.part.sets[element_set_name]
@@ -547,6 +552,7 @@ class AbaqusRVE():
 
     def _assign_beam_section_orientation(self, element_set_name):
         """Compute the orientation of beam elements with circular profile."""
+
         if element_set_name not in self.part.sets:
             element_set_name = "ELSET_{}".format(element_set_name)
 
@@ -599,6 +605,7 @@ class AbaqusRVE():
         None.
 
         """
+
         # Remove defaults
         if "F-Output-1" in self.model.fieldOutputRequests:
             del self.model.fieldOutputRequests["F-Output-1"]
@@ -638,6 +645,7 @@ class AbaqusRVE():
         None.
 
         """
+
         odb_file = "JOB_" + self.model_name + ".odb"
         if not os.path.isfile(odb_file):
             raise FileNotFoundError(
@@ -656,12 +664,13 @@ class AbaqusRVE():
         None.
 
         """
+
         if self._odb is not None:
             self._odb.close()
         self._odb = None
 
-    def export_to_vtk(self, path, field_outputs=[], sets=[], radius={},
-                      clear=False):
+    def export_to_vtk(self, path, field_outputs=[], node_sets=[],
+                      element_sets=[], radius={}, clear=False):
         """
         Export the simulation results to VTK file format.
 
@@ -675,11 +684,13 @@ class AbaqusRVE():
         path : str
             Path to the folder in which the files will be stored.
         field_outputs : list[str], optional
-            The field outputs that shall be exported. The default is [].
-        sets : list[str], optional
-            The sets that shall be exported. Invariants can be requested
-            in the form of a list element of length 2, e.g. ("S", "MISES").
-            The default is [].
+            The field outputs that shall be exported. Invariants can be
+            requested in the form of a list element of length 2, e.g.
+            ("S", "MISES"). The default is [].
+        node_sets : list[str], optional
+            The node sets that shall be exported. The default is [].
+        element_set : list[str], optional
+            The element sets that shall be exported. The default is [].
         radius : dict{str, float}, optional
             A map from physical group names to the radius of lattice struts.
             The radius will be exported as a cell field output such that
@@ -693,6 +704,7 @@ class AbaqusRVE():
         None.
 
         """
+
         if not PARAQUS_INSTALLED:
             raise ImportError("Paraqus is needed for the VTK export.")
 
@@ -702,7 +714,7 @@ class AbaqusRVE():
         if self.odb is None:
             self.open_odb_file()
 
-        # Initialize the reader and request fields and sets
+        # Initialize the reader and request fields
         odb_file = "JOB_" + self.model_name + ".odb"
         reader = OdbReader(odb_path=odb_file,
                            model_name=self.model_name,
@@ -713,16 +725,21 @@ class AbaqusRVE():
             else:
                 reader.add_field_export_request(i)
 
+        # Request sets
         for i in radius.keys():
-            if i not in sets:
-                sets.append(i)
-        for i in sets:
-            if i.startswith("NSET"):
-                position = "NODES"
-            elif i.startswith("ELSET"):
-                position = "ELEMENTS"
+            if i not in element_sets:
+                element_sets.append(i)
+        for i in element_sets:
+            if not i.startswith("ELSET_"):
+                i = "ELSET_{}".format(i)
             reader.add_set_export_request(i,
-                                          set_type=position,
+                                          set_type="ELEMENTS",
+                                          instance_name=self.model_name)
+        for i in node_sets:
+            if not i.startswith("NSET_"):
+                i = "NSET_{}".format(i)
+            reader.add_set_export_request(i,
+                                          set_type="NODES",
                                           instance_name=self.model_name)
 
         # Run over steps and frames for the export
@@ -741,6 +758,8 @@ class AbaqusRVE():
                         element_tags = []
                         radius_values = []
                         for i, j in radius.items():
+                            if not i.startswith("ELSET_"):
+                                i = "ELSET_{}".format(i)
                             group_elements = instance_model.elements.groups[
                                 self.model_name + "." + i]
                             element_tags.extend(group_elements)
@@ -772,6 +791,7 @@ class AbaqusRVE():
             The number of frames available in the given step.
 
         """
+
         self.open_odb_file()
         n_frames = len(self.odb.steps[step_name].frames)
         self.close_odb_file()
@@ -798,6 +818,7 @@ class AbaqusRVE():
             The averaged stress tensor in 2d or 3d Voigt notation.
 
         """
+
         self.open_odb_file()
 
         dim = 3 if self.model_dimension == THREE_D else 2
@@ -961,6 +982,7 @@ class LoadHistory():
             The (time, load) pairs.
 
         """
+
         data = []
         for t, v in self:
             data.append((t, v))
