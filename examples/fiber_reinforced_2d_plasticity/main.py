@@ -100,7 +100,7 @@ def create_geometry(model_name, dx=1.0, dy=1.0, fiber_fraction=0.2):
 def load_path(time):
     strain = np.zeros(6)
     strain[0] = np.sin(np.pi*time)
-    strain[1] = np.exp(-((time - 0.5)/0.2)**2)
+    strain[1] = np.exp(-((time - 0.5)/0.2)**2) - np.exp(-(0.5/0.2)**2)
     strain[5] = np.sin(2*np.pi*time)
     strain *= 0.125
     return strain
@@ -145,7 +145,7 @@ model_name = "RVE"
 create_geometry(model_name, dx=dx, dy=dy, fiber_fraction=fiber_fraction)
 unit_cell = GmshRVE(model_name)
 unit_cell.add_periodic_mesh_constraints()
-unit_cell.generate_mesh(element_size=0.4)
+unit_cell.generate_mesh(element_size=0.37)
 input_file = unit_cell.write_abaqus_input()
 
 if debug_geometry:
