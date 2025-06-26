@@ -36,8 +36,9 @@ class AbaqusRVE():
     ----------
     model_name : str
         The name of the model.
-    periodic : bool
-        A flag to mark whether the model is periodic.
+    periodic_mesh : bool
+        A flag to mark whether the model has a mesh with periodicity
+        constraints.
     model_dimension : abaqus.abaqusConstant
         The model dimension. The value can be THREE_D or TWO_D_PLANAR.
     model : abaqus.Model
@@ -97,7 +98,7 @@ class AbaqusRVE():
         del mdb.models[default_model]
 
         self._model_name = gmsh_RVE.model_name
-        self._periodic = gmsh_RVE.periodic
+        self._periodic_mesh = gmsh_RVE.periodic_mesh
         self._model_dimension = dim
         self._model = mdb.models[self._model_name]
         self._part = self._model.parts[self._model_name]
@@ -147,9 +148,9 @@ class AbaqusRVE():
         return self._model_name
 
     @property
-    def periodic(self):
+    def periodic_mesh(self):
         """Flag to mark whether the model is periodic."""
-        return self._periodic
+        return self._periodic_mesh
 
     @property
     def model_dimension(self):
@@ -391,7 +392,7 @@ class AbaqusRVE():
                     self.model.Equation(name="PBC_{}_{}_{}".format(
                         master, slave, dof), terms=terms)
 
-        if not self.periodic:
+        if not self.periodic_mesh:
             raise RuntimeError("The mesh is not suitable for periodic BCs.")
 
         # Define some shortcuts
