@@ -37,8 +37,10 @@ class GmshRVE():
         The name of the underlying Gmsh model.
     boundary : Boundary
         The boundary definition of the RVE.
-    periodic : bool
+    periodic_boundary : bool
         A flag to mark whether the model is periodic.
+    periodic_mesh : bool
+        A flag to mark whether the model has periodic mesh constraints.
     node_sets : dict[str, numpy.ndarray[int]]
         A map from set names to set nodes for user-defined physical groups and
         further default node sets.
@@ -72,10 +74,11 @@ class GmshRVE():
     >>>
     >>> # Create a GmshRVE object and play around with it
     >>> unit_cell = GmshRVE("SQUARE_LATTICE")
+    >>> unit_cell.add_periodic_mesh_constraints()
     >>> unit_cell.generate_mesh()
     >>> unit_cell.build_node_sets()
     >>> unit_cell.build_element_sets()
-    >>> input_file_path = unit_cell.write_to_abaqus_input()
+    >>> input_file_path = unit_cell.write_abaqus_input()
 
     """
 
@@ -90,6 +93,7 @@ class GmshRVE():
         self._node_sets = {}
         self._element_sets = {}
         self._boundary = boundary
+        self._periodic_mesh = False
 
         # Create the boundary map
         if boundary is None:
@@ -128,9 +132,14 @@ class GmshRVE():
         return self._boundary
 
     @property
-    def periodic(self):
+    def periodic_boundary(self):
         """Flag to mark whether the model is periodic."""
         return self._boundary.periodic
+
+    @property
+    def periodic_mesh(self):
+        """Flag to mark whether the model has periodic mesh constraints."""
+        return self._periodic_mesh
 
     @property
     def node_sets(self):
@@ -269,10 +278,6 @@ class GmshRVE():
 
         """
 
-        self.activate()
-        if self.periodic:
-            self._add_periodic_mesh_constraints()
-
         # Set element order
         if element_order not in {1, 2}:
             raise ValueError("Only first-order and second-order elements are "
@@ -293,8 +298,15 @@ class GmshRVE():
         mesh_dim = gmsh.model.get_dimension()
         gmsh.model.mesh.generate(mesh_dim)
 
-    def _add_periodic_mesh_constraints(self):
-        """Add periodic mesh constraints to the Gmsh model."""
+    def add_periodic_mesh_constraints(self):
+        """
+        Add periodic mesh constraints to the Gmsh model.
+
+        Returns
+        -------
+        None.
+
+        """
 
         def translation(axes, edge_lengths):
             """Define the affine matrix for a translation along an axis."""
@@ -306,7 +318,9 @@ class GmshRVE():
                 transformation[a*4 + 3] = edge_lengths[a]
             return transformation
 
-        assert self.periodic
+        if not self.periodic_boundary:
+            raise RuntimeError(
+                "The model does not have a periodic boundary formulation.")
 
         # Define transformations
         bounding_box = np.array(
@@ -326,6 +340,8 @@ class GmshRVE():
                 gmsh.model.mesh.set_periodic(
                     dim, tags_slave, tags_master,
                     translation(SLAVE_GROUPS_OFFSET_AXES[slave], bounding_box))
+
+        self._periodic_mesh = True
 
     def build_node_sets(self):
         """
@@ -641,11 +657,10 @@ class Boundary(UserDict):
         The number of sampling points per spatial direction that will be
         generated to check for periodicity and validity of the model. The
         default is 10.
-    enforce_periodic : bool
-        If True, force the model to assume a periodic boundary formulation.
-        Only set this to True if you really know what you are doing. This
-        option is only valid if a boundary map is provided manually through
-        *args or **kwargs. The default is False.
+    periodic_default : bool
+        If True, assume a periodic boundary formulation in case the automatic
+        periodicity check fails. Only set this to True if you really know what
+        you are doing. The default is False.
     **kwargs
         Keyword arguments that will be passed to the UserDict constructor.
 
@@ -690,7 +705,7 @@ class Boundary(UserDict):
     """
 
     def __init__(self, model_name, *args, sampling_density=10,
-                 enforce_periodic=False, **kwargs):
+                 periodic_default=False, **kwargs):
         if not gmsh.is_initialized():
             gmsh.initialize()
         if model_name not in gmsh.model.list():
@@ -700,15 +715,28 @@ class Boundary(UserDict):
         super().__init__(*args, **kwargs)
         self._model_name = model_name
         self._sampling_density = sampling_density
-        self._periodic = enforce_periodic
 
+        (x_min, y_min, z_min,
+         x_max, y_max, z_max) = self.get_bounding_box_from_points()
+        tol = gmsh.option.get_number("Geometry.Tolerance")
+        model_dim = 3 - np.isclose([x_max - x_min,
+                                    y_max - y_min,
+                                    z_max - z_min], 0.0, atol=tol).sum()
+
+        # Build the boundary automatically
         if len(args) == 0 and len(kwargs) == 0:
             try:
-                self._build_boundary()
+                self._build_boundary(model_dim)
             except Exception:
                 raise RuntimeError(
                     "Automatic boundary generation not possible. Please "
                     "provide the boundary manually.")
+
+        # Rearrange boundary map in case of a periodic geometry
+        try:
+            self._check_for_periodicity(model_dim)
+        except Exception:
+            self._periodic = periodic_default
 
         # Add missing groups as empty groups
         for key in POINT_GROUPS + EDGE_GROUPS + FACE_GROUPS:
@@ -800,7 +828,7 @@ class Boundary(UserDict):
 
         return x_min, y_min, z_min, x_max, y_max, z_max
 
-    def _build_boundary(self):
+    def _build_boundary(self, model_dim):
         """Build the boundary information for the requested Gmsh model."""
 
         # Activate the model
@@ -816,9 +844,6 @@ class Boundary(UserDict):
         group_to_coords = self.get_group_coordinate_identifiers()
         (x_min, y_min, z_min,
          x_max, y_max, z_max) = self.get_bounding_box_from_points()
-        model_dim = 3 - np.isclose([x_max - x_min,
-                                    y_max - y_min,
-                                    z_max - z_min], 0.0, atol=tol).sum()
 
         # Initialize boundary map
         for group_name in group_to_coords.keys():
@@ -873,9 +898,6 @@ class Boundary(UserDict):
                 to_remove.update(downward & set(group_dimtags))
 
             self[group_name] = list(set(group_dimtags) - to_remove)
-
-        # Rearrange boundary map in case of a periodic geometry
-        self._check_for_periodicity(model_dim)
 
     def get_group_coordinate_identifiers(self):
         """Get all spatial coordinates being part of a point, edge or face."""
