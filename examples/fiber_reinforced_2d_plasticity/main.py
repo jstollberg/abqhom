@@ -126,7 +126,7 @@ for name in ("MATRIX", "FIBER"):
     material.Elastic(table=[[E, nu]])
     material.Plastic(table=[[sig_y + H*eps_p, eps_p] for eps_p in
                             np.linspace(0.0, 5.0, 10)])
-    unit_cell.assign_solid_section(name, name, "ELSET_" + name)
+    unit_cell.assign_solid_section(name, name, name)
 
 # Define load step
 step_name = "LOAD"
@@ -151,5 +151,5 @@ if export_vtk:
     print("Running VTK export...")
     unit_cell.export_to_vtk(vtk_path,
                             field_outputs=["U", ("S", "MISES"), "PEEQ"],
-                            sets=["ELSET_MATRIX", "ELSET_FIBER"])
+                            element_sets=["MATRIX", "FIBER"])
 print("*** Finished ***")

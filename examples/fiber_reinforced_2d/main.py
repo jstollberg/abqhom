@@ -152,7 +152,7 @@ for fiber_fraction in np.linspace(min_fiber_fraction,
             E, nu = parameters[name]
             material = unit_cell.model.Material(name=name)
             material.Elastic(table=[[E, nu]])
-            unit_cell.assign_solid_section(name, name, "ELSET_" + name)
+            unit_cell.assign_solid_section(name, name, name)
 
         # Define load step
         step_name = "LOAD"
@@ -175,7 +175,7 @@ for fiber_fraction in np.linspace(min_fiber_fraction,
 
         # Export to VTK
         unit_cell.export_to_vtk(vtk_path, field_outputs=["U", ("S", "MISES")],
-                                sets=["ELSET_MATRIX", "ELSET_FIBER"])
+                                element_sets=["MATRIX", "FIBER"])
 
     print("\n------------------------------")
     print("Effective constitutive matrix:")

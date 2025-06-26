@@ -162,7 +162,7 @@ for i in range(6):
         E, nu, d = parameters[name]
         material = unit_cell.model.Material(name=name)
         material.Elastic(table=[[E, nu]])
-        unit_cell.assign_beam_section(name, name, "ELSET_" + name, 0.5*d)
+        unit_cell.assign_beam_section(name, name, name, 0.5*d)
 
     # Define load step
     step_name = "LOAD"
@@ -180,8 +180,8 @@ for i in range(6):
     # Export to VTK
     unit_cell.export_to_vtk(
         vtk_path, field_outputs=["U"],
-        radius={"ELSET_CUBIC": 0.5*parameters["CUBIC"][2],
-                "ELSET_FCC": 0.5*parameters["FCC"][2]})
+        radius={"CUBIC": 0.5*parameters["CUBIC"][2],
+                "FCC": 0.5*parameters["FCC"][2]})
 
 print("\n------------------------------")
 print("Effective constitutive matrix:")

@@ -166,7 +166,7 @@ for i in range(6):
         E, nu = parameters[name]
         material = unit_cell.model.Material(name=name)
         material.Elastic(table=[[E, nu]])
-        unit_cell.assign_solid_section(name, name, "ELSET_" + name)
+        unit_cell.assign_solid_section(name, name, name)
 
     # Define load step
     step_name = "LOAD"
@@ -189,7 +189,7 @@ for i in range(6):
 
     # Export to VTK
     unit_cell.export_to_vtk(vtk_path, field_outputs=["U", ("S", "MISES")],
-                            sets=["ELSET_MATRIX", "ELSET_INCLUSION"])
+                            element_sets=["MATRIX", "INCLUSION"])
 
 gmsh.finalize()
 
