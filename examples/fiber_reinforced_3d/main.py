@@ -181,6 +181,7 @@ for fiber_fraction in np.linspace(min_fiber_fraction,
         create_geometry(model_name, dx=dx, dy=dy, dz=dz,
                         fiber_fraction=fiber_fraction)
         unit_cell = GmshRVE(model_name)
+        unit_cell.add_periodic_mesh_constraints()
         unit_cell.generate_mesh(element_size=1.25)
         input_file = unit_cell.write_abaqus_input()
 

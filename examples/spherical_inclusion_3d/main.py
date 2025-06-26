@@ -149,8 +149,8 @@ for i in range(6):
     model_name = "RVE_{}".format(i + 1)
     boundary = create_geometry(model_name, dx=dx, dy=dy, dz=dz,
                                inclusion_fraction=inclusion_fraction)
-    unit_cell = GmshRVE(model_name, Boundary(model_name, boundary,
-                                             enforce_periodic=True))
+    unit_cell = GmshRVE(model_name, Boundary(model_name, boundary))
+    unit_cell.add_periodic_mesh_constraints()
     unit_cell.generate_mesh(element_size=1.25)
     input_file = unit_cell.write_abaqus_input()
 

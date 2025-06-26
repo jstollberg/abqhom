@@ -125,6 +125,7 @@ for i in range(6):
     model_name = "RUC_{}".format(i + 1)
     create_geometry(model_name, dx=dx, dy=dy, dz=dz)
     unit_cell = GmshRVE(model_name)
+    unit_cell.add_periodic_mesh_constraints()
     unit_cell.generate_mesh(element_size=element_size)
     input_file = unit_cell.write_abaqus_input()
 
