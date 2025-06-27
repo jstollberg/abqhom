@@ -146,7 +146,7 @@ for i in range(6):
 
     # Apply periodic boundary conditions and run analysis
     unit_cell.apply_periodic_BC(step_name, history)
-    unit_cell.run_analysis(field_outputs=["NFORC", "U"])
+    unit_cell.run_analysis(field_outputs=["NFORC", "U", "UR"])
     stress = unit_cell.compute_averaged_stress(step_name)
     print("Stress = " + str(stress.round(4).tolist()))
 
@@ -155,7 +155,7 @@ for i in range(6):
 
     # Export to VTK
     unit_cell.export_to_vtk(
-        vtk_path, field_outputs=["U"],
+        vtk_path, field_outputs=["U", "UR"],
         radius={"CUBIC": 0.5*parameters["CUBIC"][2],
                 "BCC": 0.5*parameters["BCC"][2]})
 
