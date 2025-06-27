@@ -14,7 +14,7 @@ from abaqusConstants import (THREE_D, TWO_D_PLANAR, DEFORMABLE_BODY, ON, UNSET,
                              CARTESIAN, N1_COSINES, DURING_ANALYSIS, TOTAL)
 from abqhom.constants import (POINT_GROUPS, EDGE_GROUPS, FACE_GROUPS,
                               PERIODIC_PAIRS, ELEMENTS_ROTATIONAL_DOFS,
-                              PARAQUS_INSTALLED)
+                              PARAQUS_INSTALLED, ELEMENTS_WARPING_DOFS)
 
 if PARAQUS_INSTALLED:
     from paraqus.abaqus import OdbReader
@@ -377,8 +377,21 @@ class AbaqusRVE():
                 time_history, u_history, region, initialization_step, bc_name,
                 amplitude_name)
 
-        def apply_periodic_rotations():
-            """Apply periodic boundary conditions to rotational DOFs."""
+        def apply_higher_order_constraints():
+            """Apply periodic boundary conditions to higher-order DOFs."""
+
+            # Collect all element types present in the model
+            all_element_types = self._collect_element_types()
+
+            # Collect the dofs that need to be constrained
+            dofs = []
+            if len(all_element_types & ELEMENTS_ROTATIONAL_DOFS) > 0:
+                rotational_dofs = ([4, 5, 6] if self.model_dimension == THREE_D
+                                   else [6])
+                dofs.extend(rotational_dofs)  # Rotations
+
+            if len(all_element_types & ELEMENTS_WARPING_DOFS) > 0:
+                dofs.append(7)  # Warping
 
             # Apply equation constraints to rotational degrees of freedom
             for slave, master in PERIODIC_PAIRS.items():
@@ -432,9 +445,8 @@ class AbaqusRVE():
                 self.model.Equation(name="PBC_{}_{}_{}".format(
                     master, slave, dof), terms=terms)
 
-        # Apply constraints also on rotational degrees of freedom
-        if self._collect_element_types() <= ELEMENTS_ROTATIONAL_DOFS:
-            apply_periodic_rotations()
+        # Apply constraints also to rotations and warping
+        apply_higher_order_constraints()
 
     def assign_solid_section(self, section_name, material_name,
                              element_set_name):
