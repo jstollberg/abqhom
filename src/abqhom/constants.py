@@ -88,21 +88,30 @@ BOUNDARY_CONNECTIVITY = {"POINT_1": [],
                          "FACE_5":  ["EDGE_9", "EDGE_4", "EDGE_12", "EDGE_8"],
                          "FACE_6":  ["EDGE_10", "EDGE_2", "EDGE_11", "EDGE_6"]}
 
-# Default map from Gmsh element types to Abaqus element types
-ABAQUS_ELEMENT_TYPES = {1:  "B23",    # 2-node line
-                        2:  "CPE3",   # 3-node triangle
-                        3:  "CPE4",   # 4-node quadrangle
-                        4:  "C3D4",   # 4-node tetrahedron
-                        5:  "C3D8",   # 8-node hexahedron
-                        6:  "C3D6",   # 6-node prism
-                        7:  "C3D5",   # 5-node pyramid
-                        8:  "B22",    # 3-node second-order line
-                        9:  "CPE6",   # 6-node second order triangle
-                        11: "C3D10",  # 10-node second-order tetrahedron
-                        16: "CPE8",   # 8-node second-order quadrangle
-                        17: "C3D20",  # 20-node second-order hexahedron
-                        18: "C3D15",  # 15-node second-order prism
-                        }
+# Default map from Gmsh element types to Abaqus element types for 2d models
+ABAQUS_ELEMENT_TYPES_2D = {1:  "B23",    # 2-node line
+                           2:  "CPE3",   # 3-node triangle
+                           3:  "CPE4",   # 4-node quadrangle
+                           8:  "B22",    # 3-node second-order line
+                           9:  "CPE6",   # 6-node second order triangle
+                           16: "CPE8",   # 8-node second-order quadrangle
+                           }
+
+# Default map from Gmsh element types to Abaqus element types for 3d models
+ABAQUS_ELEMENT_TYPES_3D = {1:  "B33",     # 2-node line
+                           2:  "S3",      # 3-node triangle
+                           3:  "S4",      # 4-node quadrangle
+                           4:  "C3D4",    # 4-node tetrahedron
+                           5:  "C3D8",    # 8-node hexahedron
+                           6:  "C3D6",    # 6-node prism
+                           7:  "C3D5",    # 5-node pyramid
+                           8:  "B32",     # 3-node second-order line
+                           9:  "STRI65",  # 6-node second order triangle
+                           11: "C3D10",   # 10-node second-order tetrahedron
+                           16: "S8R5",    # 8-node second-order quadrangle
+                           17: "C3D20",   # 20-node second-order hexahedron
+                           18: "C3D15",   # 15-node second-order prism
+                           }
 
 # Map from the order of the connectivity list from Gmsh to Abaqus
 ABAQUS_CONNECTIVITY_ORDER = {
@@ -125,9 +134,16 @@ ABAQUS_CONNECTIVITY_ORDER = {
 
 # Abaqus element types with rotational degrees of freedom
 ELEMENTS_ROTATIONAL_DOFS = {
-    # Beam elements
+    # Beams in a plane
     "B21", "B21H", "B22", "B22H", "B23", "B23H", "PIPE21", "PIPE21H", "PIPE22",
     "PIPE22H",
+
+    # Beams in space
+    "B31", "B31H", "B32", "B32H", "B33", "B33H", "PIPE31", "PIPE31H", "PIPE32",
+    "PIPE32H",
+
+    # Open-section beams in space
+    "B31OS", "B31OSH", "B32OS", "B32OSH",
 
     # Frame elements
     "FRAME2D", "FRAME3D",
@@ -136,6 +152,11 @@ ELEMENTS_ROTATIONAL_DOFS = {
     "ELBOW31", "ELBOW32", "ELBOW31B", "ELBOW31C",
 
     # Shell elements
-    "STRI3", "S3", "S3R", "S3RS", "STRI64", "S4", "S4R", "S4RSW", "S4R5",
-    "S8R", "S8R5", "S9R5"
+    "STRI3", "S3", "S3R", "S3RS", "STRI65", "S4", "S4R", "S4RS", "S4RSW",
+    "S4R5", "S8R", "S8R5", "S9R5"
+    }
+
+# Abaqus element types with warping degrees of freedom
+ELEMENTS_WARPING_DOFS = {
+    "B31OS", "B31OSH", "B32OS", "B32OSH"
     }
