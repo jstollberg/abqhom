@@ -9,8 +9,9 @@ from collections import UserDict
 import numpy as np
 import gmsh
 from abqhom.constants import (POINT_GROUPS, EDGE_GROUPS, FACE_GROUPS,
-                              PERIODIC_PAIRS, ABAQUS_ELEMENT_TYPES,
-                              ABAQUS_CONNECTIVITY_ORDER, BOUNDARY_CONNECTIVITY,
+                              PERIODIC_PAIRS, ABAQUS_ELEMENT_TYPES_2D,
+                              ABAQUS_ELEMENT_TYPES_3D, BOUNDARY_CONNECTIVITY,
+                              ABAQUS_CONNECTIVITY_ORDER,
                               SLAVE_GROUPS_OFFSET_AXES)
 
 
@@ -529,14 +530,18 @@ class GmshRVE():
         self.activate()
 
         # Load default element type map
-        if el_type_map is None:
-            el_type_map = ABAQUS_ELEMENT_TYPES
+        if el_type_map is None and self.model_dimension == 2:
+            el_type_map = ABAQUS_ELEMENT_TYPES_2D
+        elif el_type_map is None and self.model_dimension == 3:
+            el_type_map = ABAQUS_ELEMENT_TYPES_3D
 
         # Get node information
         node_tags, node_coords, _ = gmsh.model.mesh.get_nodes(
             gmsh.model.get_dimension(), includeBoundary=True)
         node_tags = np.array(node_tags, dtype=int)
         node_coords = np.array(node_coords, dtype=float).reshape(-1, 3)
+        if self.model_dimension == 2:
+            node_coords[:, 2] = 0.0
 
         # Get element information
         el_types, el_tags, conn = gmsh.model.mesh.getElements(
