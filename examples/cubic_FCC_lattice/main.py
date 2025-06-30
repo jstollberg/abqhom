@@ -13,6 +13,7 @@ for i in (gmsh_path, abqhom_path, paraqus_path):
 import gmsh
 
 # Import homogenization tools
+from abqhom.utils import voigt_to_tensor, tensor_to_voigt
 from abqhom.gmshmodel import GmshRVE
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
 
@@ -140,10 +141,12 @@ for i in range(6):
     def strain_history(time):
         strain = np.zeros(6)
         strain[i] = strain_magnitude
+        strain = voigt_to_tensor(strain, "STRAIN")
         return time*strain
 
     history = LoadHistory(np.array([0.0, 1.0]), strain_history)
-    print("Strain = " + str(history(1.0).round(3).tolist()))
+    print("Strain = " + str(tensor_to_voigt(history(1.0), "STRAIN")
+                            .round(3).tolist()))
 
     # Create geometry in Gmsh and dump it to an input file
     model_name = "RUC_{}".format(i + 1)
@@ -170,16 +173,17 @@ for i in range(6):
 
     # Apply periodic boundary conditions and run analysis
     unit_cell.apply_periodic_BC(step_name, history)
-    unit_cell.run_analysis(field_outputs=["NFORC", "U"])
+    unit_cell.run_analysis(field_outputs=["NFORC", "U", "UR"])
     stress = unit_cell.compute_averaged_stress(step_name)
-    print("Stress = " + str(stress.round(4).tolist()))
+    stress = tensor_to_voigt(stress, "STRESS")
+    print("Stress = " + str(stress.round(3).tolist()))
 
     # Compute effective stiffness tensor
     C[:, i] = stress/strain_magnitude
 
     # Export to VTK
     unit_cell.export_to_vtk(
-        vtk_path, field_outputs=["U"],
+        vtk_path, field_outputs=["U", "UR"],
         radius={"CUBIC": 0.5*parameters["CUBIC"][2],
                 "FCC": 0.5*parameters["FCC"][2]})
 

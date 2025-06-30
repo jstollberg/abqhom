@@ -14,9 +14,9 @@ for i in (gmsh_path, abqhom_path, paraqus_path):
 import gmsh
 
 # Import homogenization tools
+from abqhom.utils import voigt_to_tensor
 from abqhom.gmshmodel import GmshRVE
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
-from abqhom.utils import reuss, voigt, export_to_csv_file
 
 # Import Abaqus stuff
 from abaqusConstants import FIXED
@@ -71,6 +71,7 @@ def load_path(time):
     strain[1] = np.exp(-((time - 0.5)/0.2)**2) - np.exp(-(0.5/0.2)**2)
     strain[5] = np.sin(2*np.pi*time)
     strain *= 0.125
+    strain = voigt_to_tensor(strain, "STRAIN")
     return strain
 
 
