@@ -193,7 +193,7 @@ class GmshRVE():
 
         Returns
         -------
-        dict[str, NDArray[np.int_]]
+        dict[str, ndarray]
             The node sets. Keys are the set names and values are the
             nodes in the respective set.
 
@@ -208,7 +208,7 @@ class GmshRVE():
 
         Returns
         -------
-        dict[str, NDArray[np.int_]]
+        dict[str, ndarray]
             The element sets. Keys are the set names and values are the
             elements in the respective set.
 
@@ -1202,7 +1202,7 @@ class Boundary(UserDict, object):
 
         Returns
         -------
-        coords : NDArray[np.float64]
+        coords : ndarray
             The spatial coordinates of the sample points.
 
         """
