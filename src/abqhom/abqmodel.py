@@ -7,7 +7,6 @@ computational homogenization with Abaqus.
 import os
 import numpy as np
 
-from abqhom.utils import voigt_to_tensor, tensor_to_voigt
 from abqhom.constants import (POINT_GROUPS, EDGE_GROUPS, FACE_GROUPS,
                               PERIODIC_PAIRS, ELEMENTS_ROTATIONAL_DOFS,
                               PARAQUS_INSTALLED, ELEMENTS_WARPING_DOFS)
@@ -453,7 +452,7 @@ class AbaqusRVE():
                 + "Please use periodic boundary conditions.")
 
         time_history = strain_history.time_data
-        strain_history = voigt_to_tensor(strain_history.load_data, "STRAIN")
+        strain_history = strain_history.load_data
 
         # Apply Dirichlet boundary conditions on all boundary nodes
         boundary_nodes = self.instance.sets["NSET_BOUNDARY_NODES"]
@@ -517,7 +516,7 @@ class AbaqusRVE():
                 "Boundary conditions have already been initialized.")
 
         time_history = strain_history.time_data
-        strain_history = voigt_to_tensor(strain_history.load_data, "STRAIN")
+        strain_history = strain_history.load_data
 
         def create_reference_point(master, slave):
             """
@@ -1100,8 +1099,6 @@ class AbaqusRVE():
 
         # Divide the stress by the RVE volume
         stress /= np.prod(deltas)
-        stress = 0.5*(stress + stress.T)
-        stress = tensor_to_voigt(stress, "STRESS")
 
         self.close_odb_file()
         return stress
@@ -1117,9 +1114,8 @@ class LoadHistory():
         The time data points of the load history
     history : Callable
         The stress or strain history function having a point of time as
-        input and returns the load in 3d Voigt notation, i.e. the order
-        of the data is [xx, yy, zz, yz, xz, xy]. The shear components
-        for strains must be multiplied by 2.
+        input and returns the load in full 3d tensor notation, i.e. in
+        form of a (3, 3) array.
 
     Attributes
     ----------
@@ -1131,6 +1127,7 @@ class LoadHistory():
 
     Example
     -------
+    >>> from abqhom.utils import voigt_to_tensor
     >>> from abqhom.abqmodel import LoadHistory
     >>>
     >>> # Strain history for a plane strain problem
@@ -1139,6 +1136,7 @@ class LoadHistory():
     >>>     strain[0] = np.sin(np.pi*time)
     >>>     strain[1] = time**2
     >>>     strain[5] = np.sin(2*np.pi*time)
+    >>>     strain = voigt_to_tensor(strain, "STRAIN")
     >>>     return strain
     >>>
     >>> time = np.linspace(0.0, 1.0, 50)
@@ -1149,13 +1147,12 @@ class LoadHistory():
 
     def __init__(
             self, time, history):
-        if history(0).shape != (6,):
-            raise ValueError("The argument history must return a " +
-                             "numpyp.ndarray of shape (6,).")
-
         self._time = np.array(time)
         self._history = history
         self._index = 0
+
+        # Test return value of history
+        self[self._index]
 
     @property
     def time_data(self):
@@ -1195,8 +1192,7 @@ class LoadHistory():
         if self._index >= len(self.time_data):
             raise StopIteration
 
-        time = self.time_data[self._index]
-        load = self(time)
+        time, load = self[self._index]
         self._index += 1
 
         return time, load
@@ -1207,7 +1203,13 @@ class LoadHistory():
 
     def __getitem__(self, i):
         time = self.time_data[i]
-        load = self(time)
+        load = np.array(self(time))
+
+        if load.shape != (3, 3):
+            raise ValueError(
+                "The history function must return the load in full 3d tensor "
+                "notation as a (3, 3) array.")
+
         return time, load
 
     def __call__(self, time):
@@ -1226,13 +1228,13 @@ class LoadHistory():
 
         Returns
         -------
-        data : tuple[tuple[float, float]]
+        data : tuple[tuple[float, ndarray]]
             The (time, load) pairs.
 
         """
 
         data = []
         for t, v in self:
-            data.append((t, v))
+            data.append((t, np.array(v)))
         data = tuple(data)
         return data
