@@ -13,15 +13,15 @@ def voigt_to_tensor(voigt_tensor, quantity):
 
     Parameters
     ----------
-    voigt_tensor : numpy.ndarray[float]
+    voigt_tensor : ndarray
         The tensor in Voigt notation.
     quantity : str
-        The quantity that is described by the tensor. Currently supported are
-        'STRESS' and 'STRAIN'.
+        The quantity that is described by the tensor. Currently
+        supported are 'STRESS' and 'STRAIN'.
 
     Returns
     -------
-    tensor : numpy.ndarray[float]
+    tensor : ndarray
         The tensor in symbolic tensor notation.
 
     """
@@ -67,15 +67,15 @@ def tensor_to_voigt(tensor, quantity):
 
     Parameters
     ----------
-    tensor : numpy.ndarray[float]
+    tensor : ndarray
         The tensors in symbolic tensor notation.
     quantity : str
-        The quantity that is described by the tensor. Currently supported are
-        'STRESS' and 'STRAIN'.
+        The quantity that is described by the tensor. Currently
+        supported are 'STRESS' and 'STRAIN'.
 
     Returns
     -------
-    tensor : numpy.ndarray[float]
+    tensor : ndarray
         The tensors in Voigt notation.
 
     """
@@ -112,7 +112,7 @@ def tensor_to_voigt(tensor, quantity):
         else:
             raise ValueError("The shape of the provided tensor is invalid.")
 
-    voigt = np.array(voigt)
+    voigt = np.array(voigt, dtype=float)
     if voigt.shape[0] == 1:
         voigt = voigt[0]
 
@@ -127,14 +127,14 @@ def reuss(volume_fraction, C1, C2):
     ----------
     volume_fraction : float
         Volume fraction of material 1.
-    C1 : numpy.ndarray[float]
+    C1 : ndarray
         Constitutive tensor of material 1 in Voigt notation.
-    C2 : numpy.ndarray[float]
+    C2 : ndarray
         Constitutive tensor of material 2 in Voigt notation.
 
     Returns
     -------
-    C : numpy.ndarray[float]
+    C : ndarray
         The homogenized constitutive tensor.
 
     """
@@ -152,18 +152,18 @@ def voigt(volume_fraction, C1, C2):
     ----------
     volume_fraction : float
         Volume fraction of material 1.
-    C1 : numpy.ndarray[float]
+    C1 : ndarray
         Constitutive tensor of material 1 in Voigt notation.
-    C2 : numpy.ndarray[float]
+    C2 : ndarray
         Constitutive tensor of material 2 in Voigt notation.
 
     Returns
     -------
-    C : numpy.ndarray[float]
+    C : ndarray
         The homogenized constitutive tensor.
 
     """
-    C = volume_fraction*C1 + (1 - volume_fraction)*C2
+    C = (volume_fraction*C1) + (1 - volume_fraction)*C2
     return C
 
 
@@ -173,7 +173,7 @@ def export_to_csv_file(C, path):
 
     Parameters
     ----------
-    C : numpy.ndarray[float]
+    C : ArrayLike
         The array to export.
     path : str
         The file path.
@@ -196,12 +196,12 @@ def read_csv_file(path, dtype=None):
     ----------
     path : str
         Path to the file.
-    dtype : type, optional
+    dtype : numpy.dtype, optional
         Data type of the array. The default is None.
 
     Returns
     -------
-    array : numpy.ndarray[dtype]
+    array : ndarray
         The array containing the values from the csv file.
 
     """

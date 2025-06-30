@@ -6,15 +6,17 @@ computational homogenization with Abaqus.
 
 import os
 import numpy as np
+
 from abqhom.utils import voigt_to_tensor, tensor_to_voigt
+from abqhom.constants import (POINT_GROUPS, EDGE_GROUPS, FACE_GROUPS,
+                              PERIODIC_PAIRS, ELEMENTS_ROTATIONAL_DOFS,
+                              PARAQUS_INSTALLED, ELEMENTS_WARPING_DOFS)
+
 from abaqus import Mdb, mdb, session
 from regionToolset import Region
 from mesh import MeshNodeArray, MeshElementArray
 from abaqusConstants import (THREE_D, TWO_D_PLANAR, DEFORMABLE_BODY, ON, UNSET,
                              CARTESIAN, N1_COSINES, DURING_ANALYSIS, TOTAL)
-from abqhom.constants import (POINT_GROUPS, EDGE_GROUPS, FACE_GROUPS,
-                              PERIODIC_PAIRS, ELEMENTS_ROTATIONAL_DOFS,
-                              PARAQUS_INSTALLED, ELEMENTS_WARPING_DOFS)
 
 if PARAQUS_INSTALLED:
     from paraqus.abaqus import OdbReader
@@ -39,16 +41,15 @@ class AbaqusRVE():
     periodic_mesh : bool
         A flag to mark whether the model has a mesh with periodicity
         constraints.
-    model_dimension : abaqus.abaqusConstant
+    model_dimension : SymbolicConstant
         The model dimension. The value can be THREE_D or TWO_D_PLANAR.
-    model : abaqus.Model
+    model : Model
         The internal Abaqus representation of the model.
-        element sets
-    part : abaqus.Part
+    part : Part
         The internal Abaqus representation of the RVE part.
-    instance : abaqus.PartInstance
+    instance : PartInstance
         The internal representation of the RVE part in the assembly.
-    odb : abaqus.Odb
+    odb : Odb
         The Abaqus output database containing the analysis results.
 
     Example
@@ -71,7 +72,7 @@ class AbaqusRVE():
     >>> # Assign material and sections
     >>> material = unit_cell.model.Material(name="Steel")
     >>> material.Elastic(table=[[210.0, 0.3]])
-    >>> unit_cell.assign_solid_section("Steel", "Steel", "ELSET_ALL_ELEMENTS")
+    >>> unit_cell.assign_solid_section("Steel", "Steel", "ALL_ELEMENTS")
     >>>
     >>> # Generate assembly and step
     >>> unit_cell.model.StaticStep(name="Load", previous="Initial")
@@ -100,6 +101,7 @@ class AbaqusRVE():
         self._model_name = gmsh_RVE.model_name
         self._periodic_mesh = gmsh_RVE.periodic_mesh
         self._model_dimension = dim
+        self._bc_initialized = False
         self._model = mdb.models[self._model_name]
         self._part = self._model.parts[self._model_name]
         self._instance = None
@@ -144,41 +146,116 @@ class AbaqusRVE():
 
     @property
     def model_name(self):
-        """The name of the Abaqus model."""
+        """
+        The internal name of the Abaqus model.
+
+        Returns
+        -------
+        str
+            The model name.
+
+        """
+
         return self._model_name
 
     @property
     def periodic_mesh(self):
-        """Flag to mark whether the model is periodic."""
+        """
+        A flag to mark whether the mesh has periodicity constraints.
+
+        Returns
+        -------
+        bool
+            True if the mesh is periodic, False otherwise.
+
+        """
+
         return self._periodic_mesh
 
     @property
     def model_dimension(self):
-        """The geometric dimensionality of the Abaqus model."""
+        """
+        The geometric dimension of the Abaqus model.
+
+        Returns
+        -------
+        SymbolicConstant
+            The dimension, i.e. THREE_D or TWO_D_PLANAR.
+
+        """
+
         return self._model_dimension
 
     @property
     def model(self):
-        """A shortcut to the RVE Abaqus model."""
+        """
+        The internal Abaqus representation of the model.
+
+        Returns
+        -------
+        Model
+            The Abaqus model.
+
+        """
+
         return self._model
 
     @property
     def part(self):
-        """A shortcut to the RVE part in the Abaqus model."""
+        """
+        The internal Abaqus representation of the RVE part.
+
+        Returns
+        -------
+        Part
+            The RVE Abaqus part.
+
+        """
+
         return self._part
 
     @property
     def instance(self):
-        """A shortcut to the RVE part instance in the Abaqus model."""
+        """
+        The internal Abaqus representation of the RVE part instance.
+
+        Returns
+        -------
+        PartInstance
+            The RVE Abaqus part instance.
+
+        """
+
         return self._instance
 
     @property
     def odb(self):
-        """A shortcut to the output data base file resulting from the model."""
+        """
+        The Abaqus output database containing the analysis results.
+
+        Returns
+        -------
+        Odb
+            The output database.
+
+        """
         return self._odb
 
     def _add_node_sets(self, node_sets):
-        """Add all relevant node sets to the Abaqus model."""
+        """
+        Add node sets to the Abaqus model.
+
+        Parameters
+        ----------
+        node_sets : dict[str, Iterable]
+            The node sets with the set names as keys and the set nodes
+            as values.
+
+        Returns
+        -------
+        None.
+
+        """
 
         for set_name, set_items in node_sets.items():
             set_name = "NSET_" + str(set_name)
@@ -191,7 +268,20 @@ class AbaqusRVE():
                                             unsorted=True)
 
     def _add_element_sets(self, element_sets):
-        """Add all relevant element sets to the Abaqus model."""
+        """
+        Add element sets to the Abaqus model.
+
+        Parameters
+        ----------
+        element_sets : dict[str, Iterable]
+            The element sets with the set names as keys and the set
+            elements as values.
+
+        Returns
+        -------
+        None.
+
+        """
 
         for set_name, set_items in element_sets.items():
             set_name = "ELSET_" + str(set_name)
@@ -236,7 +326,15 @@ class AbaqusRVE():
         return x_min, y_min, z_min, x_max, y_max, z_max
 
     def _collect_element_types(self):
-        """Create a set containing the names of all occuring element types."""
+        """
+        Create a set containing the names of all occuring element types.
+
+        Returns
+        -------
+        element_types : set[str]
+            The string representations of all element types in the mesh.
+
+        """
 
         all_elements = self.part.sets["ELSET_ALL_ELEMENTS"].elements
         element_types = {str(element.type) for element in all_elements}
@@ -245,7 +343,30 @@ class AbaqusRVE():
     def _add_dirichlet_from_displacement_history(self, time_history, u_history,
                                                  region, step_name, bc_name,
                                                  amplitude_name):
-        """Add history-dependent Dirichlet boundary conditions."""
+        """
+        Add history-dependent Dirichlet boundary conditions.
+
+        Parameters
+        ----------
+        time_history : ndarray
+            The time data points of the displacement history.
+        u_history : ndarray
+            The displacement data points of the displacement history.
+        region : Region
+            The node region for applying the boundary conditions.
+        step_name : str
+            The name of the step in which the boundary conditions will
+            be initialized.
+        bc_name : str
+            The name of the boundary condition.
+        amplitude_name : str
+            The name of the displacement history amplitude.
+
+        Returns
+        -------
+        None.
+
+        """
 
         for i in range(3):
             # Ignore z component for 2d models
@@ -272,18 +393,40 @@ class AbaqusRVE():
                                       amplitude=amplitude_name,
                                       u1=u[0], u2=u[1], u3=u[2])
 
-    def apply_uniform_traction_BC(self, step_name, stress_history):
+    def _apply_uniform_traction_BC(self, initialization_step, stress_history):
+        """This method is not yet implemented."""
+
         raise NotImplementedError(
-            "Uniform traction boundary conditions are not supported yet.")
+            "Uniform traction boundary conditions are not yet supported.")
 
     def apply_affine_displacement_BC(self, initialization_step,
                                      strain_history):
-        """
-        Apply affine displacement boundary conditions to the RVE model.
+        r"""
+        Apply affine displacement boundary conditions.
 
-        The boundary conditions will be transferred to all subsequent steps,
-        i.e. the strain history must be formulated w.r.t. the total simulation
-        time and not the step time.
+        The boundary conditions will be transferred to all subsequent
+        steps, i.e. the strain history must be formulated w.r.t. the
+        total simulation time and not the step time.
+
+        Affine displacement boundary conditions read
+
+        .. math::
+            \boldsymbol{u} =
+            \boldsymbol{\mathcal{E}} \cdot \boldsymbol{X}
+
+        whereby the prescribed macroscopic strain is the linearized
+        strain tensor
+
+        .. math::
+            \boldsymbol{\mathcal{E}} = \boldsymbol{\varepsilon}
+
+        for geometrically linear analyses and the deformation gradient
+        minus the identity tensor
+
+        .. math::
+            \boldsymbol{\mathcal{E}} = \boldsymbol{F} - \boldsymbol{I}
+
+        for geometrically nonlinear analyses.
 
         Parameters
         ----------
@@ -298,6 +441,10 @@ class AbaqusRVE():
         None.
 
         """
+
+        if self._bc_initialized:
+            raise RuntimeError(
+                "Boundary conditions have already been initialized.")
 
         if self._collect_element_types() <= ELEMENTS_ROTATIONAL_DOFS:
             raise NotImplementedError(
@@ -320,14 +467,36 @@ class AbaqusRVE():
             self._add_dirichlet_from_displacement_history(
                 time_history, u_history, region, initialization_step, bc_name,
                 amplitude_name)
+        self._bc_initialized = True
 
     def apply_periodic_BC(self, initialization_step, strain_history):
-        """
-        Apply periodic boundary conditions to the RVE model.
+        r"""
+        Apply periodic boundary conditions.
 
-        The boundary conditions will be transferred to all subsequent steps,
-        i.e. the strain history must be formulated w.r.t. the total simulation
-        time and not the step time.
+        The boundary conditions will be transferred to all subsequent
+        steps, i.e. the strain history must be formulated w.r.t. the
+        total simulation time and not the step time.
+
+        Periodic displacement boundary conditions read
+
+        .. math::
+            \boldsymbol{u}^{+} - \boldsymbol{u}^{-} =
+            \boldsymbol{\mathcal{E}} \cdot \left[
+                \boldsymbol{X}^{+} - \boldsymbol{X}^{-} \right]
+
+        whereby the prescribed macroscopic strain is the linearized
+        strain tensor
+
+        .. math::
+            \boldsymbol{\mathcal{E}} = \boldsymbol{\varepsilon}
+
+        for geometrically linear analyses and the deformation gradient
+        minus the identity tensor
+
+        .. math::
+            \boldsymbol{\mathcal{E}} = \boldsymbol{F} - \boldsymbol{I}
+
+        for geometrically nonlinear analyses.
 
         Parameters
         ----------
@@ -343,11 +512,29 @@ class AbaqusRVE():
 
         """
 
+        if self._bc_initialized:
+            raise RuntimeError(
+                "Boundary conditions have already been initialized.")
+
         time_history = strain_history.time_data
         strain_history = voigt_to_tensor(strain_history.load_data, "STRAIN")
 
         def create_reference_point(master, slave):
-            """Create a reference points to connect master and slave."""
+            """
+            Create a reference point to connect master and slave nodes.
+
+            Parameters
+            ----------
+            master : str
+                The name of the master boundary group.
+            slave : str
+                The name of the slave boundary group.
+
+            Returns
+            -------
+            None.
+
+            """
 
             coords = [0.0, 0.0, 0.0]
             point_name = "REFERENCE_POINT_{}_{}".format(master, slave)
@@ -378,7 +565,17 @@ class AbaqusRVE():
                 amplitude_name)
 
         def apply_higher_order_constraints():
-            """Apply periodic boundary conditions to higher-order DOFs."""
+            """
+            Apply periodic boundary conditions to higher-order DOFs.
+
+            Currently considered higher-order DOFs are rotational DOFs
+            (beams and shells) and warping DOFs (open section beams).
+
+            Returns
+            -------
+            None.
+
+            """
 
             # Collect all element types present in the model
             all_element_types = self._collect_element_types()
@@ -448,18 +645,20 @@ class AbaqusRVE():
         # Apply constraints also to rotations and warping
         apply_higher_order_constraints()
 
+        self._bc_initialized = True
+
     def assign_solid_section(self, section_name, material_name,
                              element_set_name):
         """
-        Assign a solid material section to a given element set.
+        Assign a solid material section to an element set.
 
         Parameters
         ----------
         section_name : str
             The name of the section to be created.
         material_name : str
-            The name of the material that is associated with the section. The
-            material should exist already.
+            The name of the material that is associated with the
+            section. The material should exist already.
         element_set_name : str
             The name of the element set that is assigned the section.
 
@@ -476,7 +675,7 @@ class AbaqusRVE():
     def assign_beam_section(self, section_name, material_name,
                             element_set_name, radius):
         """
-        Assign a beam section with circular profile to a given element set.
+        Assign a beam section with circular profile to an element set.
 
         The orientation of the beams will be created automatically.
 
@@ -485,8 +684,8 @@ class AbaqusRVE():
         section_name : str
             The name of the section to be created.
         material_name : str
-            The name of the material that is associated with the section. The
-            material should exist already.
+            The name of the material that is associated with the
+            section. The material should exist already.
         element_set_name : str
             The name of the element set that is assigned the section.
         radius : float
@@ -504,41 +703,23 @@ class AbaqusRVE():
         self._assign_general_section(section_name, element_set_name)
         self._assign_beam_section_orientation(element_set_name)
 
-    def assign_shell_section(self, section_name, material_name,
-                             element_set_name):
-        """
-        This method is not supported yet.
-
-        Parameters
-        ----------
-        section_name : str
-            The name of the section to be created.
-        material_name : str
-            The name of the material that is associated with the section. The
-            material should exist already.
-        element_set_name : str
-            The name of the element set that is assigned the section.
-
-        Returns
-        -------
-        None.
-
-        """
-
+    def _assign_shell_section(self, section_name, material_name,
+                              element_set_name):
+        """This method is not yet implemented."""
         raise NotImplementedError("Shell sections are not supported yet.")
 
     def assign_truss_section(self, section_name, material_name,
                              element_set_name, area):
         """
-        Assign a truss section to a given element set.
+        Assign a truss section to an element set.
 
         Parameters
         ----------
         section_name : str
             The name of the section to be created.
         material_name : str
-            The name of the material that is associated with the section. The
-            material should exist already.
+            The name of the material that is associated with the
+            section. The material should exist already.
         element_set_name : str
             The name of the element set that is assigned the section.
         area : float
@@ -555,18 +736,52 @@ class AbaqusRVE():
         self._assign_general_section(section_name, element_set_name)
 
     def _assign_general_section(self, section_name, element_set_name):
-        """Assign a material section to a given element set."""
+        """
+        Assign any material section to an element set.
+
+        Parameters
+        ----------
+        section_name : str
+            The name of the material section.
+        element_set_name : str
+            The name of the element set that is assigned the section.
+
+        Returns
+        -------
+        None.
+
+        """
 
         if element_set_name not in self.part.sets:
             element_set_name = "ELSET_{}".format(element_set_name)
+        if element_set_name not in self.part.sets:
+            raise RuntimeError("The element set was not found.")
+
         region = self.part.sets[element_set_name]
         self.part.SectionAssignment(region=region, sectionName=section_name)
 
     def _assign_beam_section_orientation(self, element_set_name):
-        """Compute the orientation of beam elements with circular profile."""
+        """
+        Compute the correct tangent and normal vectors of beams.
+
+        This method is only valid for beam elements with a circular
+        profile.
+
+        Parameters
+        ----------
+        element_set_name : str
+            The name of the element set that is assigned a beam section.
+
+        Returns
+        -------
+        None.
+
+        """
 
         if element_set_name not in self.part.sets:
             element_set_name = "ELSET_{}".format(element_set_name)
+        if element_set_name not in self.part.sets:
+            raise RuntimeError("The element set was not found.")
 
         for element in self.part.sets[element_set_name].elements:
             # Compute unit tangent vector, i.e. the beam axis direction
@@ -605,12 +820,14 @@ class AbaqusRVE():
         Parameters
         ----------
         field_outputs : list[str], optional
-            The field outputs that shall be computed. The default is ["NFORC"].
+            The field outputs that shall be computed. The default is
+            ["NFORC"].
         history_outputs : list[str], optional
-            The history outputs that shall be computed. The default is [].
+            The history outputs that shall be computed. The default is
+            [].
         **kwargs :
-            Additional arguments that will be passed to the Abaqus job. See
-            the documentation of the Abaqus Job class for details.
+            Additional arguments that will be passed to the Abaqus job.
+            See the documentation of the Abaqus Job class for details.
 
         Returns
         -------
@@ -704,12 +921,13 @@ class AbaqusRVE():
         element_set : list[str], optional
             The element sets that shall be exported. The default is [].
         radius : dict{str, float}, optional
-            A map from physical group names to the radius of lattice struts.
-            The radius will be exported as a cell field output such that
+            A map from physical group names to the radius of lattice
+            struts in case the model uses beam or truss elements. The
+            radius will be exported as a cell field output such that
             struts can be visualized in the correct size.
         clear : bool, optional
-            If True, the output folder will be cleared if it already exists.
-            The default is False.
+            If True, the output folder will be cleared if it already
+            exists. The default is False.
 
         Returns
         -------
@@ -792,8 +1010,8 @@ class AbaqusRVE():
         step_name : str
             The name of the step.
         close : bool, optional
-            If True, the ODB file will be closed after getting the number of
-            frames. The default is False.
+            If True, the ODB file will be closed after getting the
+            number of frames. The default is False.
 
         Returns
         -------
@@ -811,9 +1029,9 @@ class AbaqusRVE():
         """
         Compute the averaged stress.
 
-        NOTE: This function should be re-implemented as soon as we know how
-        to efficiently compute averages for elasto-plastic fields such as
-        the plastic strain.
+        NOTE: This function should be re-implemented as soon as we know
+        how to efficiently compute averages for elasto-plastic fields
+        such as the plastic strain.
 
         Parameters
         ----------
@@ -895,22 +1113,21 @@ class LoadHistory():
 
     Parameters
     ----------
-    time : numpy.ndarray[float]
+    time : ArrayLike
         The time data points of the load history
-    history : function
-        The stress or strain history function having a point of time as input
-        and returns the load in 3d Voigt notation, i.e. the order of the data
-        is [xx, yy, zz, yz, xz, xy]. The shear components for strains must be
-        multiplied by 2.
-
+    history : Callable
+        The stress or strain history function having a point of time as
+        input and returns the load in 3d Voigt notation, i.e. the order
+        of the data is [xx, yy, zz, yz, xz, xy]. The shear components
+        for strains must be multiplied by 2.
 
     Attributes
     ----------
-    time_data : numpy.ndarray[float]
+    time_data : ndarray
         The time data points of the load history
-    load_data : numpy.ndarray[float]
-        The load data points of the load history, i.e. the history evaluated
-        at the time data points.
+    load_data : ndarray
+        The load data points of the load history, i.e. the history
+        evaluated at the time data points.
 
     Example
     -------
@@ -930,23 +1147,40 @@ class LoadHistory():
 
     """
 
-    def __init__(self, time, history):
+    def __init__(
+            self, time, history):
         if history(0).shape != (6,):
             raise ValueError("The argument history must return a " +
                              "numpyp.ndarray of shape (6,).")
 
-        self._time = time
+        self._time = np.array(time)
         self._history = history
         self._index = 0
 
     @property
     def time_data(self):
-        """The time data points of the load history."""
+        """
+        The time data points of the load history
+
+        Returns
+        -------
+        ndarray
+            The time data points.
+
+        """
         return self._time
 
     @property
     def load_data(self):
-        """The load data points of the load history."""
+        """
+        The load data points (stress or strain) of the load history.
+
+        Returns
+        -------
+        data : ndarray
+            The load data points.
+
+        """
         data = []
         for _, v in self:
             data.append(v)
@@ -965,6 +1199,10 @@ class LoadHistory():
         load = self(time)
         self._index += 1
 
+        return time, load
+
+    def next(self):
+        time, load = self.__next__()
         return time, load
 
     def __getitem__(self, i):

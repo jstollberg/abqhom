@@ -3,8 +3,6 @@ Collection of constants for the abqhom package.
 
 """
 
-from collections import OrderedDict
-
 try:
     import paraqus
     PARAQUS_INSTALLED = True
