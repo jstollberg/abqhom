@@ -373,23 +373,22 @@ class AbaqusRVE():
                 break
 
             # Add amplitude for the load history
-            amplitude_name += "_{}".format(i + 1)
+            amplitude_name_i = amplitude_name + "_{}".format(i + 1)
             data = np.vstack((time_history, u_history[:, i])).T
             data = tuple([(t, v) for t, v in data])
-            self.model.TabularAmplitude(name=amplitude_name, timeSpan=TOTAL,
+            self.model.TabularAmplitude(name=amplitude_name_i, timeSpan=TOTAL,
                                         data=data)
 
             # Add the boundary conditon
             # The actual displacement value will be controlled by the
             # amplitude, so just put a value of 1.0 here
-            bc_name += "_{}".format(i + 1)
-            assert bc_name not in self.model.boundaryConditions
+            bc_name_i = bc_name + "_{}".format(i + 1)
             u = [UNSET, UNSET, UNSET]
             u[i] = 1.0
-            self.model.DisplacementBC(name=bc_name,
+            self.model.DisplacementBC(name=bc_name_i,
                                       createStepName=step_name,
                                       region=region,
-                                      amplitude=amplitude_name,
+                                      amplitude=amplitude_name_i,
                                       u1=u[0], u2=u[1], u3=u[2])
 
     def _apply_uniform_traction_BC(self, initialization_step, stress_history):
@@ -595,7 +594,6 @@ class AbaqusRVE():
                         or "NSET_" + slave not in self.instance.sets):
                     continue
 
-                dofs = [4, 5, 6] if self.model_dimension == THREE_D else [6]
                 for dof in dofs:
                     base_name = self.model_name + ".NSET_"
                     terms = [[1.0, base_name + slave, dof],
