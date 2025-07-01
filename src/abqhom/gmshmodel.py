@@ -252,6 +252,7 @@ class GmshRVE():
         -------
         dim : int
             The mesh dimension. If not mesh was created -1 is returned.
+
         """
 
         self.activate()
@@ -369,9 +370,9 @@ class GmshRVE():
 
         # Set element order
         if element_order not in {1, 2}:
-            raise ValueError("Only first-order and second-order elements are "
-                             "supported.")
-        gmsh.model.mesh.set_order(element_order)
+            raise ValueError("Only first-order and second-order elements "
+                             "are supported.")
+        gmsh.option.set_number("Mesh.ElementOrder", element_order)
         gmsh.option.set_number("Mesh.SecondOrderIncomplete", 1)
 
         # Set meshing algorithms
@@ -661,7 +662,7 @@ class GmshRVE():
                 new_set.extend(item)
         set_dictionary[set_name] = np.array(new_set, dtype=np.uint64)
 
-    def write_abaqus_input(self, el_type_map=None):
+    def write_abaqus_input(self, custom_types={}):
         """
         Export the Gmsh mesh to Abaqus.
 
@@ -671,9 +672,10 @@ class GmshRVE():
 
         Parameters
         ----------
-        el_type_map : dict[int, str], optional
+        custom_types : dict[int, str], optional
             Map from Gmsh element types to Abaqus element types. If this
-            is None a default map will be used. The default is None.
+            is an empty dict a default map will be used. The default is
+            None.
 
         Returns
         -------
@@ -686,10 +688,10 @@ class GmshRVE():
 
         # Load default element type map
         assert self.model_dimension in {2, 3}
-        if el_type_map is None and self.model_dimension == 2:
+        el_type_map = ABAQUS_ELEMENT_TYPES_3D
+        if self.model_dimension == 2:
             el_type_map = ABAQUS_ELEMENT_TYPES_2D
-        elif el_type_map is None:  # and self.model_dimension == 3
-            el_type_map = ABAQUS_ELEMENT_TYPES_3D
+        el_type_map.update(custom_types)
 
         # Get node information
         node_tags, node_coords, _ = gmsh.model.mesh.get_nodes(
@@ -903,21 +905,21 @@ class Boundary(UserDict, object):
         if not initial_data:
             try:
                 self._build_boundary(model_dim)
-            except Exception as exc:
+            except Exception:
                 raise RuntimeError(
                     "Automatic boundary generation not possible. Please "
-                    "provide the boundary manually.") from exc
+                    "provide the boundary manually.")
 
         # Rearrange boundary map in case of a periodic geometry
         if check_periodic:
             try:
                 self._check_for_periodicity(model_dim)
-            except Exception as exc:
+            except Exception:
                 raise RuntimeError(
                     "Automatic periodicity check not possible. Please set "
                     "check_periodic = False and provide information on "
                     "periodicity through construction of initial_data and "
-                    "periodic_default.") from exc
+                    "periodic_default.")
 
         # Add missing groups as empty groups
         for key in POINT_GROUPS + EDGE_GROUPS + FACE_GROUPS:
