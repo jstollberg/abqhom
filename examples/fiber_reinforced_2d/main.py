@@ -140,15 +140,13 @@ for fiber_fraction in np.linspace(min_fiber_fraction,
         unit_cell = GmshRVE(model_name)
         unit_cell.add_periodic_mesh_constraints()
         unit_cell.generate_mesh(element_size=0.4)
-        input_file = unit_cell.write_abaqus_input()
 
         if debug_geometry:
             unit_cell.show()
             sys.exit()
 
         # Load the model into Abaqus
-        unit_cell = AbaqusRVE(unit_cell, input_file)
-        gmsh.finalize()
+        unit_cell = AbaqusRVE(unit_cell)
 
         # Assign material
         for name in parameters:
@@ -180,6 +178,8 @@ for fiber_fraction in np.linspace(min_fiber_fraction,
         # Export to VTK
         unit_cell.export_to_vtk(vtk_path, field_outputs=["U", ("S", "MISES")],
                                 element_sets=["MATRIX", "FIBER"])
+
+        gmsh.finalize()
 
     print("\n------------------------------")
     print("Effective constitutive matrix:")

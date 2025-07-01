@@ -111,10 +111,9 @@ create_geometry(model_name, dx=dx, dy=dy, fiber_fraction=fiber_fraction)
 unit_cell = GmshRVE(model_name)
 unit_cell.add_periodic_mesh_constraints()
 unit_cell.generate_mesh(element_size=0.37)
-input_file = unit_cell.write_abaqus_input()
 
 # Load the model into Abaqus
-unit_cell = AbaqusRVE(unit_cell, input_file)
+unit_cell = AbaqusRVE(unit_cell)
 
 # Assign material
 for name in ("MATRIX", "FIBER"):
@@ -153,4 +152,6 @@ if export_vtk:
     unit_cell.export_to_vtk(vtk_path,
                             field_outputs=["U", ("S", "MISES"), "PEEQ"],
                             element_sets=["MATRIX", "FIBER"])
+
+gmsh.finalize()
 print("*** Finished ***")

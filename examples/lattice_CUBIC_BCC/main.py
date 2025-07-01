@@ -13,7 +13,7 @@ for i in (gmsh_path, abqhom_path, paraqus_path):
 import gmsh
 
 # Import homogenization tools
-from abqhom.utils import voigt_to_tensor
+from abqhom.utils import voigt_to_tensor, tensor_to_voigt
 from abqhom.gmshmodel import GmshRVE
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
 
@@ -78,20 +78,10 @@ def create_geometry(model_name, dx=1.0, dy=1.0, dz=1.0):
     gmsh.model.set_physical_name(1, bcc, "BCC")
 
 
-def load_path(time):
-    strain = np.zeros(6)
-    strain[0] = np.sin(np.pi*time)
-    strain[1] = np.exp(-((time - 0.5)/0.2)**2) - np.exp(-(0.5/0.2)**2)
-    strain[5] = np.sin(2*np.pi*time)
-    strain *= 0.125
-    strain = voigt_to_tensor(strain, "STRAIN")
-    return strain
-
-
 # ---------------------------------------------------------------
 # Set working directory
 workdir = os.path.join(base_path,
-                       "abqhom/examples/cubic_plasticity/abq")
+                       "abqhom/examples/lattice_CUBIC_BCC/abq")
 if not os.path.isdir(workdir):
     os.mkdir(workdir)
 os.chdir(workdir)
@@ -106,72 +96,73 @@ vtk_path = os.path.join(workdir, "..", "vtk_output")
 
 # RVE size
 dx = dy = dz = 10
-element_size = 0.2
+element_size = 1
 
-# Boundary conditions
-boundary_conditions = "PERIODIC"  # PERIODIC or DIRICHLET
+# Material parameters: Young's modulus - Poisson's ratio - diameter
+parameters = {"CUBIC": [210.0, 0.3, 0.5],
+              "BCC": [210.0, 0.3, 1.0]}
 
-# Material parameters
-parameters = {"CUBIC_HYPERELASTIC": [230.0, 0.2],
-              "CUBIC_DIAMETER":     [250e-3, 5.0],
-              "BCC_HYPERELASTIC":   [0.5],
-              "BCC_DIAMETER":       []}
+# Multiply stiffness with weight factors due to overlaps on edges and faces
+parameters["CUBIC"][0] *= 0.25
 
-parameters["ELASTIC"][0] *= 0.25
+# Run homogenization routine
+C = np.empty((6, 6))
+for i in range(6):
+    print("\n------------------------------")
+    print("Run case {}.".format(i + 1))
 
-# Create the load path for the strain
-n_steps = 500
-time = np.linspace(0.0, 1.0, 50)
-history = LoadHistory(time, load_path)
+    # Define load history
+    strain_magnitude = 0.1 if i < 3 else 0.2
 
+    def strain_history(time):
+        strain = np.zeros(6)
+        strain[i] = strain_magnitude
+        strain = voigt_to_tensor(strain, "STRAIN")
+        return time*strain
 
-# ---------------------------------------------------------------
-# Create geometry in Gmsh and dump it to an input file
-model_name = "RUC"
-create_geometry(model_name, dx=dx, dy=dy, dz=dz)
-unit_cell = GmshRVE(model_name)
-unit_cell.add_periodic_mesh_constraints()
-unit_cell.generate_mesh(element_size=element_size)
-input_file = unit_cell.write_abaqus_input()
+    history = LoadHistory(np.array([0.0, 1.0]), strain_history)
+    print("Strain = " + str(tensor_to_voigt(history(1.0), "STRAIN")
+                            .round(3).tolist()))
 
-# Load the model into Abaqus
-unit_cell = AbaqusRVE(unit_cell, input_file)
-gmsh.finalize()
+    # Create geometry in Gmsh and dump it to an input file
+    model_name = "RUC_{}".format(i + 1)
+    create_geometry(model_name, dx=dx, dy=dy, dz=dz)
+    unit_cell = GmshRVE(model_name)
+    unit_cell.add_periodic_mesh_constraints()
+    unit_cell.generate_mesh(element_size=element_size)
 
-# Assign material
-E, nu = parameters["ELASTIC"]
-sig_y, H = parameters["PLASTIC"]
-material = unit_cell.model.Material(name="CUBIC")
-material.Elastic(table=[[E, nu]])
-material.Plastic(table=[[sig_y + H*eps_p, eps_p] for eps_p in
-                        np.linspace(0.0, 5.0, 10)])
-unit_cell.assign_beam_section("CUBIC", "CUBIC", "CUBIC",
-                              0.5*parameters["DIAMETER"][0])
+    # Load the model into Abaqus
+    unit_cell = AbaqusRVE(unit_cell)
 
-# Define load step
-step_name = "LOAD"
-time_period = history.time_data[-1]
-unit_cell.model.StaticStep(name=step_name, previous="Initial",
-                           timePeriod=time_period,
-                           initialInc=time_period/float(n_steps),
-                           minInc=1e-10,
-                           maxInc=time_period/float(n_steps),
-                           maxNumInc=n_steps,
-                           )
+    # Assign material
+    for name in parameters:
+        E, nu, d = parameters[name]
+        material = unit_cell.model.Material(name=name)
+        material.Elastic(table=[[E, nu]])
+        unit_cell.assign_beam_section(name, name, name, 0.5*d)
 
-# Apply boundary conditions and run analysis
-if boundary_conditions.upper() == "PERIODIC":
+    # Define load step
+    step_name = "LOAD"
+    unit_cell.model.StaticStep(name=step_name, previous="Initial")
+
+    # Apply periodic boundary conditions and run analysis
     unit_cell.apply_periodic_BC(step_name, history)
-elif boundary_conditions.upper() == "DIRICHLET":
-    unit_cell.apply_affine_displacement_BC(step_name, history)
-else:
-    raise RuntimeError("Invalid boundary conditions.")
+    unit_cell.run_analysis(field_outputs=["NFORC", "U", "UR"])
+    stress = unit_cell.compute_averaged_stress(step_name)
+    stress = tensor_to_voigt(stress, "STRESS")
+    print("Stress = " + str(stress.round(3).tolist()))
 
-unit_cell.run_analysis(field_outputs=["NFORC", "U", "S"])
+    # Compute effective stiffness tensor
+    C[:, i] = stress/strain_magnitude
 
-# Export to VTK
-print("Running VTK export...")
-unit_cell.export_to_vtk(
-    vtk_path, field_outputs=["U"],
-    radius={"CUBIC": 0.5*parameters["DIAMETER"][0]})
-print("*** Finished ***")
+    # Export to VTK
+    unit_cell.export_to_vtk(
+        vtk_path, field_outputs=["U", "UR"],
+        radius={"CUBIC": 0.5*parameters["CUBIC"][2],
+                "BCC": 0.5*parameters["BCC"][2]})
+
+    gmsh.finalize()
+
+print("\n------------------------------")
+print("Effective constitutive matrix:")
+print(C.round(3))

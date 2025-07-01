@@ -37,13 +37,14 @@ def create_geometry(model_name, dx=1.0, dy=1.0, dz=1.0):
     point_7 = gmsh.model.geo.add_point(x + 0.5*dx, y + 0.5*dy, z + 0.5*dz)
     point_8 = gmsh.model.geo.add_point(x - 0.5*dx, y + 0.5*dy, z + 0.5*dz)
 
-    # Add points on surfaces
+    # Add points on surfaces and in center
     point_9 = gmsh.model.geo.add_point(x, y, z - 0.5*dz)
     point_10 = gmsh.model.geo.add_point(x, y, z + 0.5*dz)
     point_11 = gmsh.model.geo.add_point(x - 0.5*dx, y, z)
     point_12 = gmsh.model.geo.add_point(x + 0.5*dx, y, z)
     point_13 = gmsh.model.geo.add_point(x, y - 0.5*dy, z)
     point_14 = gmsh.model.geo.add_point(x, y + 0.5*dy, z)
+    point_15 = gmsh.model.geo.add_point(x, y, z)
 
     # Add lines on edges
     edge_1 = gmsh.model.geo.add_line(point_1, point_2)
@@ -85,6 +86,16 @@ def create_geometry(model_name, dx=1.0, dy=1.0, dz=1.0):
     edge_35 = gmsh.model.geo.add_line(point_7, point_14)
     edge_36 = gmsh.model.geo.add_line(point_8, point_14)
 
+    # Add lines in volume
+    edge_37 = gmsh.model.geo.add_line(point_15, point_1)
+    edge_38 = gmsh.model.geo.add_line(point_15, point_2)
+    edge_39 = gmsh.model.geo.add_line(point_15, point_3)
+    edge_40 = gmsh.model.geo.add_line(point_15, point_4)
+    edge_41 = gmsh.model.geo.add_line(point_15, point_5)
+    edge_42 = gmsh.model.geo.add_line(point_15, point_6)
+    edge_43 = gmsh.model.geo.add_line(point_15, point_7)
+    edge_44 = gmsh.model.geo.add_line(point_15, point_8)
+
     gmsh.model.geo.synchronize()
 
     # Add physical groups for primitive unit cells
@@ -100,11 +111,16 @@ def create_geometry(model_name, dx=1.0, dy=1.0, dz=1.0):
     fcc = gmsh.model.add_physical_group(1, fcc_entities)
     gmsh.model.set_physical_name(1, fcc, "FCC")
 
+    bcc_entities = [edge_37, edge_38, edge_39, edge_40, edge_41, edge_42,
+                    edge_43, edge_44]
+    bcc = gmsh.model.add_physical_group(1, bcc_entities)
+    gmsh.model.set_physical_name(1, bcc, "BCC")
+
 
 # ---------------------------------------------------------------
 # Set working directory
 workdir = os.path.join(base_path,
-                       "abqhom/examples/cubic_FCC_lattice/abq")
+                       "abqhom/examples/lattice_CUBIC_FCC_BCC/abq")
 if not os.path.isdir(workdir):
     os.mkdir(workdir)
 os.chdir(workdir)
@@ -123,7 +139,8 @@ element_size = 0.5
 
 # Material parameters: Young's modulus - Poisson's ratio - diameter
 parameters = {"CUBIC": [210.0, 0.3, 0.3],
-              "FCC":   [210.0, 0.3, 0.6]}
+              "FCC":   [210.0, 0.3, 0.6],
+              "BCC":   [210.0, 0.3, 1.0]}
 
 # Multiply stiffness with weight factors due to overlaps on edges and faces
 parameters["CUBIC"][0] *= 0.25
@@ -150,15 +167,13 @@ for i in range(6):
 
     # Create geometry in Gmsh and dump it to an input file
     model_name = "RUC_{}".format(i + 1)
-    boundary_map = create_geometry(model_name, dx=dx, dy=dy, dz=dz)
-    unit_cell = GmshRVE(model_name, boundary_map)
+    create_geometry(model_name, dx=dx, dy=dy, dz=dz)
+    unit_cell = GmshRVE(model_name)
     unit_cell.add_periodic_mesh_constraints()
     unit_cell.generate_mesh(element_size=element_size)
-    input_file = unit_cell.write_abaqus_input()
 
     # Load the model into Abaqus
-    unit_cell = AbaqusRVE(unit_cell, input_file)
-    gmsh.finalize()
+    unit_cell = AbaqusRVE(unit_cell)
 
     # Assign material
     for name in parameters:
@@ -185,7 +200,10 @@ for i in range(6):
     unit_cell.export_to_vtk(
         vtk_path, field_outputs=["U", "UR"],
         radius={"CUBIC": 0.5*parameters["CUBIC"][2],
-                "FCC": 0.5*parameters["FCC"][2]})
+                "FCC": 0.5*parameters["FCC"][2],
+                "BCC": 0.5*parameters["BCC"][2]})
+
+    gmsh.finalize()
 
 print("\n------------------------------")
 print("Effective constitutive matrix:")

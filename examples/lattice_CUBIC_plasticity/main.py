@@ -17,6 +17,9 @@ from abqhom.utils import voigt_to_tensor
 from abqhom.gmshmodel import GmshRVE
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
 
+# Import Abaqus stuff
+from abaqusConstants import FIXED_USER_DEFINED_INC
+
 
 def create_geometry(model_name, dx=1.0, dy=1.0, dz=1.0):
 
@@ -51,7 +54,7 @@ def load_path(time):
     strain[2] = 4*(time - 0.5)**2 - 1
     strain[4] = np.sin(2*np.pi*time)**2
     strain[5] = np.sin(2*np.pi*time)
-    strain *= 0.125
+    strain *= 0.4
     strain = voigt_to_tensor(strain, "STRAIN")
     return strain
 
@@ -59,7 +62,7 @@ def load_path(time):
 # ---------------------------------------------------------------
 # Set working directory
 workdir = os.path.join(base_path,
-                       "abqhom/examples/cubic_lattice_plasticity/abq")
+                       "abqhom/examples/lattice_CUBIC_plasticity/abq")
 if not os.path.isdir(workdir):
     os.mkdir(workdir)
 os.chdir(workdir)
@@ -74,15 +77,19 @@ vtk_path = os.path.join(workdir, "..", "vtk_output")
 
 # RVE size
 dx = dy = dz = 10
-element_size = 0.15
+element_size = 10
+
+# Nonlinear geometry
+nonlinear_geometry = True
 
 # Boundary conditions
 boundary_conditions = "PERIODIC"  # PERIODIC or DIRICHLET
 
 # Material parameters
-parameters = {"ELASTIC":    [230.0, 0.2],
-              "PLASTIC":    [250e-3, 5.0],
-              "DIAMETER":   [0.5]}
+parameters = {"ELASTIC":  [230.0, 0.2],
+              "PLASTIC":  [250e-3, 5.0],
+              "DENSITY":  [1e-5],
+              "DIAMETER": [1.0]}
 
 parameters["ELASTIC"][0] *= 0.25
 parameters["PLASTIC"][0] *= 0.25
@@ -90,7 +97,7 @@ parameters["PLASTIC"][1] *= 0.25
 
 # Create the load path for the strain
 n_steps = 500
-time = np.linspace(0.0, 1.0, 50)
+time = np.linspace(0.0, 1.0, n_steps)
 history = LoadHistory(time, load_path)
 
 
@@ -100,33 +107,34 @@ model_name = "RUC"
 create_geometry(model_name, dx=dx, dy=dy, dz=dz)
 unit_cell = GmshRVE(model_name)
 unit_cell.add_periodic_mesh_constraints()
-unit_cell.generate_mesh(element_size=element_size)
-input_file = unit_cell.write_abaqus_input()
+unit_cell.generate_mesh(element_order=1, element_size=element_size)
+input_file = unit_cell.write_abaqus_input(custom_types={1: "B31"})
 
 # Load the model into Abaqus
-unit_cell = AbaqusRVE(unit_cell, input_file)
-gmsh.finalize()
+unit_cell = AbaqusRVE(unit_cell, custom_types={1: "B31"})
 
 # Assign material
 E, nu = parameters["ELASTIC"]
 sig_y, H = parameters["PLASTIC"]
+rho = parameters["DENSITY"]
 material = unit_cell.model.Material(name="CUBIC")
 material.Elastic(table=[[E, nu]])
+material.Density(table=(rho, ))
 material.Plastic(table=[[sig_y + H*eps_p, eps_p] for eps_p in
                         np.linspace(0.0, 5.0, 10)])
 unit_cell.assign_beam_section("CUBIC", "CUBIC", "CUBIC",
                               0.5*parameters["DIAMETER"][0])
 
-# Define load step
+# Use an explicit scheme for stability reasons
 step_name = "LOAD"
 time_period = history.time_data[-1]
-unit_cell.model.StaticStep(name=step_name, previous="Initial",
-                           timePeriod=time_period,
-                           initialInc=time_period/float(n_steps),
-                           minInc=1e-10,
-                           maxInc=time_period/float(n_steps),
-                           maxNumInc=n_steps,
-                           )
+unit_cell.model.ExplicitDynamicsStep(
+    name=step_name, previous="Initial",
+    nlgeom=nonlinear_geometry,
+    timePeriod=time_period,
+    timeIncrementationMethod=FIXED_USER_DEFINED_INC,
+    userDefinedInc=time_period/float(n_steps)
+    )
 
 # Apply boundary conditions and run analysis
 if boundary_conditions.upper() == "PERIODIC":
@@ -143,4 +151,6 @@ print("Running VTK export...")
 unit_cell.export_to_vtk(
     vtk_path, field_outputs=["U", "UR"],
     radius={"CUBIC": 0.5*parameters["DIAMETER"][0]})
+
+gmsh.finalize()
 print("*** Finished ***")

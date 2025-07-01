@@ -155,14 +155,13 @@ for i in range(6):
     unit_cell = GmshRVE(model_name, Boundary(model_name, boundary))
     unit_cell.add_periodic_mesh_constraints()
     unit_cell.generate_mesh(element_size=1.25)
-    input_file = unit_cell.write_abaqus_input()
 
     if debug_geometry:
         gmsh.fltk.run()
         sys.exit()
 
     # Load the model into Abaqus
-    unit_cell = AbaqusRVE(unit_cell, input_file)
+    unit_cell = AbaqusRVE(unit_cell)
 
     # Assign material
     for name in parameters:
@@ -195,7 +194,7 @@ for i in range(6):
     unit_cell.export_to_vtk(vtk_path, field_outputs=["U", ("S", "MISES")],
                             element_sets=["MATRIX", "INCLUSION"])
 
-gmsh.finalize()
+    gmsh.finalize()
 
 print("\n------------------------------")
 print("Effective constitutive matrix:")
