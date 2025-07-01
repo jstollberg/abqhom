@@ -18,9 +18,6 @@ from abqhom.utils import voigt_to_tensor
 from abqhom.gmshmodel import GmshRVE
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
 
-# Import Abaqus stuff
-from abaqusConstants import FIXED
-
 
 def create_geometry(model_name, dx=1.0, dy=1.0, fiber_fraction=0.2):
     # Compute fiber radius from volume fraction
@@ -94,9 +91,9 @@ boundary_conditions = "PERIODIC"  # PERIODIC or DIRICHLET
 
 # Material parameters:
 parameters = {"MATRIX_ELASTIC": [3.5, 0.35],
-              "MATRIX_PLASTIC": [70e-3, 2.0],
+              "MATRIX_PLASTIC": [70e-3, 10.0],
               "FIBER_ELASTIC":  [230.0, 0.2],
-              "FIBER_PLASTIC":  [250e-3, 5.0]}
+              "FIBER_PLASTIC":  [250e-3, 20.0]}
 
 # Name folder to store VTK files
 vtk_path = os.path.join(workdir, "..", "vtk_output", str(fiber_fraction))
@@ -133,9 +130,12 @@ for name in ("MATRIX", "FIBER"):
 step_name = "LOAD"
 time_period = history.time_data[-1]
 unit_cell.model.StaticStep(name=step_name, previous="Initial",
-                           timePeriod=time_period, maxNumInc=n_steps,
-                           timeIncrementationMethod=FIXED,
-                           initialInc=time_period/float(n_steps))
+                           timePeriod=time_period,
+                           initialInc=time_period/float(n_steps),
+                           minInc=1e-10,
+                           maxInc=time_period/float(n_steps),
+                           maxNumInc=n_steps,
+                           )
 
 # Apply boundary conditions and run analysis
 if boundary_conditions.upper() == "PERIODIC":

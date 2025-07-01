@@ -82,7 +82,7 @@ from abqhom.gmshmodel import Boundary, GmshRVE
 
 dx = dy = dz = 10.0
 radius_cube = 1.0
-radius_bcc = 1.0
+radius_bcc = 2.0
 model_name = "RUC"
 
 gmsh.initialize()
@@ -91,14 +91,14 @@ gmsh.initialize()
 create_geometry(model_name, dx, dy, dz, radius_cube, radius_bcc)
 unit_cell = GmshRVE(model_name)
 unit_cell.generate_mesh(element_size=0.5)
-unit_cell.build_element_sets()
-unit_cell._periodic=False
+# unit_cell.build_element_sets()
+# unit_cell._periodic=False
 
-#
+# #
 
-unit_cell.build_node_sets()
-print(unit_cell.node_sets["FACE_NODES"])
-print(unit_cell.node_sets["EDGE_4"])
+# unit_cell.build_node_sets()
+# print(unit_cell.node_sets["FACE_NODES"])
+# print(unit_cell.node_sets["EDGE_4"])
 unit_cell.show()
 
 

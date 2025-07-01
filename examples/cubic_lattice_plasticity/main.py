@@ -17,9 +17,6 @@ from abqhom.utils import voigt_to_tensor
 from abqhom.gmshmodel import GmshRVE
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
 
-# Import Abaqus stuff
-from abaqusConstants import FIXED
-
 
 def create_geometry(model_name, dx=1.0, dy=1.0, dz=1.0):
 
@@ -51,6 +48,8 @@ def load_path(time):
     strain = np.zeros(6)
     strain[0] = np.sin(np.pi*time)
     strain[1] = np.exp(-((time - 0.5)/0.2)**2) - np.exp(-(0.5/0.2)**2)
+    strain[2] = 4*(time - 0.5)**2 - 1
+    strain[4] = np.sin(2*np.pi*time)**2
     strain[5] = np.sin(2*np.pi*time)
     strain *= 0.125
     strain = voigt_to_tensor(strain, "STRAIN")
@@ -60,7 +59,7 @@ def load_path(time):
 # ---------------------------------------------------------------
 # Set working directory
 workdir = os.path.join(base_path,
-                       "abqhom/examples/cubic_plasticity/abq")
+                       "abqhom/examples/cubic_lattice_plasticity/abq")
 if not os.path.isdir(workdir):
     os.mkdir(workdir)
 os.chdir(workdir)
@@ -75,7 +74,7 @@ vtk_path = os.path.join(workdir, "..", "vtk_output")
 
 # RVE size
 dx = dy = dz = 10
-element_size = 0.2
+element_size = 0.15
 
 # Boundary conditions
 boundary_conditions = "PERIODIC"  # PERIODIC or DIRICHLET
@@ -122,9 +121,12 @@ unit_cell.assign_beam_section("CUBIC", "CUBIC", "CUBIC",
 step_name = "LOAD"
 time_period = history.time_data[-1]
 unit_cell.model.StaticStep(name=step_name, previous="Initial",
-                           timePeriod=time_period, maxNumInc=n_steps,
-                           timeIncrementationMethod=FIXED,
-                           initialInc=time_period/float(n_steps))
+                           timePeriod=time_period,
+                           initialInc=time_period/float(n_steps),
+                           minInc=1e-10,
+                           maxInc=time_period/float(n_steps),
+                           maxNumInc=n_steps,
+                           )
 
 # Apply boundary conditions and run analysis
 if boundary_conditions.upper() == "PERIODIC":
@@ -134,11 +136,11 @@ elif boundary_conditions.upper() == "DIRICHLET":
 else:
     raise RuntimeError("Invalid boundary conditions.")
 
-unit_cell.run_analysis(field_outputs=["NFORC", "U", "S"])
+unit_cell.run_analysis(field_outputs=["NFORC", "U", "UR", "S"])
 
 # Export to VTK
 print("Running VTK export...")
 unit_cell.export_to_vtk(
-    vtk_path, field_outputs=["U"],
+    vtk_path, field_outputs=["U", "UR"],
     radius={"CUBIC": 0.5*parameters["DIAMETER"][0]})
 print("*** Finished ***")
