@@ -15,7 +15,8 @@ from abaqus import Mdb, mdb, session
 from regionToolset import Region
 from mesh import MeshNodeArray, MeshElementArray
 from abaqusConstants import (THREE_D, TWO_D_PLANAR, DEFORMABLE_BODY, ON, UNSET,
-                             CARTESIAN, N1_COSINES, DURING_ANALYSIS, TOTAL)
+                             CARTESIAN, N1_COSINES, DURING_ANALYSIS, TOTAL,
+                             EVERY_TIME_INCREMENT)
 
 if PARAQUS_INSTALLED:
     from paraqus.abaqus import OdbReader
@@ -447,8 +448,8 @@ class AbaqusRVE():
         if self._collect_element_types() <= ELEMENTS_ROTATIONAL_DOFS:
             raise NotImplementedError(
                 "Affine displacement boundary conditions are not supported "
-                + "for elements with rotational degrees of freedom. "
-                + "Please use periodic boundary conditions.")
+                "for elements with rotational degrees of freedom. "
+                "Please use periodic boundary conditions.")
 
         time_history = strain_history.time_data
         strain_history = strain_history.load_data
@@ -843,18 +844,18 @@ class AbaqusRVE():
             for step in self.model.steps.keys():
                 if step == "Initial":
                     continue
-                self.model.FieldOutputRequest(name="FIELD_OUTPUT_" + step,
-                                              createStepName=step,
-                                              variables=field_outputs)
+                self.model.FieldOutputRequest(
+                    name="FIELD_OUTPUT_" + step, createStepName=step,
+                    variables=field_outputs, timeInterval=EVERY_TIME_INCREMENT)
 
         # Request the history outputs
         if len(history_outputs) > 0:
             for step in self.model.steps.keys():
                 if step == "Initial":
                     continue
-                self.model.HistoryOutputRequest(name="HISTORY_OUTPUT_" + step,
-                                                createStepName=step,
-                                                variables=field_outputs)
+                self.model.HistoryOutputRequest(
+                    name="HISTORY_OUTPUT_" + step, createStepName=step,
+                    variables=field_outputs, timeInterval=EVERY_TIME_INCREMENT)
 
         # Create and run the job
         job_name = "JOB_" + self.model_name
