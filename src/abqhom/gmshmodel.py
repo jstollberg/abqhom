@@ -675,7 +675,7 @@ class GmshRVE():
         custom_types : dict[int, str], optional
             Map from Gmsh element types to Abaqus element types. If this
             is an empty dict a default map will be used. The default is
-            None.
+            {}.
 
         Returns
         -------

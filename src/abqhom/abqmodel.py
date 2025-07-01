@@ -31,8 +31,10 @@ class AbaqusRVE():
     ----------
     gmsh_RVE : GmshRVE
         The GmshRVE containing the mesh information of the RVE.
-    input_file : str
-        Path to the Abaqus input file containing the mesh information.
+    custom_types : dict[int, str], optional
+        Map from Gmsh element types to Abaqus element types. If this
+        is an empty dict a default map will be used. The default is
+        {}.
 
     Attributes
     ----------
@@ -86,10 +88,13 @@ class AbaqusRVE():
 
     """
 
-    def __init__(self, gmsh_RVE, input_file):
+    def __init__(self, gmsh_RVE, custom_types={}):
         if gmsh_RVE.model_dimension not in {2, 3}:
             raise RuntimeError("Only 2d and 3d models are supported.")
         dim = THREE_D if gmsh_RVE.model_dimension == 3 else TWO_D_PLANAR
+
+        # Write Abaqus input file
+        input_file = gmsh_RVE.write_abaqus_input(custom_types=custom_types)
 
         # Load the RVE into Abaqus
         Mdb()
