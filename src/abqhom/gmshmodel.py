@@ -901,23 +901,23 @@ class Boundary(UserDict, object):
 
         # Build the boundary automatically
         if not initial_data:
-            # try:
-            self._build_boundary(model_dim)
-            # except Exception as exc:
-            #     raise RuntimeError(
-            #         "Automatic boundary generation not possible. Please "
-            #         "provide the boundary manually.") from exc
+            try:
+                self._build_boundary(model_dim)
+            except Exception as exc:
+                raise RuntimeError(
+                    "Automatic boundary generation not possible. Please "
+                    "provide the boundary manually.") from exc
 
         # Rearrange boundary map in case of a periodic geometry
         if check_periodic:
-            # try:
-            self._check_for_periodicity(model_dim)
-            # except Exception as exc:
-            #     raise RuntimeError(
-            #         "Automatic periodicity check not possible. Please set "
-            #         "check_periodic = False and provide information on "
-            #         "periodicity through construction of initial_data and "
-            #         "periodic_default.") from exc
+            try:
+                self._check_for_periodicity(model_dim)
+            except Exception as exc:
+                raise RuntimeError(
+                    "Automatic periodicity check not possible. Please set "
+                    "check_periodic = False and provide information on "
+                    "periodicity through construction of initial_data and "
+                    "periodic_default.") from exc
 
         # Add missing groups as empty groups
         for key in POINT_GROUPS + EDGE_GROUPS + FACE_GROUPS:
