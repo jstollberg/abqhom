@@ -3,6 +3,8 @@ Collection of constants for the abqhom package.
 
 """
 
+import numpy as np
+
 try:
     import paraqus
     PARAQUS_INSTALLED = True
@@ -58,6 +60,18 @@ SLAVE_GROUPS_OFFSET_AXES = {"POINT_2": [0],
                             "FACE_4":  [1],
                             "FACE_6":  [0]}
 
+# Normal vectors on boundary groups (only the highest possible groups)
+NORMAL_VECTORS = {"EDGE_1": np.array([0.0, -1.0, 0.0]),
+                  "EGDE_2": np.array([1.0, 0.0, 0.0]),
+                  "EDGE_3": np.array([0.0, 1.0, 0.0]),
+                  "EDGE_4": np.array([-1.0, 0.0, 0.0]),
+                  "FACE_1": np.array([0.0, 0.0, -1.0]),
+                  "FACE_2": np.array([0.0, 0.0, 1.0]),
+                  "FACE_3": np.array([0.0, -1.0, 0.0]),
+                  "FACE_4": np.array([0.0, 1.0, 0.0]),
+                  "FACE_5": np.array([-1.0, 0.0, 0.0]),
+                  "FACE_6": np.array([1.0, 0.0, 0.0])}
+
 # Groups forming the boundary of a higher-dimensional group
 BOUNDARY_CONNECTIVITY = {"POINT_1": [],
                          "POINT_2": [],
@@ -85,6 +99,11 @@ BOUNDARY_CONNECTIVITY = {"POINT_1": [],
                          "FACE_4":  ["EDGE_3", "EDGE_12", "EDGE_7", "EDGE_11"],
                          "FACE_5":  ["EDGE_9", "EDGE_4", "EDGE_12", "EDGE_8"],
                          "FACE_6":  ["EDGE_10", "EDGE_2", "EDGE_11", "EDGE_6"]}
+
+# Extension for set names containing elements that are adjacent to
+# joints (or not adjacent to joints)
+JOINT_ADJACENT_EXTENSION = "_JOINT_ADJACENT"
+NOT_JOINT_ADJACENT_EXTENSION = "_NOT_JOINT_ADJACENT"
 
 # Default map from Gmsh element types to Abaqus element types for 2d models
 ABAQUS_ELEMENT_TYPES_2D = {1:  "B23",    # 2-node line

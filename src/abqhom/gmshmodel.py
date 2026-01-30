@@ -20,7 +20,9 @@ from abqhom.constants import (POINT_GROUPS, EDGE_GROUPS, FACE_GROUPS,
                               PERIODIC_PAIRS, ABAQUS_ELEMENT_TYPES_2D,
                               ABAQUS_ELEMENT_TYPES_3D, BOUNDARY_CONNECTIVITY,
                               ABAQUS_CONNECTIVITY_ORDER,
-                              SLAVE_GROUPS_OFFSET_AXES)
+                              SLAVE_GROUPS_OFFSET_AXES,
+                              JOINT_ADJACENT_EXTENSION,
+                              NOT_JOINT_ADJACENT_EXTENSION)
 
 
 class GmshRVE():
@@ -324,6 +326,137 @@ class GmshRVE():
          x_max, y_max, z_max) = self.boundary.get_bounding_box_from_points()
         return x_min, y_min, z_min, x_max, y_max, z_max
 
+    def get_nodes(self):
+        """
+        Get all relevant node from the mesh information.
+
+        Relevant nodes are the nodes located on entities of dimension
+        model_dimension and on physical groups.
+
+        Returns
+        -------
+        node_tags : ndarray
+            The relevant node tags.
+        node_coords : ndarray
+            The relevant node coordinates.
+
+        """
+
+        self.activate()
+
+        # Get nodes from physical groups
+        node_tags = []
+        node_coords = []
+        for group in gmsh.model.get_physical_groups():
+            if gmsh.model.get_physical_name(*group) in (POINT_GROUPS
+                                                        + EDGE_GROUPS
+                                                        + FACE_GROUPS):
+                continue
+
+            entities = gmsh.model.get_entities_for_physical_group(*group)
+            for tag in entities:
+                (entity_node_tags,
+                 entity_node_coords,
+                 _) = gmsh.model.mesh.get_nodes(group[0], tag,
+                                                includeBoundary=True)
+                node_tags.append(entity_node_tags)
+                node_coords.append(entity_node_coords)
+
+        # Get nodes from model dimension
+        main_node_tags, main_node_coords, _ = gmsh.model.mesh.get_nodes(
+            gmsh.model.get_dimension(), includeBoundary=True)
+        node_tags.append(main_node_tags)
+        node_coords.append(main_node_coords)
+
+        # Combine nodes and coordinates from different sources
+        node_tags = np.concatenate(node_tags, dtype=np.int64)
+        node_coords = np.concatenate(node_coords, dtype=np.float64)
+        node_coords = np.array(node_coords).reshape(-1, 3)
+        if self.model_dimension == 2:
+            node_coords[:, 2] = 0.0
+
+        # Make sure to not have duplicate nodes from physical groups
+        _, unique_idx = np.unique(node_tags, return_index=True)
+        node_tags = node_tags[unique_idx]
+        node_coords = node_coords[unique_idx]
+
+        return node_tags, node_coords
+
+    def get_elements(self):
+        """
+        Get all relevant elements from the mesh information.
+
+        Relevant elements are the elements located on entities of dimension
+        model_dimension and on physical groups.
+
+        Returns
+        -------
+        element_tags : dict[int, ndarray]
+            The relevant element tags. Keys are the Gmsh element types and
+            values are the element tags of the respective element type.
+        element_connectivity : dict[int, ndarray]
+            The relevant element connectivity lists. Keys are the Gmsh element
+            types and values are the connectivity lists.
+
+        """
+
+        element_tags = {}
+        element_connectivity = {}
+
+        # Get element information from physical groups
+        for group in gmsh.model.get_physical_groups():
+            if gmsh.model.get_physical_name(*group) in (POINT_GROUPS
+                                                        + EDGE_GROUPS
+                                                        + FACE_GROUPS):
+                continue
+
+            entities = gmsh.model.get_entities_for_physical_group(*group)
+            for tag in entities:
+                (entity_el_types,
+                 entity_el_tags,
+                 entity_conn) = gmsh.model.mesh.get_elements(group[0], tag)
+
+                for i, el_type in enumerate(entity_el_types):
+                    element_tags[el_type] = element_tags.get(el_type, [])
+                    element_connectivity[el_type] = element_connectivity.get(
+                        el_type, [])
+                    element_tags[el_type].append(entity_el_tags[i])
+                    element_connectivity[el_type].append(entity_conn[i])
+
+        # Get element information form entities of the model dimension
+        main_el_types, main_el_tags, main_conn = gmsh.model.mesh.getElements(
+            self.mesh_dimension)
+
+        for i, el_type in enumerate(main_el_types):
+            element_tags[el_type] = element_tags.get(el_type, [])
+            element_connectivity[el_type] = element_connectivity.get(el_type,
+                                                                     [])
+            element_tags[el_type].append(main_el_tags[i])
+            element_connectivity[el_type].append(main_conn[i])
+
+        # Rearrange connectivity list
+        for el_type in element_tags.keys():
+            element_tags[el_type] = np.concatenate(element_tags[el_type],
+                                                   dtype=np.uint64)
+            conn = np.concatenate(element_connectivity[el_type],
+                                  dtype=np.uint64)
+
+            nen = gmsh.model.mesh.getElementProperties(el_type)[3]
+            conn = conn.reshape(-1, nen)
+            conn = conn[:, ABAQUS_CONNECTIVITY_ORDER[el_type]]
+            element_connectivity[el_type] = conn
+
+        # Remove duplicate elements
+        for el_type in element_tags.keys():
+            tags = element_tags[el_type]
+            conn = element_connectivity[el_type]
+
+            _, unique_idx = np.unique(element_tags[el_type], return_index=True)
+            element_tags[el_type] = tags[unique_idx]
+            element_connectivity[el_type] = conn[unique_idx]
+
+        return element_tags, element_connectivity
+
     def _add_boundary_groups(self):
         """
         Add physical groups for boundary entities to the Gmsh model.
@@ -334,8 +467,19 @@ class GmshRVE():
 
         """
 
-        # Add physical groups to model
         self.activate()
+
+        # Check for name conflicts
+        boundary_groups = POINT_GROUPS + EDGE_GROUPS + FACE_GROUPS
+        for dimtag in gmsh.model.get_physical_groups():
+            name = gmsh.model.get_physical_name(*dimtag)
+            if name.upper() in [POINT_GROUPS + EDGE_GROUPS + FACE_GROUPS]:
+                raise RuntimeError(
+                    "Physical group {} conflicts with the automatically "
+                    "generated physical boundary groups. Do not use any of "
+                    "the following names: {}".format(name, boundary_groups))
+
+        # Add physical groups to model
         for name, dimtags in self.boundary.items():
             for dim in range(3):
                 entities = [j for i, j in dimtags if i == dim]
@@ -561,11 +705,10 @@ class GmshRVE():
                         ("BOUNDARY_NODES", (POINT_GROUPS + EDGE_GROUPS +
                                             FACE_GROUPS))]
         for set_name, set_items in special_sets:
-            self._add_set_from_sets(self.node_sets, set_name, set_items)
+            self._new_set_from_union(self.node_sets, set_name, *set_items)
 
         # Add sets for inner nodes and all nodes nodes
-        all_nodes = gmsh.model.mesh.get_nodes(gmsh.model.get_dimension(),
-                                              includeBoundary=True)[0]
+        all_nodes, _ = self.get_nodes()
         self.node_sets["ALL_NODES"] = np.unique(all_nodes).astype(np.uint64)
         self.node_sets["INNER_NODES"] = np.setdiff1d(
             self.node_sets["ALL_NODES"], self.node_sets["BOUNDARY_NODES"])
@@ -600,18 +743,12 @@ class GmshRVE():
         if self.mesh_dimension < 0:
             raise RuntimeError("There are no elements in the model.")
 
-        # Find all groups that need to be processed based on the mesh
-        # dimension
-        relevant_groups = gmsh.model.get_physical_groups(self.mesh_dimension)
-
-        # Initialize element sets
-        element_sets = {}
-
         # Add all sets containing elements of the highest available
         # dimension
-        for group in relevant_groups:
+        for group in gmsh.model.get_physical_groups():
             name = gmsh.model.get_physical_name(*group)
-            if len(name) == 0:
+            if (len(name) == 0) or (name in (POINT_GROUPS + EDGE_GROUPS
+                                             + FACE_GROUPS)):
                 continue
 
             group_elements = []
@@ -620,34 +757,24 @@ class GmshRVE():
                 elements = gmsh.model.mesh.get_elements(group[0], entity)[1]
                 elements = [e for el_type in elements for e in el_type]
                 group_elements.extend(elements)
-            element_sets[name] = np.array(group_elements, dtype=np.uint64)
-
-        # Make sure the elements only appear once in the sets
-        for name in element_sets.keys():
-            element_sets[name] = np.unique(element_sets[name])
+            self.element_sets[name] = (
+                np.unique(group_elements).astype(np.uint64))
 
         # Add a set for all elements in the model
-        all_elements = gmsh.model.mesh.get_elements(self.mesh_dimension)[1]
-        all_elements = [e for el_type in all_elements for e in el_type]
-        element_sets["ALL_ELEMENTS"] = np.array(all_elements, dtype=np.uint64)
+        all_elements, _ = self.get_elements()
+        all_elements = [e for t in all_elements.values() for e in t]
+        self.element_sets["ALL_ELEMENTS"] = np.array(all_elements,
+                                                     dtype=np.uint64)
 
-        # Assign sets to the object property
-        for name in element_sets.keys():
-            self.element_sets[name] = element_sets[name]
+        # Add sets that will be useful for joint stiffening of beams
+        self._add_joint_adjacent_element_sets()
 
-    def _add_set_from_sets(self, set_dictionary, set_name, set_items):
+    def _add_joint_adjacent_element_sets(self):
         """
-        Add node or element sets combining multiple existing sets.
+        Add sets for elements that are adjacent to joints.
 
-        Parameters
-        ----------
-        set_dictionary : dict[str, np.ndarray]
-            The dictionary to add the new set to and containing the sets
-            to consider when creating the new set.
-        set_name : str
-            The name of the new set.
-        set_items : Iterable[str]
-            The names of the sets that will be combined to the new set.
+        The inverse sets (i.e. elements that are not adjacent to points)
+        will be created as well.
 
         Returns
         -------
@@ -655,12 +782,120 @@ class GmshRVE():
 
         """
 
-        new_set = []
+        joint_adjacents = {}
+
+        # Check all point entities (representing the joints)
+        points = gmsh.model.get_entities(0)
+        for point in points:
+
+            # Find the node on the joint connection
+            target = gmsh.model.mesh.get_nodes(*point)[0][0]
+
+            # Check all 1d physical groups for possible connections
+            for group, elements in self.element_sets.items():
+                for e in elements:
+                    nodes = gmsh.model.mesh.get_element(e)[1]
+                    if target in nodes:
+                        adjacent_elements = joint_adjacents.get(group, [])
+                        adjacent_elements.append(e)
+                        joint_adjacents[group] = adjacent_elements
+
+        # Add the sets to the element set dictionary
+        for name, elements in joint_adjacents.items():
+            self.element_sets[name + JOINT_ADJACENT_EXTENSION] = (
+                np.unique(elements).astype(np.uint64))
+            self._new_set_from_cut(self.element_sets,
+                                   name + NOT_JOINT_ADJACENT_EXTENSION,
+                                   name, name + JOINT_ADJACENT_EXTENSION)
+
+    def _new_set_from_union(self, set_dictionary, set_name, *set_items):
+        """
+        Add node or element sets as the union of existing sets.
+
+        **The order of the items in the new set will be arbitrary.**
+
+        Parameters
+        ----------
+        set_dictionary : dict[str, ndarray]
+            The dictionary to add the new set to and containing the sets
+            to consider when creating the new set.
+        set_name : str
+            The name of the new set.
+        set_items : str
+            The names of the sets that will be united to the new set.
+
+        Returns
+        -------
+        None.
+
+        """
+
+        union = set()
         for i in set_items:
-            item = set_dictionary.get(i)
-            if item is not None:
-                new_set.extend(item)
-        set_dictionary[set_name] = np.array(new_set, dtype=np.uint64)
+            union.update(set_dictionary.get(i, []))
+
+        set_dictionary[set_name] = np.array(list(union), dtype=np.uint64)
+
+    def _new_set_from_intersection(self, set_dictionary, set_name, *set_items):
+        """
+        Add node or element sets as the intersection of existing sets.
+
+        **The order of the items in the new set will be arbitrary.**
+
+        Parameters
+        ----------
+        set_dictionary : dict[str, ndarray]
+            The dictionary to add the new set to and containing the sets
+            to consider when creating the new set.
+        set_name : str
+            The name of the new set.
+        set_items : str
+            The names of the sets that will be intersected to the new
+            set.
+
+        Returns
+        -------
+        None.
+
+        """
+
+        intersection = set()
+        for i in set_items:
+            intersection.update(set_dictionary.get(i), [])
+
+        for i in set_items:
+            item = set(set_dictionary.get(i), [])
+            intersection = intersection & item
+
+        set_dictionary[set_name] = np.array(list(intersection),
+                                            dtype=np.uint64)
+
+    def _new_set_from_cut(self, set_dictionary, set_name, item, tool):
+        """
+        Add node or element sets as the cut of existing sets.
+
+        **The order of the items in the new set will be arbitrary.**
+
+        Parameters
+        ----------
+        set_dictionary : dict[str, ndarray]
+            The dictionary to add the new set to and containing the sets
+            to consider when creating the new set.
+        set_name : str
+            The name of the new set.
+        item : str
+            The name of the set that will act as the item.
+        tool : str
+            The name of the set that will act as the tool.
+
+        Returns
+        -------
+        None.
+
+        """
+
+        cut = set(set_dictionary[item]) - set(set_dictionary[tool])
+        set_dictionary[set_name] = np.array(list(cut), dtype=np.int64)
 
     def write_abaqus_input(self, custom_types={}):
         """
@@ -694,22 +929,8 @@ class GmshRVE():
         el_type_map.update(custom_types)
 
         # Get node information
-        node_tags, node_coords, _ = gmsh.model.mesh.get_nodes(
-            gmsh.model.get_dimension(), includeBoundary=True)
-        node_coords = np.array(node_coords, dtype=np.float64).reshape(-1, 3)
-        if self.model_dimension == 2:
-            node_coords[:, 2] = 0.0
-
-        # Get element information
-        el_types, el_tags, conn = gmsh.model.mesh.getElements(
-            self.mesh_dimension)
-
-        # Reorder the connectivity list in terms of the Abaqus node
-        # order
-        for i, el_type in enumerate(el_types):
-            _, _, _, nen, _, _ = gmsh.model.mesh.getElementProperties(el_type)
-            conn[i] = np.array(conn).reshape(-1, nen)
-            conn[i] = conn[i][:, ABAQUS_CONNECTIVITY_ORDER[el_type]]
+        node_tags, node_coords = self.get_nodes()
+        element_tags, conn = self.get_elements()
 
         # Initialize Abaqus input file
         path = os.path.abspath(self.model_name + ".inp")
@@ -723,7 +944,10 @@ class GmshRVE():
                     tag, coords[0], coords[1], coords[2]))
 
             # Add elements
-            for el_type, type_tags, type_conn in zip(el_types, el_tags, conn):
+            for el_type in element_tags.keys():
+                type_tags = element_tags[el_type]
+                type_conn = conn[el_type]
+
                 file.write("*ELEMENT, TYPE={}\n".format(el_type_map[el_type]))
                 for tag, nodes in zip(type_tags, type_conn):
                     file.write("{}".format(tag))
@@ -1097,7 +1321,7 @@ class Boundary(UserDict, object):
 
             # Generate sample points
             coords = self._generate_sample_points_on_entity(
-                dim, tag, self.sampling_density)
+                dim, tag, self.sampling_density, tol)
 
             # Check if the entity is entirely inside the bounding box
             x, y, z = coords[:, 0], coords[:, 1], coords[:, 2]
@@ -1189,7 +1413,7 @@ class Boundary(UserDict, object):
 
         return group_to_coords
 
-    def _generate_sample_points_on_entity(self, dim, tag, n):
+    def _generate_sample_points_on_entity(self, dim, tag, n, tol):
         """
         Create n sample points per direction on a Gmsh entity.
 
@@ -1201,6 +1425,8 @@ class Boundary(UserDict, object):
             The Gmsh identifier tag of the entitiy.
         n : int
             The number of sample points per direction.
+        tol : float
+            The offset tolarance from the entitiy boundary.
 
         Returns
         -------
@@ -1212,7 +1438,7 @@ class Boundary(UserDict, object):
         (bounds_min,
          bounds_max) = gmsh.model.get_parametrization_bounds(dim, tag)
         sample_points = [np.linspace(i, j, n)
-                         for i, j in zip(bounds_min, bounds_max)]
+                         for i, j in zip(bounds_min + tol, bounds_max - tol)]
         sample_points = np.meshgrid(*sample_points)
 
         # Get the physical coordinates from the parametric space
@@ -1278,10 +1504,9 @@ class Boundary(UserDict, object):
             coords = coords[np.lexsort([coords[:, i] for i in order])]
             return coords
 
-        boundary_groups = {0: ["POINT_1"],
-                           1: ["POINT_1", "POINT_2"],
-                           2: ["POINT_1", "POINT_2", "POINT_3", "POINT_4",
-                               "EDGE_1", "EDGE_2", "EDGE_3", "EDGE_4"],
+        boundary_groups = {0: POINT_GROUPS[0],
+                           1: POINT_GROUPS[0:2],
+                           2: POINT_GROUPS[0:4] + EDGE_GROUPS[0:4],
                            3: POINT_GROUPS + EDGE_GROUPS + FACE_GROUPS}
 
         # Make a deepcopy of the original boundary map
@@ -1302,7 +1527,8 @@ class Boundary(UserDict, object):
             for master_dimtag in master_entities:
                 # Generate sample points on the master entity
                 coords_master = self._generate_sample_points_on_entity(
-                    master_dimtag[0], master_dimtag[1], self.sampling_density)
+                    master_dimtag[0], master_dimtag[1], self.sampling_density,
+                    tol)
                 coords_master = sort_sample_coordinates(coords_master, master)
 
                 # Check periodicity for all potential slave entities
@@ -1314,7 +1540,7 @@ class Boundary(UserDict, object):
                     # entity
                     coords_slave = self._generate_sample_points_on_entity(
                         slave_dimtag[0], slave_dimtag[1],
-                        self.sampling_density)
+                        self.sampling_density, tol)
                     coords_slave = sort_sample_coordinates(coords_slave,
                                                            master)
 
@@ -1328,6 +1554,7 @@ class Boundary(UserDict, object):
                     delta_true = np.abs(coords_slave - coords_master)
                     delta_expected = np.nan_to_num(np.abs(
                         group_to_coords[slave] - group_to_coords[master]))
+
                     if np.allclose(delta_true, delta_expected, atol=tol):
                         slave_indices.append(slave_index)
                         break

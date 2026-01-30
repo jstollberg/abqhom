@@ -9,14 +9,16 @@ import numpy as np
 
 from abqhom.constants import (POINT_GROUPS, EDGE_GROUPS, FACE_GROUPS,
                               PERIODIC_PAIRS, ELEMENTS_ROTATIONAL_DOFS,
-                              PARAQUS_INSTALLED, ELEMENTS_WARPING_DOFS)
+                              PARAQUS_INSTALLED, ELEMENTS_WARPING_DOFS,
+                              BOUNDARY_CONNECTIVITY, NORMAL_VECTORS,
+                              JOINT_ADJACENT_EXTENSION,
+                              NOT_JOINT_ADJACENT_EXTENSION)
 
 from abaqus import Mdb, mdb, session
 from regionToolset import Region
 from mesh import MeshNodeArray, MeshElementArray
 from abaqusConstants import (THREE_D, TWO_D_PLANAR, DEFORMABLE_BODY, ON, UNSET,
-                             CARTESIAN, N1_COSINES, DURING_ANALYSIS, TOTAL,
-                             EVERY_TIME_INCREMENT)
+                             CARTESIAN, N1_COSINES, DURING_ANALYSIS, TOTAL)
 
 if PARAQUS_INSTALLED:
     from paraqus.abaqus import OdbReader
@@ -59,17 +61,24 @@ class AbaqusRVE():
     >>> from abqhom.gmshmodel import GmshRVE
     >>> from abqhom.abqmodel import AbaqusRVE, LoadHistory
     >>>
+    >>> # Assume a model with the name GMSH_MODEL exists in Gmsh
+    >>> gmsh_RVE = GmshRVE("GMSH_MODEL")
+    >>> gmsh_RVE.add_periodic_mesh_constraints()
+    >>> gmsh_RVE.generate_mesh()
+    >>> input_file_path = unit_cell.write_abaqus_input()
+    >>>
     >>> # Strain in x-direction
     >>> def strain_path(time):
-    >>>     strain = np.zeros(6)
-    >>>     strain[0] = 0.1*time
+    >>>     strain = np.zeros((3,3))
+    >>>     strain[0, 0] = 0.1*time
     >>>     return strain
     >>>
+    >>> # Create the load history
     >>> time = np.linspace(0.0, 1.0, 50)
     >>> history = LoadHistory(time, strain_path)
     >>>
     >>> # Assume there exists a GmshRVE, create an AbaqusRVE from that
-    >>> unit_cell = AbaqusRVE(gmsh_RVE, "abaqus_input.inp")
+    >>> unit_cell = AbaqusRVE(gmsh_RVE, input_file_path)
     >>>
     >>> # Assign material and sections
     >>> material = unit_cell.model.Material(name="Steel")
@@ -403,6 +412,42 @@ class AbaqusRVE():
         raise NotImplementedError(
             "Uniform traction boundary conditions are not yet supported.")
 
+        if self._bc_initialized:
+            raise RuntimeError(
+                "Boundary conditions have already been initialized.")
+
+        if (self._collect_element_types() <= ELEMENTS_ROTATIONAL_DOFS or
+                self._collect_element_types() <= ELEMENTS_WARPING_DOFS):
+            raise NotImplementedError(
+                "Uniform traction boundary conditions are not supported for "
+                "elements with rotational or warping degrees of freedom. "
+                "Please use periodic boundary conditions.")
+
+        def collect_nodes(group, nodes):
+            for group in BOUNDARY_CONNECTIVITY[group]:
+                nodes.append([])
+                collect_nodes(group, nodes)
+
+        time_history = stress_history.time_data
+        stress_history = stress_history.load_data
+
+        # Recursively apply forces
+        boundary_groups = FACE_GROUPS
+        if self.model_dimension == TWO_D_PLANAR:
+            boundary_groups = EDGE_GROUPS[0:4]
+
+        for group in boundary_groups:
+            nodes = []  # Here need to be the nodes of groups
+            collect_nodes(group, nodes)
+
+            region = Region(nodes=MeshNodeArray(nodes=nodes))
+            normal_vector = NORMAL_VECTORS[group]
+            t_history = np.dot(stress_history, normal_vector)
+
+            # Apply load to nodes in region
+
+        self._bc_initialized = True
+
     def apply_affine_displacement_BC(self, initialization_step,
                                      strain_history):
         r"""
@@ -418,19 +463,19 @@ class AbaqusRVE():
             \boldsymbol{u} =
             \boldsymbol{\mathcal{E}} \cdot \boldsymbol{X}
 
-        whereby the prescribed macroscopic strain is the linearized
-        strain tensor
-
-        .. math::
-            \boldsymbol{\mathcal{E}} = \boldsymbol{\varepsilon}
-
+        whereby the prescribed macroscopic strain
+        :math:`\boldsymbol{\mathcal{E}}`
+        is the linearized strain tensor
+        :math:`\boldsymbol{\mathcal{E}} = \boldsymbol{\varepsilon}`
         for geometrically linear analyses and the deformation gradient
         minus the identity tensor
-
-        .. math::
-            \boldsymbol{\mathcal{E}} = \boldsymbol{F} - \boldsymbol{I}
-
+        :math:`\boldsymbol{\mathcal{E}} = \boldsymbol{F} -
+        \boldsymbol{I}`
         for geometrically nonlinear analyses.
+
+        **Affine displacement boundary conditions are not supported for
+        models containing elements with rotational or warping degrees
+        of freedom.**
 
         Parameters
         ----------
@@ -450,10 +495,11 @@ class AbaqusRVE():
             raise RuntimeError(
                 "Boundary conditions have already been initialized.")
 
-        if self._collect_element_types() <= ELEMENTS_ROTATIONAL_DOFS:
+        if (self._collect_element_types() <= ELEMENTS_ROTATIONAL_DOFS or
+                self._collect_element_types() <= ELEMENTS_WARPING_DOFS):
             raise NotImplementedError(
                 "Affine displacement boundary conditions are not supported "
-                "for elements with rotational degrees of freedom. "
+                "for elements with rotational or warping degrees of freedom. "
                 "Please use periodic boundary conditions.")
 
         time_history = strain_history.time_data
@@ -475,7 +521,7 @@ class AbaqusRVE():
 
     def apply_periodic_BC(self, initialization_step, strain_history):
         r"""
-        Apply periodic boundary conditions.
+        Apply periodic displacement boundary conditions.
 
         The boundary conditions will be transferred to all subsequent
         steps, i.e. the strain history must be formulated w.r.t. the
@@ -488,19 +534,25 @@ class AbaqusRVE():
             \boldsymbol{\mathcal{E}} \cdot \left[
                 \boldsymbol{X}^{+} - \boldsymbol{X}^{-} \right]
 
-        whereby the prescribed macroscopic strain is the linearized
-        strain tensor
-
-        .. math::
-            \boldsymbol{\mathcal{E}} = \boldsymbol{\varepsilon}
-
+        whereby the prescribed macroscopic strain
+        :math:`\boldsymbol{\mathcal{E}}`
+        is the linearized strain tensor
+        :math:`\boldsymbol{\mathcal{E}} = \boldsymbol{\varepsilon}`
         for geometrically linear analyses and the deformation gradient
         minus the identity tensor
+        :math:`\boldsymbol{\mathcal{E}} = \boldsymbol{F} -
+        \boldsymbol{I}`
+        for geometrically nonlinear analyses.
+
+        If the model contains rotational degrees of freedom, additional
+        constraints of the form
 
         .. math::
-            \boldsymbol{\mathcal{E}} = \boldsymbol{F} - \boldsymbol{I}
+            \boldsymbol{\theta}^{+} - \boldsymbol{\theta}^{-} =
+            \boldsymbol{0}
 
-        for geometrically nonlinear analyses.
+        will be enforced, implying that the macroscopic curvature is
+        assumed to be zero.
 
         Parameters
         ----------
@@ -650,20 +702,17 @@ class AbaqusRVE():
 
         self._bc_initialized = True
 
-    def assign_solid_section(self, section_name, material_name,
-                             element_set_name):
+    def assign_solid_section(self, element_set_name, material_name):
         """
         Assign a solid material section to an element set.
 
         Parameters
         ----------
-        section_name : str
-            The name of the section to be created.
+        element_set_name : str
+            The name of the element set that is assigned the section.
         material_name : str
             The name of the material that is associated with the
             section. The material should exist already.
-        element_set_name : str
-            The name of the element set that is assigned the section.
 
         Returns
         -------
@@ -671,12 +720,12 @@ class AbaqusRVE():
 
         """
 
-        self.model.HomogeneousSolidSection(name=section_name,
+        self.model.HomogeneousSolidSection(name=element_set_name,
                                            material=material_name)
-        self._assign_general_section(section_name, element_set_name)
+        self._assign_general_section(element_set_name, element_set_name)
 
-    def assign_beam_section(self, section_name, material_name,
-                            element_set_name, radius):
+    def assign_beam_section(self, element_set_name, material_name, radius,
+                            joint_stiffening_factor=1.0):
         """
         Assign a beam section with circular profile to an element set.
 
@@ -684,15 +733,18 @@ class AbaqusRVE():
 
         Parameters
         ----------
-        section_name : str
-            The name of the section to be created.
+        element_set_name : str
+            The name of the element set that is assigned the section.
         material_name : str
             The name of the material that is associated with the
             section. The material should exist already.
-        element_set_name : str
-            The name of the element set that is assigned the section.
         radius : float
             The radius of the circular cross-sectional area.
+        joint_stiffening_factor : float
+            Factor to apply the radius with to account for joint
+            stiffening. Only the redius of the beam element closest to
+            the joint will be changed. The joint stiffening effect will
+            only be activated if the discretization is fine enough.
 
         Returns
         -------
@@ -700,31 +752,48 @@ class AbaqusRVE():
 
         """
 
-        self.model.CircularProfile(name=section_name, r=radius)
-        self.model.BeamSection(name=section_name, integration=DURING_ANALYSIS,
-                               profile=section_name, material=material_name)
-        self._assign_general_section(section_name, element_set_name)
-        self._assign_beam_section_orientation(element_set_name)
+        if joint_stiffening_factor <= 0.0:
+            raise ValueError("The joint stiffening factor must be greater "
+                             "than zero to avoid singular or negative radii.")
 
-    def _assign_shell_section(self, section_name, material_name,
-                              element_set_name):
+        # Define an iterator for the different beam sections
+        iterator = [[JOINT_ADJACENT_EXTENSION, joint_stiffening_factor],
+                    [NOT_JOINT_ADJACENT_EXTENSION, 1.0]]
+
+        # Check if all sets are available
+        not_joint_set = element_set_name + NOT_JOINT_ADJACENT_EXTENSION
+        if ((not_joint_set not in self.part.sets) and
+                ("ELSET_" + not_joint_set not in self.part.sets)):
+            iterator.pop(-1)
+            iterator[0][1] = 1.0
+
+        # Assign the sections
+        for ext, factor in iterator:
+            extended_set_name = element_set_name + ext
+
+            self.model.CircularProfile(name=extended_set_name, r=factor*radius)
+            self.model.BeamSection(name=extended_set_name,
+                                   integration=DURING_ANALYSIS,
+                                   profile=extended_set_name,
+                                   material=material_name)
+            self._assign_general_section(extended_set_name, extended_set_name)
+            self._assign_beam_section_orientation(extended_set_name)
+
+    def _assign_shell_section(self, element_set_name, material_name):
         """This method is not yet implemented."""
         raise NotImplementedError("Shell sections are not supported yet.")
 
-    def assign_truss_section(self, section_name, material_name,
-                             element_set_name, area):
+    def assign_truss_section(self, element_set_name, material_name, area):
         """
         Assign a truss section to an element set.
 
         Parameters
         ----------
-        section_name : str
-            The name of the section to be created.
+        element_set_name : str
+            The name of the element set that is assigned the section.
         material_name : str
             The name of the material that is associated with the
             section. The material should exist already.
-        element_set_name : str
-            The name of the element set that is assigned the section.
         area : float
             The cross-sectional area of the beam.
 
@@ -734,9 +803,9 @@ class AbaqusRVE():
 
         """
 
-        self.model.TrussSection(name=section_name, material=material_name,
+        self.model.TrussSection(name=element_set_name, material=material_name,
                                 area=area)
-        self._assign_general_section(section_name, element_set_name)
+        self._assign_general_section(element_set_name, element_set_name)
 
     def _assign_general_section(self, section_name, element_set_name):
         """
@@ -851,7 +920,8 @@ class AbaqusRVE():
                     continue
                 self.model.FieldOutputRequest(
                     name="FIELD_OUTPUT_" + step, createStepName=step,
-                    variables=field_outputs, timeInterval=EVERY_TIME_INCREMENT)
+                    variables=field_outputs)
+                    # timeInterval=EVERY_TIME_INCREMENT)
 
         # Request the history outputs
         if len(history_outputs) > 0:
@@ -860,7 +930,8 @@ class AbaqusRVE():
                     continue
                 self.model.HistoryOutputRequest(
                     name="HISTORY_OUTPUT_" + step, createStepName=step,
-                    variables=field_outputs, timeInterval=EVERY_TIME_INCREMENT)
+                    variables=history_outputs)
+                    # timeInterval=EVERY_TIME_INCREMENT)
 
         # Create and run the job
         job_name = "JOB_" + self.model_name
