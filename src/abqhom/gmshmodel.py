@@ -20,9 +20,7 @@ from abqhom.constants import (POINT_GROUPS, EDGE_GROUPS, FACE_GROUPS,
                               PERIODIC_PAIRS, ABAQUS_ELEMENT_TYPES_2D,
                               ABAQUS_ELEMENT_TYPES_3D, BOUNDARY_CONNECTIVITY,
                               ABAQUS_CONNECTIVITY_ORDER,
-                              SLAVE_GROUPS_OFFSET_AXES,
-                              JOINT_ADJACENT_EXTENSION,
-                              NOT_JOINT_ADJACENT_EXTENSION)
+                              SLAVE_GROUPS_OFFSET_AXES)
 
 
 class GmshRVE():
@@ -765,48 +763,6 @@ class GmshRVE():
         all_elements = [e for t in all_elements.values() for e in t]
         self.element_sets["ALL_ELEMENTS"] = np.array(all_elements,
                                                      dtype=np.uint64)
-
-        # Add sets that will be useful for joint stiffening of beams
-        self._add_joint_adjacent_element_sets()
-
-    def _add_joint_adjacent_element_sets(self):
-        """
-        Add sets for elements that are adjacent to joints.
-
-        The inverse sets (i.e. elements that are not adjacent to points)
-        will be created as well.
-
-        Returns
-        -------
-        None.
-
-        """
-
-        joint_adjacents = {}
-
-        # Check all point entities (representing the joints)
-        points = gmsh.model.get_entities(0)
-        for point in points:
-
-            # Find the node on the joint connection
-            target = gmsh.model.mesh.get_nodes(*point)[0][0]
-
-            # Check all 1d physical groups for possible connections
-            for group, elements in self.element_sets.items():
-                for e in elements:
-                    nodes = gmsh.model.mesh.get_element(e)[1]
-                    if target in nodes:
-                        adjacent_elements = joint_adjacents.get(group, [])
-                        adjacent_elements.append(e)
-                        joint_adjacents[group] = adjacent_elements
-
-        # Add the sets to the element set dictionary
-        for name, elements in joint_adjacents.items():
-            self.element_sets[name + JOINT_ADJACENT_EXTENSION] = (
-                np.unique(elements).astype(np.uint64))
-            self._new_set_from_cut(self.element_sets,
-                                   name + NOT_JOINT_ADJACENT_EXTENSION,
-                                   name, name + JOINT_ADJACENT_EXTENSION)
 
     def _new_set_from_union(self, set_dictionary, set_name, *set_items):
         """

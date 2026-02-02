@@ -10,9 +10,7 @@ import numpy as np
 from abqhom.constants import (POINT_GROUPS, EDGE_GROUPS, FACE_GROUPS,
                               PERIODIC_PAIRS, ELEMENTS_ROTATIONAL_DOFS,
                               PARAQUS_INSTALLED, ELEMENTS_WARPING_DOFS,
-                              BOUNDARY_CONNECTIVITY, NORMAL_VECTORS,
-                              JOINT_ADJACENT_EXTENSION,
-                              NOT_JOINT_ADJACENT_EXTENSION)
+                              BOUNDARY_CONNECTIVITY, NORMAL_VECTORS)
 
 from abaqus import Mdb, mdb, session
 from regionToolset import Region
@@ -724,8 +722,7 @@ class AbaqusRVE():
                                            material=material_name)
         self._assign_general_section(element_set_name, element_set_name)
 
-    def assign_beam_section(self, element_set_name, material_name, radius,
-                            joint_stiffening_factor=1.0):
+    def assign_beam_section(self, element_set_name, material_name, radius):
         """
         Assign a beam section with circular profile to an element set.
 
@@ -740,11 +737,6 @@ class AbaqusRVE():
             section. The material should exist already.
         radius : float
             The radius of the circular cross-sectional area.
-        joint_stiffening_factor : float
-            Factor to apply the radius with to account for joint
-            stiffening. Only the redius of the beam element closest to
-            the joint will be changed. The joint stiffening effect will
-            only be activated if the discretization is fine enough.
 
         Returns
         -------
@@ -752,32 +744,13 @@ class AbaqusRVE():
 
         """
 
-        if joint_stiffening_factor <= 0.0:
-            raise ValueError("The joint stiffening factor must be greater "
-                             "than zero to avoid singular or negative radii.")
-
-        # Define an iterator for the different beam sections
-        iterator = [[JOINT_ADJACENT_EXTENSION, joint_stiffening_factor],
-                    [NOT_JOINT_ADJACENT_EXTENSION, 1.0]]
-
-        # Check if all sets are available
-        not_joint_set = element_set_name + NOT_JOINT_ADJACENT_EXTENSION
-        if ((not_joint_set not in self.part.sets) and
-                ("ELSET_" + not_joint_set not in self.part.sets)):
-            iterator.pop(-1)
-            iterator[0][1] = 1.0
-
-        # Assign the sections
-        for ext, factor in iterator:
-            extended_set_name = element_set_name + ext
-
-            self.model.CircularProfile(name=extended_set_name, r=factor*radius)
-            self.model.BeamSection(name=extended_set_name,
-                                   integration=DURING_ANALYSIS,
-                                   profile=extended_set_name,
-                                   material=material_name)
-            self._assign_general_section(extended_set_name, extended_set_name)
-            self._assign_beam_section_orientation(extended_set_name)
+        self.model.CircularProfile(name=element_set_name, r=radius)
+        self.model.BeamSection(name=element_set_name,
+                               integration=DURING_ANALYSIS,
+                               profile=element_set_name,
+                               material=material_name)
+        self._assign_general_section(element_set_name, element_set_name)
+        self._assign_beam_section_orientation(element_set_name)
 
     def _assign_shell_section(self, element_set_name, material_name):
         """This method is not yet implemented."""

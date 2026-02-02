@@ -100,11 +100,6 @@ BOUNDARY_CONNECTIVITY = {"POINT_1": [],
                          "FACE_5":  ["EDGE_9", "EDGE_4", "EDGE_12", "EDGE_8"],
                          "FACE_6":  ["EDGE_10", "EDGE_2", "EDGE_11", "EDGE_6"]}
 
-# Extension for set names containing elements that are adjacent to
-# joints (or not adjacent to joints)
-JOINT_ADJACENT_EXTENSION = "_JOINT_ADJACENT"
-NOT_JOINT_ADJACENT_EXTENSION = "_NOT_JOINT_ADJACENT"
-
 # Default map from Gmsh element types to Abaqus element types for 2d models
 ABAQUS_ELEMENT_TYPES_2D = {1:  "B23",    # 2-node line
                            2:  "CPE3",   # 3-node triangle
