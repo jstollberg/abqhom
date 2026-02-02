@@ -16,7 +16,6 @@ import gmsh
 from abqhom.utils import voigt_to_tensor, tensor_to_voigt
 from abqhom.gmshmodel import GmshRVE
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
-from abqhom.utils import reuss, voigt, export_to_csv_file
 
 
 def create_geometry(model_name, edge_length=1.0, nodes_matrix=10,
@@ -71,12 +70,11 @@ def create_geometry(model_name, edge_length=1.0, nodes_matrix=10,
 
     gmsh.model.geo.mesh.set_transfinite_volume(volume)
 
-    # Add one fiber
-    # TODO: Here you need to generate your fibers
-    fiber_p1 = gmsh.model.geo.add_point(-0.25*dx, 0.25*dy, -0.5*dz + 0.001*dz)
-    fiber_p2 = gmsh.model.geo.add_point(-0.25*dx, 0.25*dy, 0.5*dz - 0.001*dz)
-    fiber_p3 = gmsh.model.geo.add_point(0.25*dx, -0.25*dy, -0.5*dz + 0.001*dz)
-    fiber_p4 = gmsh.model.geo.add_point(0.25*dx, -0.25*dy, 0.5*dz - 0.001*dz)
+    # Add two fibers
+    fiber_p1 = gmsh.model.geo.add_point(-0.25*dx, 0.25*dy, -0.499*dz)
+    fiber_p2 = gmsh.model.geo.add_point(-0.25*dx, 0.25*dy, 0.499*dz)
+    fiber_p3 = gmsh.model.geo.add_point(0.25*dx, -0.25*dy, -0.499*dz)
+    fiber_p4 = gmsh.model.geo.add_point(0.25*dx, -0.25*dy, 0.499*dz)
     fiber_1 = gmsh.model.geo.add_line(fiber_p1, fiber_p2)
     fiber_2 = gmsh.model.geo.add_line(fiber_p3, fiber_p4)
     gmsh.model.geo.mesh.set_transfinite_curve(fiber_1, nodes_fibers)
