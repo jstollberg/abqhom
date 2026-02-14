@@ -61,7 +61,7 @@ def voigt_to_tensor(voigt_tensor, quantity):
     return tensor
 
 
-def tensor_to_voigt(tensor, quantity):
+def tensor_to_voigt(tensor, quantity, check_symmetry=True):
     """
     Transform a sequence of tensors to Voigt notation.
 
@@ -72,6 +72,9 @@ def tensor_to_voigt(tensor, quantity):
     quantity : str
         The quantity that is described by the tensor. Currently
         supported are 'STRESS' and 'STRAIN'.
+    check_symmetry : bool
+        If True, the input will be checked for symmetry. The default
+        is True.
 
     Returns
     -------
@@ -88,7 +91,7 @@ def tensor_to_voigt(tensor, quantity):
 
     voigt = []
     for t in tensor:
-        if not np.allclose(t, t.T):
+        if not np.allclose(t, t.T) and check_symmetry:
             raise ValueError("The provided tensor is not symmetric.")
 
         if t.shape == (3, 3):
