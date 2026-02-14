@@ -857,7 +857,7 @@ class AbaqusRVE():
                                                    method=N1_COSINES,
                                                    n1=normal)
 
-    def run_analysis(self, field_outputs=["NFORC"], history_outputs=[],
+    def run_analysis(self, field_outputs=[], history_outputs=[],
                      **kwargs):
         """
         Create the job and run the finite element analysis in Abaqus.
@@ -866,7 +866,7 @@ class AbaqusRVE():
         ----------
         field_outputs : list[str], optional
             The field outputs that shall be computed. The default is
-            ["NFORC"].
+            [].
         history_outputs : list[str], optional
             The history outputs that shall be computed. The default is
             [].
@@ -885,6 +885,10 @@ class AbaqusRVE():
             del self.model.fieldOutputRequests["F-Output-1"]
         if "H-Output-1" in self.model.historyOutputRequests:
             del self.model.historyOutputRequests["H-Output-1"]
+
+        # Request at least internal force outputs
+        if "NFORC" not in field_outputs:
+            field_outputs.append("NFORC")
 
         # Request the field outputs
         if len(field_outputs) > 0:
@@ -1089,8 +1093,9 @@ class AbaqusRVE():
 
         Returns
         -------
-        stress : numpy.ndarray[flot]
-            The averaged stress tensor in 2d or 3d Voigt notation.
+        stress : numpy.ndarray[float]
+            The averaged stress tensor in 2d or 3d symbolic tensor
+            notation.
 
         """
 
