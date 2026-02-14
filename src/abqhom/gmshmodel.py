@@ -328,8 +328,7 @@ class GmshRVE():
         """
         Get all relevant node from the mesh information.
 
-        Relevant nodes are the nodes located on entities of dimension
-        model_dimension and on physical groups.
+        Relevant nodes are the nodes located on physical groups.
 
         Returns
         -------
@@ -361,14 +360,14 @@ class GmshRVE():
                 node_coords.append(entity_node_coords)
 
         # Get nodes from model dimension
-        main_node_tags, main_node_coords, _ = gmsh.model.mesh.get_nodes(
-            gmsh.model.get_dimension(), includeBoundary=True)
-        node_tags.append(main_node_tags)
-        node_coords.append(main_node_coords)
+        # main_node_tags, main_node_coords, _ = gmsh.model.mesh.get_nodes(
+        #     gmsh.model.get_dimension(), includeBoundary=True)
+        # node_tags.append(main_node_tags)
+        # node_coords.append(main_node_coords)
 
-        # Combine nodes and coordinates from different sources
-        node_tags = np.concatenate(node_tags, dtype=np.int64)
-        node_coords = np.concatenate(node_coords, dtype=np.float64)
+        # # Combine nodes and coordinates from different sources
+        node_tags = np.concatenate(node_tags)
+        node_coords = np.concatenate(node_coords)
         node_coords = np.array(node_coords).reshape(-1, 3)
         if self.model_dimension == 2:
             node_coords[:, 2] = 0.0
@@ -384,8 +383,7 @@ class GmshRVE():
         """
         Get all relevant elements from the mesh information.
 
-        Relevant elements are the elements located on entities of dimension
-        model_dimension and on physical groups.
+        Relevant elements are the elements located on physical groups.
 
         Returns
         -------
@@ -422,15 +420,15 @@ class GmshRVE():
                     element_connectivity[el_type].append(entity_conn[i])
 
         # Get element information form entities of the model dimension
-        main_el_types, main_el_tags, main_conn = gmsh.model.mesh.getElements(
-            self.mesh_dimension)
+        # main_el_types, main_el_tags, main_conn = gmsh.model.mesh.getElements(
+        #     self.mesh_dimension)
 
-        for i, el_type in enumerate(main_el_types):
-            element_tags[el_type] = element_tags.get(el_type, [])
-            element_connectivity[el_type] = element_connectivity.get(el_type,
-                                                                     [])
-            element_tags[el_type].append(main_el_tags[i])
-            element_connectivity[el_type].append(main_conn[i])
+        # for i, el_type in enumerate(main_el_types):
+        #     element_tags[el_type] = element_tags.get(el_type, [])
+        #     element_connectivity[el_type] = element_connectivity.get(el_type,
+        #                                                              [])
+        #     element_tags[el_type].append(main_el_tags[i])
+        #     element_connectivity[el_type].append(main_conn[i])
 
         # Rearrange connectivity list
         for el_type in element_tags.keys():
