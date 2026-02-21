@@ -10,7 +10,8 @@ import numpy as np
 from abqhom.constants import (POINT_GROUPS, EDGE_GROUPS, FACE_GROUPS,
                               PERIODIC_PAIRS, ELEMENTS_ROTATIONAL_DOFS,
                               PARAQUS_INSTALLED, ELEMENTS_WARPING_DOFS,
-                              BOUNDARY_CONNECTIVITY, NORMAL_VECTORS)
+                              BOUNDARY_CONNECTIVITY, NORMAL_VECTORS,
+                              SLAVE_GROUPS_OFFSET_AXES)
 
 from abaqus import Mdb, mdb, session
 from regionToolset import Region
@@ -114,6 +115,7 @@ class AbaqusRVE():
         self._periodic_mesh = gmsh_RVE.periodic_mesh
         self._model_dimension = dim
         self._bc_initialized = False
+        self._has_periodic_bc = False
         self._model = mdb.models[self._model_name]
         self._part = self._model.parts[self._model_name]
         self._instance = None
@@ -699,6 +701,7 @@ class AbaqusRVE():
         apply_higher_order_constraints()
 
         self._bc_initialized = True
+        self._has_periodic_bc = True
 
     def assign_solid_section(self, element_set_name, material_name):
         """
@@ -887,8 +890,8 @@ class AbaqusRVE():
             del self.model.historyOutputRequests["H-Output-1"]
 
         # Request at least internal force outputs
-        if "NFORC" not in field_outputs:
-            field_outputs.append("NFORC")
+        if "RF" not in field_outputs:
+            field_outputs.append("RF")
 
         # Request the field outputs
         if len(field_outputs) > 0:
@@ -1076,13 +1079,13 @@ class AbaqusRVE():
         self.close_odb_file()
         return n_frames
 
-    def compute_averaged_stress(self, step_name, frame=-1):
+    def average_stress(self, step_name, frame=-1):
         """
         Compute the averaged stress.
 
-        NOTE: This function should be re-implemented as soon as we know
-        how to efficiently compute averages for elasto-plastic fields
-        such as the plastic strain.
+        In case of linear kinematics the average Cauchy stress is
+        computed. In case of nonlinear kinematics, the first Piola-
+        Kirchhoff stress is computed.
 
         Parameters
         ----------
@@ -1098,60 +1101,58 @@ class AbaqusRVE():
             notation.
 
         """
-
         self.open_odb_file()
 
         dim = 3 if self.model_dimension == THREE_D else 2
+
+        # Compute surface areas of the RVE
         bounding_box = np.array(self.get_bounding_box())
         bounding_box = bounding_box.reshape(2, -1)
-        deltas = bounding_box[1] - bounding_box[0]
-        deltas = deltas[0:dim]
+        delta = bounding_box[1] - bounding_box[0]
+        if dim == 2:
+            delta[-1] = 1
+        area = [delta[1]*delta[2], delta[0]*delta[2], delta[0]*delta[1]]
 
-        # Get internal forces
+        # Get reaction forces
         frame = self.odb.steps[step_name].frames[frame]
-        f_int_1 = frame.fieldOutputs["NFORC1"]
-        f_int_2 = frame.fieldOutputs["NFORC2"]
-        f_int_3 = (frame.fieldOutputs["NFORC3"]
-                   if self.model_dimension == THREE_D else f_int_1)
+        reaction_force = frame.fieldOutputs["RF"]
 
         # Initialize averaged stress tensor
         stress = np.zeros((dim, dim), dtype=float)
 
-        # Loop over all boundary nodes
-        boundary_sets = POINT_GROUPS + EDGE_GROUPS
-        if dim == 3:
-            boundary_sets += FACE_GROUPS
+        # Loop over all reference points in each direction
+        plus_groups = [[], [], []]
+        for group, offset_axes in SLAVE_GROUPS_OFFSET_AXES.items():
+            for i in offset_axes:
+                plus_groups[i].append(group)
+
+        # Loop over each loading direction
         odb_instance = self.odb.rootAssembly.instances[self.model_name]
-        for set_name in boundary_sets:
-            if "NSET_" + set_name not in odb_instance.nodeSets:
-                continue
-            region = odb_instance.nodeSets["NSET_" + set_name]
-            f_int_1_subset = f_int_1.getSubset(region=region).values
-            f_int_2_subset = f_int_2.getSubset(region=region).values
-            f_int_3_subset = f_int_3.getSubset(region=region).values
+        for i, direction_groups in enumerate(plus_groups[0:dim]):
+            stress_vector = np.zeros(dim)
 
-            # Collect force values for each node
-            f_int_1_map, f_int_2_map, f_int_3_map = {}, {}, {}
-            for i, j, k in zip(f_int_1_subset, f_int_2_subset, f_int_3_subset):
+            for group in direction_groups:
+                master = PERIODIC_PAIRS[group]
 
-                f_int_1_map[i.nodeLabel] = (f_int_1_map.get(i.nodeLabel,
-                                                            0.0) - i.data)
-                f_int_2_map[j.nodeLabel] = f_int_2_map.get(j.nodeLabel,
-                                                           0.0) - j.data
-                f_int_3_map[k.nodeLabel] = f_int_3_map.get(k.nodeLabel,
-                                                           0.0) - k.data
+                # Default is running over node sets
+                if "NSET_" + group not in odb_instance.nodeSets:
+                    continue
+                region = odb_instance.nodeSets["NSET_" + group]
 
-            # Update averaged stress tensor
-            for node in region.nodes:
-                x = node.coordinates[0:dim]
-                f_int = np.array([f_int_1_map[node.label],
-                                  f_int_2_map[node.label],
-                                  f_int_3_map[node.label]])
-                f_int = f_int[0:dim]
-                stress += np.outer(f_int, x)
+                # In case of periodic BC switch to reference points
+                if self._has_periodic_bc:
+                    ref_point = "REFERENCE_POINT_" + master + "_" + group
+                    if ref_point not in self.odb.rootAssembly.instances.keys():
+                        continue
+                    region = self.odb.rootAssembly.instances[ref_point]
 
-        # Divide the stress by the RVE volume
-        stress /= np.prod(deltas)
+                # Get reaction force at reference point
+                region_force = reaction_force.getSubset(region=region)
+                for f in region_force.values:
+                    stress_vector += f.data[0:dim]
+
+            # Compute stress in i-direction
+            stress[:, i] = stress_vector/area[i]
 
         self.close_odb_file()
         return stress
