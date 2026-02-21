@@ -432,10 +432,8 @@ class GmshRVE():
 
         # Rearrange connectivity list
         for el_type in element_tags.keys():
-            element_tags[el_type] = np.concatenate(element_tags[el_type],
-                                                   dtype=np.uint64)
-            conn = np.concatenate(element_connectivity[el_type],
-                                  dtype=np.uint64)
+            element_tags[el_type] = np.concatenate(element_tags[el_type])
+            conn = np.concatenate(element_connectivity[el_type])
 
             nen = gmsh.model.mesh.getElementProperties(el_type)[3]
             conn = conn.reshape(-1, nen)
@@ -640,6 +638,7 @@ class GmshRVE():
                 group_node_tags = [tag for n in nodes for tag in n[0]]
                 group_node_coords = [coord for n in nodes for coord in n[1]]
                 group_node_coords = np.reshape(group_node_coords, (-1, 3))
+                group_node_coords = np.round(group_node_coords, decimals=10)
 
                 # Sort the nodes according to their spatial positions
                 sorter = np.lexsort([group_node_coords[:, i] for i in order])
@@ -1455,7 +1454,8 @@ class Boundary(UserDict, object):
             group_to_coords = self.get_group_coordinate_identifiers()
             order = np.where(np.isnan(group_to_coords[master]))[0][::-1]
             order = order if len(order) > 0 else [0]
-            coords = coords[np.lexsort([coords[:, i] for i in order])]
+            rounded_coords = np.round(coords, decimals=10)
+            coords = coords[np.lexsort([rounded_coords[:, i] for i in order])]
             return coords
 
         boundary_groups = {0: POINT_GROUPS[0],
