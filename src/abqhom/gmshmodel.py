@@ -1107,7 +1107,7 @@ class Boundary(UserDict, object):
         if not set(self.keys()) <= set(POINT_GROUPS + EDGE_GROUPS +
                                        FACE_GROUPS):
             raise RuntimeError(
-                "The boundary contains data that cannot associated with "
+                "The boundary contains data that cannot be associated with "
                 "boundary groups.")
 
     @property

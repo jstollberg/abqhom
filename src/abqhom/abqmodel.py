@@ -125,12 +125,14 @@ class AbaqusRVE():
         self._part.setValues(space=dim)
 
         # Add node sets
+        # FIXME: the == is weird, should be subset of node sets
         all_groups = POINT_GROUPS + EDGE_GROUPS + FACE_GROUPS
         if not set(all_groups) == set(gmsh_RVE.node_sets.keys()):
             gmsh_RVE.build_node_sets()
         self._add_node_sets(gmsh_RVE.node_sets)
 
         # Add element sets
+        # FIXME: the == is weird, should be subset of element sets
         if not set(all_groups) == set(gmsh_RVE.node_sets.keys()):
             gmsh_RVE.build_element_sets()
         self._add_element_sets(gmsh_RVE.element_sets)
@@ -423,6 +425,8 @@ class AbaqusRVE():
                 "elements with rotational or warping degrees of freedom. "
                 "Please use periodic boundary conditions.")
 
+        # TODO: this method needs to be implemented
+
         def collect_nodes(group, nodes):
             for group in BOUNDARY_CONNECTIVITY[group]:
                 nodes.append([])
@@ -495,6 +499,8 @@ class AbaqusRVE():
             raise RuntimeError(
                 "Boundary conditions have already been initialized.")
 
+        # TODO: rotational degrees of freedom might be set to zero for this
+        # type of BC, that would indicate zero curvature on the macro scale
         if (self._collect_element_types() <= ELEMENTS_ROTATIONAL_DOFS or
                 self._collect_element_types() <= ELEMENTS_WARPING_DOFS):
             raise NotImplementedError(
@@ -1101,6 +1107,9 @@ class AbaqusRVE():
             notation.
 
         """
+        # TODO: Weight forces of edge/face elements of beam/truss structures
+        # automatically with factors 1/4 and 1/2, respectively
+
         self.open_odb_file()
 
         dim = 3 if self.model_dimension == THREE_D else 2
