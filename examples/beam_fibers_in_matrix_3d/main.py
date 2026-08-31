@@ -87,7 +87,9 @@ def create_geometry(model_name, edge_length=1.0, nodes_matrix=10,
 
     gmsh.model.geo.mesh.set_transfinite_volume(volume)
 
-    # Add two fibers
+    # Add two fibers. The endpoints are inset by a small offset so the
+    # fibers stay fully embedded in the matrix (their nodes do not touch
+    # the periodic boundary faces).
     fiber_p1 = gmsh.model.geo.add_point(-0.25*dx, 0.25*dy, -0.5*dz + 1e-3)
     fiber_p2 = gmsh.model.geo.add_point(-0.25*dx, 0.25*dy, 0.5*dz - 1e-3)
     fiber_p3 = gmsh.model.geo.add_point(0.25*dx, -0.25*dy, -0.5*dz + 1e-3)

@@ -7,10 +7,8 @@ computational homogenization with Abaqus.
 import os
 import numpy as np
 
-from abqhom.constants import (EDGE_GROUPS, FACE_GROUPS,
-                              PERIODIC_PAIRS, ELEMENTS_ROTATIONAL_DOFS,
-                              PARAQUS_INSTALLED, ELEMENTS_WARPING_DOFS,
-                              BOUNDARY_CONNECTIVITY, NORMAL_VECTORS)
+from abqhom.constants import (PERIODIC_PAIRS, ELEMENTS_ROTATIONAL_DOFS,
+                              PARAQUS_INSTALLED, ELEMENTS_WARPING_DOFS)
 
 from abaqus import Mdb, mdb, session
 from regionToolset import Region

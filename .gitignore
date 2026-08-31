@@ -1,22 +1,43 @@
+# Python bytecode
 __pycache__/
-*/*/abq
 *.pyc
-*.csv
-*.inp
-*.odb
+
+# Output directories written by the examples
+abq/
+results/
+vtk_output/
+
+# Abaqus job, scratch and CAE files
+*.abq
+*.cae
 *.com
 *.dat
+*.env
+*.exception
+*.inp
 *.ipm
+*.jnl
+*.lck
 *.log
+*.mdl
 *.msg
+*.odb
+*.pac
 *.prt
+*.rec
+*.res
+*.rpy
+*.rpy.*
+*.sel
 *.sim
 *.sta
-*.rec
+*.stt
+
+# gmsh / homogenization output
+*.csv
 *.vtu
 *.pvd
-*.keep
-*.exception
+
+# Generated figures and animations
 *.png
-*.exception
 *.mp4
