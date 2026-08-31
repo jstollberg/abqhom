@@ -7,11 +7,10 @@ computational homogenization with Abaqus.
 import os
 import numpy as np
 
-from abqhom.constants import (POINT_GROUPS, EDGE_GROUPS, FACE_GROUPS,
+from abqhom.constants import (EDGE_GROUPS, FACE_GROUPS,
                               PERIODIC_PAIRS, ELEMENTS_ROTATIONAL_DOFS,
                               PARAQUS_INSTALLED, ELEMENTS_WARPING_DOFS,
-                              BOUNDARY_CONNECTIVITY, NORMAL_VECTORS,
-                              SLAVE_GROUPS_OFFSET_AXES)
+                              BOUNDARY_CONNECTIVITY, NORMAL_VECTORS)
 
 from abaqus import Mdb, mdb, session
 from regionToolset import Region
@@ -120,20 +119,22 @@ class AbaqusRVE():
         self._part = self._model.parts[self._model_name]
         self._instance = None
         self._odb = None
+        self._section_radius = {}
+
+        # Store the geometric bounding box of the RVE
+        self._bounding_box = tuple(
+            float(v) for v in gmsh_RVE.get_bounding_box_from_points())
 
         # Set the correct modeling space
         self._part.setValues(space=dim)
 
         # Add node sets
-        # FIXME: the == is weird, should be subset of node sets
-        all_groups = POINT_GROUPS + EDGE_GROUPS + FACE_GROUPS
-        if not set(all_groups) == set(gmsh_RVE.node_sets.keys()):
+        if "ALL_NODES" not in gmsh_RVE.node_sets:
             gmsh_RVE.build_node_sets()
         self._add_node_sets(gmsh_RVE.node_sets)
 
         # Add element sets
-        # FIXME: the == is weird, should be subset of element sets
-        if not set(all_groups) == set(gmsh_RVE.node_sets.keys()):
+        if "ALL_ELEMENTS" not in gmsh_RVE.element_sets:
             gmsh_RVE.build_element_sets()
         self._add_element_sets(gmsh_RVE.element_sets)
 
@@ -328,17 +329,7 @@ class AbaqusRVE():
 
         """
 
-        if self.model_dimension == THREE_D:
-            x_min, y_min, z_min = (self.instance.sets["NSET_POINT_1"].nodes[0]
-                                   .coordinates)
-            x_max, y_max, z_max = (self.instance.sets["NSET_POINT_7"].nodes[0]
-                                   .coordinates)
-        else:  # TWO_D_PLANAR
-            x_min, y_min, z_min = (self.instance.sets["NSET_POINT_1"].nodes[0]
-                                   .coordinates)
-            x_max, y_max, z_max = (self.instance.sets["NSET_POINT_3"].nodes[0]
-                                   .coordinates)
-
+        x_min, y_min, z_min, x_max, y_max, z_max = self._bounding_box
         return x_min, y_min, z_min, x_max, y_max, z_max
 
     def _collect_element_types(self):
@@ -407,50 +398,6 @@ class AbaqusRVE():
                                       region=region,
                                       amplitude=amplitude_name_i,
                                       u1=u[0], u2=u[1], u3=u[2])
-
-    def _apply_uniform_traction_BC(self, initialization_step, stress_history):
-        """This method is not yet implemented."""
-
-        raise NotImplementedError(
-            "Uniform traction boundary conditions are not yet supported.")
-
-        if self._bc_initialized:
-            raise RuntimeError(
-                "Boundary conditions have already been initialized.")
-
-        if (self._collect_element_types() <= ELEMENTS_ROTATIONAL_DOFS or
-                self._collect_element_types() <= ELEMENTS_WARPING_DOFS):
-            raise NotImplementedError(
-                "Uniform traction boundary conditions are not supported for "
-                "elements with rotational or warping degrees of freedom. "
-                "Please use periodic boundary conditions.")
-
-        # TODO: this method needs to be implemented
-
-        def collect_nodes(group, nodes):
-            for group in BOUNDARY_CONNECTIVITY[group]:
-                nodes.append([])
-                collect_nodes(group, nodes)
-
-        time_history = stress_history.time_data
-        stress_history = stress_history.load_data
-
-        # Recursively apply forces
-        boundary_groups = FACE_GROUPS
-        if self.model_dimension == TWO_D_PLANAR:
-            boundary_groups = EDGE_GROUPS[0:4]
-
-        for group in boundary_groups:
-            nodes = []  # Here need to be the nodes of groups
-            collect_nodes(group, nodes)
-
-            region = Region(nodes=MeshNodeArray(nodes=nodes))
-            normal_vector = NORMAL_VECTORS[group]
-            t_history = np.dot(stress_history, normal_vector)
-
-            # Apply load to nodes in region
-
-        self._bc_initialized = True
 
     def apply_affine_displacement_BC(self, initialization_step,
                                      strain_history):
@@ -525,7 +472,92 @@ class AbaqusRVE():
                 amplitude_name)
         self._bc_initialized = True
 
-    def apply_periodic_BC(self, initialization_step, strain_history):
+    def _select_rigid_body_anchor(self, fixed_node=None):
+        r"""
+        Select a single node to suppress rigid-body motion.
+
+        Under periodic boundary conditions the macroscopic strain fixes
+        all relative boundary displacements, so only the rigid-body
+        translations remain. They are removed by prescribing the affine
+        displacement :math:`\boldsymbol{u} = \boldsymbol{\mathcal{E}}
+        \cdot \boldsymbol{X}` at a single anchor node. The anchor must not
+        be a dependent (slave) node of a periodic equation, otherwise
+        Abaqus reports an over-constraint. Nodes of the "pure master"
+        boundary groups (which never act as a slave) and interior nodes
+        satisfy this requirement.
+
+        Parameters
+        ----------
+        fixed_node : str, optional
+            The name of a node set whose first admissible node is used
+            as the anchor. If None, an anchor is selected automatically.
+            The default is None.
+
+        Returns
+        -------
+        region : Region
+            A region containing exactly the single anchor node.
+        node : MeshNode
+            The anchor node.
+
+        """
+
+        RVE_sets = self.instance.sets
+
+        # Collect the labels of all periodic slave nodes
+        slave_labels = set()
+        for slave in PERIODIC_PAIRS.keys():
+            set_name = "NSET_" + slave
+            if set_name in RVE_sets:
+                slave_labels.update(n.label for n in RVE_sets[set_name].nodes)
+
+        def first_valid_node(set_name):
+            if set_name not in RVE_sets:
+                return
+            for node in RVE_sets[set_name].nodes:
+                if node.label not in slave_labels:
+                    return node
+            return
+
+        # User-defined anchor
+        if fixed_node is not None:
+            set_name = (fixed_node if str(fixed_node).startswith("NSET_")
+                        else "NSET_" + str(fixed_node))
+            if set_name not in RVE_sets:
+                raise RuntimeError(
+                    "The node set '{}' selected for rigid-body suppression "
+                    "does not exist.".format(set_name))
+            node = first_valid_node(set_name)
+            if node is None:
+                raise RuntimeError(
+                    "The node set '{}' selected for rigid-body suppression "
+                    "does not contain a node that is free to be constrained. "
+                    "Choose an interior node or a master boundary node."
+                    .format(set_name))
+            return Region(nodes=MeshNodeArray(nodes=[node])), node
+
+        # Automatic anchor selection
+        pure_master_groups = ["POINT_1", "EDGE_1", "EDGE_4", "EDGE_9",
+                              "FACE_1", "FACE_3", "FACE_5"]
+        for group in pure_master_groups:
+            node = first_valid_node("NSET_" + group)
+            if node is not None:
+                return Region(nodes=MeshNodeArray(nodes=[node])), node
+
+        # Fallback: any boundary or inner node that is not a slave
+        for set_name in ("NSET_BOUNDARY_NODES", "NSET_INNER_NODES",
+                         "NSET_ALL_NODES"):
+            node = first_valid_node(set_name)
+            if node is not None:
+                return Region(nodes=MeshNodeArray(nodes=[node])), node
+
+        raise RuntimeError(
+            "Could not find a suitable node to suppress rigid-body motion. "
+            "Please provide one explicitly through the optional 'fixed_node' "
+            "argument.")
+
+    def apply_periodic_BC(self, initialization_step, strain_history,
+                          fixed_node=None):
         r"""
         Apply periodic displacement boundary conditions.
 
@@ -567,6 +599,10 @@ class AbaqusRVE():
             initialized.
         strain_history : LoadHistory
             The load history containing time and strain data.
+        fixed_node : str, optional
+            The name of a node set whose first admissible node is used
+            as the anchor. If None, an anchor is selected automatically.
+            The default is None.
 
         Returns
         -------
@@ -673,12 +709,12 @@ class AbaqusRVE():
         RVE_sets = self.instance.sets
         dim = 3 if self.model_dimension == THREE_D else 2
 
-        # Apply Dirichlet BC to POINT_1 to avoid rigid body motions
-        region = RVE_sets["NSET_POINT_1"]
-        x = np.array(region.nodes[0].coordinates)
+        # Suppress rigid-body translation
+        region, anchor_node = self._select_rigid_body_anchor(fixed_node)
+        x = np.array(anchor_node.coordinates)
         u_history = np.dot(strain_history, x)
-        amplitude_name = "DIRICHLET_POINT_1"
-        bc_name = "DIRICHLET_POINT_1"
+        amplitude_name = "DIRICHLET_ANCHOR_{}".format(anchor_node.label)
+        bc_name = "DIRICHLET_ANCHOR_{}".format(anchor_node.label)
         self._add_dirichlet_from_displacement_history(
             time_history, u_history, region, initialization_step, bc_name,
             amplitude_name)
@@ -760,10 +796,7 @@ class AbaqusRVE():
                                material=material_name)
         self._assign_general_section(element_set_name, element_set_name)
         self._assign_beam_section_orientation(element_set_name)
-
-    def _assign_shell_section(self, element_set_name, material_name):
-        """This method is not yet implemented."""
-        raise NotImplementedError("Shell sections are not supported yet.")
+        self._section_radius[element_set_name] = radius
 
     def assign_truss_section(self, element_set_name, material_name, area):
         """
@@ -788,6 +821,7 @@ class AbaqusRVE():
         self.model.TrussSection(name=element_set_name, material=material_name,
                                 area=area)
         self._assign_general_section(element_set_name, element_set_name)
+        self._section_radius[element_set_name] = (area/np.pi)**0.5
 
     def _assign_general_section(self, section_name, element_set_name):
         """
@@ -837,6 +871,17 @@ class AbaqusRVE():
         if element_set_name not in self.part.sets:
             raise RuntimeError("The element set was not found.")
 
+        # For 2d beam models the first cross-section axis n1 must be the
+        # out-of-plane direction
+        if self.model_dimension == TWO_D_PLANAR:
+            region = self.part.sets[element_set_name]
+            self.part.assignBeamSectionOrientation(region=region,
+                                                   method=N1_COSINES,
+                                                   n1=(0.0, 0.0, -1.0))
+            return
+
+        # For 3d beam models the first cross-section axis n1 must be
+        # perpendicular to the beam axis
         for element in self.part.sets[element_set_name].elements:
             # Compute unit tangent vector, i.e. the beam axis direction
             conn = element.connectivity
@@ -847,18 +892,15 @@ class AbaqusRVE():
             tangent = coords_end - coords_start
             tangent /= np.linalg.norm(tangent)
 
-            # Compute a vector orthogonal to the beam axis
-            free_index = 0
-            all_indices = [0, 1, 2]
-            while tangent[free_index] == 0:
-                free_index += 1
-            all_indices.remove(free_index)
-            normal = np.ones_like(tangent)
-            normal[free_index] = -1/tangent[free_index]*(
-                tangent[all_indices[0]] + tangent[all_indices[1]])
+            # Pick a reference axis that is not parallel to the beam
+            # axis and orthogonalize it against the tangent
+            reference = np.array([1.0, 0.0, 0.0])
+            if abs(np.dot(reference, tangent)) > 0.9:
+                reference = np.array([0.0, 1.0, 0.0])
+            normal = reference - np.dot(reference, tangent)*tangent
             normal /= np.linalg.norm(normal)
 
-            assert np.dot(tangent, normal) == 0
+            assert abs(np.dot(tangent, normal)) < 1e-8
 
             # Assign orientation to the element
             region = Region(elements=MeshElementArray(elements=[element]))
@@ -895,9 +937,9 @@ class AbaqusRVE():
         if "H-Output-1" in self.model.historyOutputRequests:
             del self.model.historyOutputRequests["H-Output-1"]
 
-        # Request at least internal force outputs
-        if "RF" not in field_outputs:
-            field_outputs.append("RF")
+        # Request at least the outputs needed by average_stress
+        if "NFORC" not in field_outputs:
+            field_outputs.append("NFORC")
 
         # Request the field outputs
         if len(field_outputs) > 0:
@@ -958,8 +1000,8 @@ class AbaqusRVE():
             self._odb.close()
         self._odb = None
 
-    def export_to_vtk(self, path, field_outputs=[], node_sets=[],
-                      element_sets=[], radius={}, clear=False):
+    def export_to_vtk(self, path, field_outputs=None, node_sets=None,
+                      element_sets=None, radius=None, clear=False):
         """
         Export the simulation results to VTK file format.
 
@@ -975,16 +1017,15 @@ class AbaqusRVE():
         field_outputs : list[str], optional
             The field outputs that shall be exported. Invariants can be
             requested in the form of a list element of length 2, e.g.
-            ("S", "MISES"). The default is [].
+            ("S", "MISES"). The default is None.
         node_sets : list[str], optional
-            The node sets that shall be exported. The default is [].
-        element_set : list[str], optional
-            The element sets that shall be exported. The default is [].
-        radius : dict{str, float}, optional
-            A map from physical group names to the radius of lattice
-            struts in case the model uses beam or truss elements. The
-            radius will be exported as a cell field output such that
-            struts can be visualized in the correct size.
+            The node sets that shall be exported. The default is None.
+        element_sets : list[str], optional
+            The element sets that shall be exported. The default is None.
+        radius : dict[str, float], optional
+            A map from element set names to the strut radius. It overrides
+            or supplements the radii recorded during section assignment.
+            The default is None, i.e. only the recorded radii are used.
         clear : bool, optional
             If True, the output folder will be cleared if it already
             exists. The default is False.
@@ -998,65 +1039,87 @@ class AbaqusRVE():
         if not PARAQUS_INSTALLED:
             raise ImportError("Paraqus is needed for the VTK export.")
 
+        # Normalize the optional arguments (avoid mutable defaults)
+        field_outputs = list(field_outputs) if field_outputs else []
+        node_sets = list(node_sets) if node_sets else []
+        element_sets = list(element_sets) if element_sets else []
+
+        # Strut radii for the radius cell field
+        strut_radius = self._section_radius
+        if radius is not None:
+            strut_radius.update(radius)
+
+        def add_radius_field(instance_model):
+            """
+            Add radius as a field to truss and beam element sets.
+
+            Parameters
+            ----------
+            instance_model : ParaqusModel
+                The model that is converted to VTK format.
+
+            Returns
+            -------
+            None.
+
+            """
+
+            if len(strut_radius) == 0:
+                return
+
+            element_radius = {}
+            for name, value in strut_radius.items():
+                set_name = (name if name.startswith("ELSET_")
+                            else "ELSET_" + name)
+                group = self.model_name + "." + set_name
+                for tag in instance_model.elements.groups[group]:
+                    element_radius[tag] = value
+            instance_model.add_field("RADIUS", list(element_radius.keys()),
+                                     list(element_radius.values()),
+                                     "ELEMENTS", "SCALAR")
+
+        # The strut element sets must be exported for the radius field
+        for set_name in strut_radius.keys():
+            if set_name not in element_sets:
+                element_sets.append(set_name)
+
         if not os.path.isdir(path):
             os.makedirs(path)
 
         if self.odb is None:
             self.open_odb_file()
 
-        # Initialize the reader and request fields
+        # Initialize the reader and request fields and sets
         odb_file = "JOB_" + self.model_name + ".odb"
         reader = OdbReader(odb_path=odb_file,
                            model_name=self.model_name,
                            instance_names=[self.model_name])
-        for i in field_outputs:
-            if type(i) is not str and len(i) == 2:
-                reader.add_field_export_request(i[0], invariant=i[1])
+        for output in field_outputs:
+            if type(output) is not str and len(output) == 2:
+                reader.add_field_export_request(output[0], invariant=output[1])
             else:
-                reader.add_field_export_request(i)
-
-        # Request sets
-        for i in radius.keys():
-            if i not in element_sets:
-                element_sets.append(i)
-        for i in element_sets:
-            if not i.startswith("ELSET_"):
-                i = "ELSET_{}".format(i)
-            reader.add_set_export_request(i, set_type="ELEMENTS",
+                reader.add_field_export_request(output)
+        for name in element_sets:
+            set_name = name if name.startswith("ELSET_") else "ELSET_" + name
+            reader.add_set_export_request(set_name,
+                                          set_type="ELEMENTS",
                                           instance_name=self.model_name)
-        for i in node_sets:
-            if not i.startswith("NSET_"):
-                i = "NSET_{}".format(i)
-            reader.add_set_export_request(i, set_type="NODES",
+        for name in node_sets:
+            set_name = name if name.startswith("NSET_") else "NSET_" + name
+            reader.add_set_export_request(set_name,
+                                          set_type="NODES",
                                           instance_name=self.model_name)
 
         # Run over steps and frames for the export
         vtu_writer = BinaryWriter(path, clear_output_dir=clear)
         with CollectionWriter(vtu_writer, self.model_name) as writer:
-
             for step_name in self.odb.steps.keys():
                 if step_name == "Initial":
                     continue
                 for frame in reader.get_frame_indices(step_name):
                     instance_model = list(reader.read_instances(
                         step_name=step_name, frame_index=frame))[0]
-
-                    # Add diameter fields if assigned
-                    if len(radius.keys()) > 0:
-                        element_tags = []
-                        radius_values = []
-                        for i, j in radius.items():
-                            if not i.startswith("ELSET_"):
-                                i = "ELSET_{}".format(i)
-                            group_elements = instance_model.elements.groups[
-                                self.model_name + "." + i]
-                            element_tags.extend(group_elements)
-                            radius_values.extend(
-                                np.full(group_elements.shape, j))
-                        instance_model.add_field("RADIUS", element_tags,
-                                                 radius_values, "ELEMENTS",
-                                                 "SCALAR")
-
+                    add_radius_field(instance_model)
                     writer.write(instance_model)
 
         self.close_odb_file()
@@ -1085,8 +1148,8 @@ class AbaqusRVE():
         self.close_odb_file()
         return n_frames
 
-    def average_stress(self, step_name, frame=-1):
-        """
+    def average_stress(self, step_name, frame=-1, share_boundary_struts=True):
+        r"""
         Compute the averaged stress.
 
         In case of linear kinematics the average Cauchy stress is
@@ -1099,6 +1162,9 @@ class AbaqusRVE():
             Name of the step.
         frame : int, optional
             The frame index. The default is -1.
+        share_boundary_struts : bool, optional
+            If True, weight boundary struts by their periodic sharing
+            fraction. The default is True.
 
         Returns
         -------
@@ -1107,64 +1173,88 @@ class AbaqusRVE():
             notation.
 
         """
-        # TODO: Weight forces of edge/face elements of beam/truss structures
-        # automatically with factors 1/4 and 1/2, respectively
 
         self.open_odb_file()
 
         dim = 3 if self.model_dimension == THREE_D else 2
 
-        # Compute surface areas of the RVE
-        bounding_box = np.array(self.get_bounding_box())
-        bounding_box = bounding_box.reshape(2, -1)
+        # Compute the RVE volume
+        bounding_box = np.array(self.get_bounding_box()).reshape(2, -1)
         delta = bounding_box[1] - bounding_box[0]
         if dim == 2:
-            delta[-1] = 1
-        area = [delta[1]*delta[2], delta[0]*delta[2], delta[0]*delta[1]]
+            delta[-1] = 1.0
+        volume = float(np.prod(delta))
 
-        # Get reaction forces
         frame = self.odb.steps[step_name].frames[frame]
-        reaction_force = frame.fieldOutputs["RF"]
 
-        # Initialize averaged stress tensor
-        stress = np.zeros((dim, dim), dtype=float)
+        # NFORC is stored as scalar components
+        field_outputs = frame.fieldOutputs
+        if "NFORC1" not in field_outputs.keys():
+            raise RuntimeError("Field output 'NFORC' is not available.")
 
-        # Loop over all reference points in each direction
-        plus_groups = [[], [], []]
-        for group, offset_axes in SLAVE_GROUPS_OFFSET_AXES.items():
-            for i in offset_axes:
-                plus_groups[i].append(group)
-
-        # Loop over each loading direction
         odb_instance = self.odb.rootAssembly.instances[self.model_name]
-        for i, direction_groups in enumerate(plus_groups[0:dim]):
-            stress_vector = np.zeros(dim)
+        node_coords = {n.label: np.array(n.coordinates[0:dim])
+                       for n in odb_instance.nodes}
+        weights = (self._element_sharing_weights() if share_boundary_struts
+                   else {})
 
-            for group in direction_groups:
-                master = PERIODIC_PAIRS[group]
-
-                # Default is running over node sets
-                if "NSET_" + group not in odb_instance.nodeSets:
+        # Assemble the internal nodal force vectors per (element, node)
+        forces = {}
+        for i in range(dim):
+            for f in field_outputs["NFORC{}".format(i + 1)].values:
+                if f.elementLabel is None:
                     continue
-                region = odb_instance.nodeSets["NSET_" + group]
+                key = (f.elementLabel, f.nodeLabel)
+                if key not in forces:
+                    forces[key] = np.zeros(dim)
+                forces[key][i] = f.data
 
-                # In case of periodic BC switch to reference points
-                if self._has_periodic_bc:
-                    ref_point = "REFERENCE_POINT_" + master + "_" + group
-                    if ref_point not in self.odb.rootAssembly.instances.keys():
-                        continue
-                    region = self.odb.rootAssembly.instances[ref_point]
-
-                # Get reaction force at reference point
-                region_force = reaction_force.getSubset(region=region)
-                for f in region_force.values:
-                    stress_vector += f.data[0:dim]
-
-            # Compute stress in i-direction
-            stress[:, i] = stress_vector/area[i]
+        # Virial sum with the per-element sharing weights
+        stress = np.zeros((dim, dim), dtype=float)
+        for (element_label, node_label), force in forces.items():
+            weight = weights.get(element_label, 1.0)
+            stress += weight*np.outer(force, node_coords[node_label])
+        stress *= -1.0/volume
 
         self.close_odb_file()
         return stress
+
+    def _element_sharing_weights(self):
+        r"""
+        Compute the periodic sharing weight of every element.
+
+        Returns
+        -------
+        weights : dict[int, float]
+            A map from element label to sharing weight.
+
+        """
+
+        x_min, y_min, z_min, x_max, y_max, z_max = self._bounding_box
+        planes = [(0, x_min), (0, x_max), (1, y_min), (1, y_max)]
+        if self.model_dimension == THREE_D:
+            planes += [(2, z_min), (2, z_max)]
+        delta = max(x_max - x_min, y_max - y_min, z_max - z_min)
+        tol = 1e-6*delta + 1e-12
+
+        nodes = self.part.nodes
+        weights = {}
+        for element in self.part.elements:
+            coords = []
+            for index in element.connectivity:
+                coords.append(np.array(nodes[index].coordinates))
+
+            n_faces = 0
+            for axis, value in planes:
+                on_face = True
+                for coord in coords:
+                    if abs(coord[axis] - value) >= tol:
+                        on_face = False
+                        break
+                if on_face:
+                    n_faces += 1
+            weights[element.label] = 0.5**n_faces
+        return weights
 
 
 class LoadHistory():

@@ -27,8 +27,8 @@ class GmshRVE():
     """
     An RVE representation to prepare a Gmsh model for the Abaqus export.
 
-    The RVE must be rectangular or box-shaped and must have line or
-    surface entities connected to its corner vertices.
+    The RVE must be rectangular or box-shaped. The boundary and its periodic
+    connections are detected automatically from the geometry.
 
     Parameters
     ----------
@@ -118,14 +118,13 @@ class GmshRVE():
         if self.model_dimension < 2:
             raise RuntimeError("The model must be of at least dimension 2.")
 
-        # Make sure the point groups are not empty
-        points = POINT_GROUPS
-        if self.model_dimension == 2:
-            points = ["POINT_1", "POINT_2", "POINT_3", "POINT_4"]
-        for p in points:
-            if len(self.boundary[p]) == 0:
-                raise RuntimeError(
-                    "Point groups {} must not be empty.".format(points))
+        # Make sure the RVE actually has a detectable boundary
+        all_boundary_groups = POINT_GROUPS + EDGE_GROUPS + FACE_GROUPS
+        if all(len(self.boundary[g]) == 0 for g in all_boundary_groups):
+            raise RuntimeError(
+                "No boundary entities were detected on the RVE. If the "
+                "automatic detection fails, provide the boundary manually "
+                " through the optional 'boundary' argument.")
 
         # Add physical boundary groups to the model
         self._add_boundary_groups()
@@ -359,12 +358,6 @@ class GmshRVE():
                 node_tags.append(entity_node_tags)
                 node_coords.append(entity_node_coords)
 
-        # Get nodes from model dimension
-        # main_node_tags, main_node_coords, _ = gmsh.model.mesh.get_nodes(
-        #     gmsh.model.get_dimension(), includeBoundary=True)
-        # node_tags.append(main_node_tags)
-        # node_coords.append(main_node_coords)
-
         # # Combine nodes and coordinates from different sources
         node_tags = np.concatenate(node_tags)
         node_coords = np.concatenate(node_coords)
@@ -418,17 +411,6 @@ class GmshRVE():
                         el_type, [])
                     element_tags[el_type].append(entity_el_tags[i])
                     element_connectivity[el_type].append(entity_conn[i])
-
-        # Get element information form entities of the model dimension
-        # main_el_types, main_el_tags, main_conn = gmsh.model.mesh.getElements(
-        #     self.mesh_dimension)
-
-        # for i, el_type in enumerate(main_el_types):
-        #     element_tags[el_type] = element_tags.get(el_type, [])
-        #     element_connectivity[el_type] = element_connectivity.get(el_type,
-        #                                                              [])
-        #     element_tags[el_type].append(main_el_tags[i])
-        #     element_connectivity[el_type].append(main_conn[i])
 
         # Rearrange connectivity list
         for el_type in element_tags.keys():
