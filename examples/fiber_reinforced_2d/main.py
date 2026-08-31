@@ -1,210 +1,151 @@
+"""
+Homogenization of a 2d continuous-fiber-reinforced composite (plane
+strain) with a square fiber arrangement.
+
+The effective in-plane stiffness is bracketed by the Voigt (upper) and
+Reuss (lower) bounds of a two-phase material, which are computed here for
+comparison. This example also exercises the homogenization for continuum
+(solid) elements: the automatic strut sharing weights leave continuum
+elements untouched (weight 1), so the result is unaffected by them.
+
+Run with:  abaqus cae noGUI=main.py
+"""
+
 import os
 import sys
+import inspect
+
 import numpy as np
 
-base_path = "C:/Users/jonat/Documents/"
-gmsh_path = os.path.join(base_path, "gmsh", "lib")
-abqhom_path = os.path.join(base_path, "abqhom", "src")
-paraqus_path = os.path.join(base_path, "Paraqus", "src")
-for i in (gmsh_path, abqhom_path, paraqus_path):
-    sys.path.append(i)
+# ---------------------------------------------------------------
+# Locate this example and put the shipped abqhom source first on the
+# path. Under 'abaqus cae noGUI=main.py' __file__ is undefined, so the
+# script location is obtained via inspect instead.
+here = os.path.dirname(os.path.abspath(
+    inspect.getframeinfo(inspect.currentframe()).filename))
+abqhom_path = os.path.abspath(os.path.join(here, os.pardir, os.pardir, "src"))
+gmsh_path = "C:/Users/jonat/Documents/gmsh/lib"        # TODO: set gmsh path
+paraqus_path = "C:/Users/jonat/Documents/Paraqus/src"  # optional (VTK export)
+for path in (abqhom_path, gmsh_path, paraqus_path):
+    if path not in sys.path:
+        sys.path.insert(0, path)
 
-# Import Gmsh to create the geometry
 import gmsh
 
-# Import homogenization tools
-from abqhom.utils import voigt_to_tensor, tensor_to_voigt
+from abqhom.utils import (tensor_to_voigt, voigt_to_tensor, reuss, voigt,
+                          export_to_csv_file)
 from abqhom.gmshmodel import GmshRVE
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
-from abqhom.utils import reuss, voigt, export_to_csv_file
 
 
-def create_geometry(model_name, dx=1.0, dy=1.0, fiber_fraction=0.2):
-    # Compute fiber radius from volume fraction
+def create_geometry(model_name, dx, dy, fiber_fraction):
+    """Square array of fibers (one central + four corner quarters)."""
     radius = np.sqrt((fiber_fraction*dx*dy)/(2*np.pi))
-    if radius >= np.sqrt((dx/2)**2 + (dy/2)**2)/2:
+    if radius >= 0.5*min(dx, dy):
         raise ValueError("Fibers overlap.")
 
-    # Initialize Gmsh and add a new model
     if not gmsh.is_initialized():
         gmsh.initialize()
     gmsh.model.add(model_name)
-
     gmsh.option.set_number("Geometry.Tolerance", 1e-5)
 
-    # Center point should be coordinate system origin
-    x = y = 0.0
+    rectangle = gmsh.model.occ.add_rectangle(-0.5*dx, -0.5*dy, 0.0, dx, dy)
+    disks = [gmsh.model.occ.add_disk(cx, cy, 0.0, radius, radius)
+             for cx, cy in [(0.0, 0.0),
+                            (-0.5*dx, -0.5*dy), (0.5*dx, -0.5*dy),
+                            (0.5*dx, 0.5*dy), (-0.5*dx, 0.5*dy)]]
 
-    # Construct basic geometry
-    rectangle = gmsh.model.occ.add_rectangle(x - 0.5*dx, y - 0.5*dy, 0.0,
-                                             dx, dy)
-    circle_1 = gmsh.model.occ.add_disk(x, y, 0.0, radius, radius)
-    circle_2 = gmsh.model.occ.add_disk(x - 0.5*dx, y - 0.5*dy, 0.0,
-                                       radius, radius)
-    circle_3 = gmsh.model.occ.add_disk(x + 0.5*dx, y - 0.5*dy, 0.0,
-                                       radius, radius)
-    circle_4 = gmsh.model.occ.add_disk(x + 0.5*dx, y + 0.5*dy, 0.0,
-                                       radius, radius)
-    circle_5 = gmsh.model.occ.add_disk(x - 0.5*dx, y + 0.5*dy, 0.0,
-                                       radius, radius)
-
-    # Perform boolean operations
     fibers, _ = gmsh.model.occ.intersect(
-        [(2, circle_1), (2, circle_2), (2, circle_3), (2, circle_4),
-         (2, circle_5)], [(2, rectangle)], removeTool=False)
+        [(2, d) for d in disks], [(2, rectangle)], removeTool=False)
     matrix, _ = gmsh.model.occ.cut([(2, rectangle)], fibers, removeTool=False)
     gmsh.model.occ.synchronize()
 
-    # Add physical groups
-    matrix = gmsh.model.add_physical_group(2, [i for _, i in matrix])
-    gmsh.model.set_physical_name(2, matrix, "MATRIX")
-    fibers = gmsh.model.add_physical_group(2, [i for _, i in fibers])
-    gmsh.model.set_physical_name(2, fibers, "FIBER")
+    group = gmsh.model.add_physical_group(2, [i for _, i in matrix])
+    gmsh.model.set_physical_name(2, group, "MATRIX")
+    group = gmsh.model.add_physical_group(2, [i for _, i in fibers])
+    gmsh.model.set_physical_name(2, group, "FIBER")
 
 
-def isotropic_stiffness_tensor(E, nu):
+def isotropic_plane_strain_stiffness(E, nu):
+    """In-plane (plane-strain) isotropic stiffness in Voigt notation."""
     C = np.array([[1 - nu, nu, 0.0],
                   [nu, 1 - nu, 0.0],
                   [0.0, 0.0, 0.5*(1 - 2*nu)]])
-    C *= E/((1 + nu)*(1 - 2*nu))
-
-    return C
+    return C*E/((1 + nu)*(1 - 2*nu))
 
 
 # ---------------------------------------------------------------
-# Set working directory
-workdir = os.path.join(base_path,
-                       "abqhom/examples/fiber_reinforced_2d/abq")
+# Working directory (created next to this script)
+workdir = os.path.join(here, "abq")
 if not os.path.isdir(workdir):
-    os.mkdir(workdir)
+    os.makedirs(workdir)
 os.chdir(workdir)
 
-debug_geometry = False
-
-# RVE size
+# RVE and material parameters (CFRP: E - nu)
 dx = dy = 10.0
-min_fiber_fraction = 0.01
-max_fiber_fraction = 1.0
-samples = 25
+fiber_fraction = 0.4          # change this (or loop) for other fractions
+parameters = {"MATRIX": [3.5, 0.35],    # epoxy matrix
+              "FIBER":  [230.0, 0.2]}   # carbon fibers
 
-# Boundary conditions
-boundary_conditions = "PERIODIC"  # PERIODIC or DIRICHLET
-
-# Material parameters for CFRP: Young's modulus - Poisson's ratio
-parameters = {"MATRIX": [3.5, 0.35],   # Epoxy matrix
-              "FIBER":  [230.0, 0.2]}  # Carbon fibers
-
-# Create folders to store results
-result_path = os.path.join(workdir, "..", "results", boundary_conditions)
-if not os.path.isdir(result_path):
-    os.makedirs(os.path.join(result_path, "reuss"))
-    os.makedirs(os.path.join(result_path, "voigt"))
-    os.makedirs(os.path.join(result_path, "numerical"))
-
-# Test for different fiber volume fractions
-for fiber_fraction in np.linspace(min_fiber_fraction,
-                                  max_fiber_fraction,
-                                  samples):
-    print("\n\n================================")
-    print("Fiber volume fraction = " + str(fiber_fraction) + "\n")
-
-    # Name folder to store VTK files
-    vtk_path = os.path.join(workdir, "..", "vtk_output", boundary_conditions,
-                            str(fiber_fraction))
-
-    # ---------------------------------------------------------------
-    # Run homogenization routine
-    C = np.empty((3, 3))
-    for i in range(3):
-        print("\n------------------------------")
-        print("Run case {}.".format(i + 1))
-
-        # Define load history
-        strain_magnitude = 0.1 if i < 2 else 0.2
-
-        def strain_history(time):
-            strain = np.zeros(3)
-            strain[i] = strain_magnitude
-            strain = np.array([strain[0], strain[1], 0.0, 0.0, 0.0, strain[2]])
-            strain = voigt_to_tensor(strain, "STRAIN")
-            return time*strain
-
-        history = LoadHistory(np.array([0.0, 1.0]), strain_history)
-        print("Strain = " + str(tensor_to_voigt(history(1.0), "STRAIN")
-                                .round(3).tolist()))
-
-        # Create geometry in Gmsh and dump it to an input file
-        model_name = "RVE_{}".format(i + 1)
-        create_geometry(model_name, dx=dx, dy=dy,
-                        fiber_fraction=fiber_fraction)
-        unit_cell = GmshRVE(model_name)
-        unit_cell.add_periodic_mesh_constraints()
-        unit_cell.generate_mesh(element_size=0.4)
-
-        if debug_geometry:
-            unit_cell.show()
-            sys.exit()
-
-        # Load the model into Abaqus
-        unit_cell = AbaqusRVE(unit_cell)
-
-        # Assign material
-        for name in parameters:
-            E, nu = parameters[name]
-            material = unit_cell.model.Material(name=name)
-            material.Elastic(table=[[E, nu]])
-            unit_cell.assign_solid_section(name, name, name)
-
-        # Define load step
-        step_name = "LOAD"
-        unit_cell.model.StaticStep(name=step_name, previous="Initial")
-
-        # Apply boundary conditions and run analysis
-        if boundary_conditions.upper() == "PERIODIC":
-            unit_cell.apply_periodic_BC(step_name, history)
-        elif boundary_conditions.upper() == "DIRICHLET":
-            unit_cell.apply_affine_displacement_BC(step_name, history)
-        else:
-            raise RuntimeError("Invalid boundary conditions.")
-
-        unit_cell.run_analysis(field_outputs=["NFORC", "U", "S"])
-        stress = unit_cell.compute_averaged_stress(step_name)
-        stress = tensor_to_voigt(stress, "STRESS")
-        print("Stress = " + str(stress.round(3).tolist()))
-
-        # Compute effective stiffness tensor
-        C[:, i] = stress/strain_magnitude
-
-        # Export to VTK
-        unit_cell.export_to_vtk(vtk_path, field_outputs=["U", ("S", "MISES")],
-                                element_sets=["MATRIX", "FIBER"])
-
-        gmsh.finalize()
-
+# ---------------------------------------------------------------
+# Run the homogenization routine (3 load cases in 2d: xx, yy, xy)
+components = [0, 1, 5]  # Voigt indices: xx, yy, xy(engineering)
+strain_magnitude = 1.0e-3
+C = np.zeros((3, 3))
+for col, comp in enumerate(components):
     print("\n------------------------------")
-    print("Effective constitutive matrix:")
-    print(C.round(3))
+    print("Run load case {}.".format(col + 1))
 
-    # Compute Reuss and Voigt bounds
-    C_matrix = isotropic_stiffness_tensor(*parameters["MATRIX"])
-    C_fiber = isotropic_stiffness_tensor(*parameters["FIBER"])
-    C_reuss = reuss(fiber_fraction, C_fiber, C_matrix)
-    C_voigt = voigt(fiber_fraction, C_fiber, C_matrix)
+    def strain_history(time):
+        strain = np.zeros(6)
+        strain[comp] = strain_magnitude
+        return time*voigt_to_tensor(strain, "STRAIN")
 
-    # Compute eigenvalues for comparison
-    eigen_reuss = np.sort(np.linalg.eig(C_reuss)[0])
-    eigen_voigt = np.sort(np.linalg.eig(C_voigt)[0])
-    eigen_numerical = np.sort(np.linalg.eig(C)[0])
+    history = LoadHistory(np.array([0.0, 1.0]), strain_history)
 
-    # Export eigenvalues
-    file = str(fiber_fraction) + ".csv"
-    export_to_csv_file(eigen_reuss, os.path.join(result_path, "reuss", file))
-    export_to_csv_file(eigen_voigt, os.path.join(result_path, "voigt", file))
-    export_to_csv_file(eigen_numerical, os.path.join(result_path, "numerical",
-                                                     file))
+    model_name = "RVE_{}".format(col + 1)
+    create_geometry(model_name, dx, dy, fiber_fraction)
+    unit_cell = GmshRVE(model_name)
+    unit_cell.add_periodic_mesh_constraints()
+    unit_cell.generate_mesh(element_size=0.4)
 
-    print("\n------------------------------")
-    print("Eigenvalues:")
-    print("Voigt upper bound:     " + str(eigen_voigt.round(3).tolist()))
-    print("Numerical:             " + str(eigen_numerical.round(3).tolist()))
-    print("Reuss lower bound:     " + str(eigen_reuss.round(3).tolist()))
+    unit_cell = AbaqusRVE(unit_cell)
+    for name, (E, nu) in parameters.items():
+        material = unit_cell.model.Material(name=name)
+        material.Elastic(table=[[E, nu]])
+        unit_cell.assign_solid_section(name, name)
+
+    unit_cell.model.StaticStep(name="LOAD", previous="Initial")
+    unit_cell.apply_periodic_BC("LOAD", history)
+    unit_cell.run_analysis(field_outputs=["U", "S"])
+
+    stress = tensor_to_voigt(unit_cell.average_stress("LOAD"), "STRESS",
+                             check_symmetry=False)
+    C[:, col] = stress/strain_magnitude
+
+    unit_cell.export_to_vtk(os.path.join(here, "vtk_output"),
+                            field_outputs=["U", ("S", "MISES")],
+                            element_sets=["MATRIX", "FIBER"], clear=(col == 0))
+    gmsh.finalize()
+
+# ---------------------------------------------------------------
+# Voigt / Reuss bounds of the two-phase material
+C_matrix = isotropic_plane_strain_stiffness(*parameters["MATRIX"])
+C_fiber = isotropic_plane_strain_stiffness(*parameters["FIBER"])
+C_reuss = reuss(fiber_fraction, C_fiber, C_matrix)
+C_voigt = voigt(fiber_fraction, C_fiber, C_matrix)
+
+eig = lambda M: np.sort(np.linalg.eigvals(M)).round(3).tolist()
+print("\n------------------------------")
+print("Effective constitutive matrix (Voigt):")
+print(np.array2string(C, precision=4, suppress_small=True))
+print("\nEigenvalues (numerical must lie between the bounds):")
+print("  Voigt upper bound : {}".format(eig(C_voigt)))
+print("  numerical         : {}".format(eig(C)))
+print("  Reuss lower bound : {}".format(eig(C_reuss)))
+
+# Store the effective stiffness
+result_dir = os.path.join(here, "results")
+if not os.path.isdir(result_dir):
+    os.makedirs(result_dir)
+export_to_csv_file(C, os.path.join(result_dir, "stiffness.csv"))

@@ -1,23 +1,41 @@
+"""
+Homogenization of a 3d two-phase composite with a spherical inclusion.
+
+The effective stiffness is bracketed by the Voigt (upper) and Reuss
+(lower) bounds, computed here for comparison. Because the automatic
+boundary detection fails for this OpenCASCADE geometry (the sphere cut
+breaks the point-in-entity test), the RVE boundary is provided manually
+through the optional 'boundary' argument of GmshRVE -- an example of how
+to fall back to a user-defined boundary.
+
+Run with:  abaqus cae noGUI=main.py
+"""
+
 import os
 import sys
-import random
+import inspect
+
 import numpy as np
 
-base_path = "C:/Users/jonat/Documents/"
-gmsh_path = os.path.join(base_path, "gmsh", "lib")
-abqhom_path = os.path.join(base_path, "abqhom", "src")
-paraqus_path = os.path.join(base_path, "Paraqus", "src")
-for i in (gmsh_path, abqhom_path, paraqus_path):
-    sys.path.append(i)
+# ---------------------------------------------------------------
+# Locate this example and put the shipped abqhom source first on the
+# path. Under 'abaqus cae noGUI=main.py' __file__ is undefined, so the
+# script location is obtained via inspect instead.
+here = os.path.dirname(os.path.abspath(
+    inspect.getframeinfo(inspect.currentframe()).filename))
+abqhom_path = os.path.abspath(os.path.join(here, os.pardir, os.pardir, "src"))
+gmsh_path = "C:/Users/jonat/Documents/gmsh/lib"        # TODO: set gmsh path
+paraqus_path = "C:/Users/jonat/Documents/Paraqus/src"  # optional (VTK export)
+for path in (abqhom_path, gmsh_path, paraqus_path):
+    if path not in sys.path:
+        sys.path.insert(0, path)
 
-# Import Gmsh to create the geometry
 import gmsh
 
-# Import homogenization tools
-from abqhom.utils import voigt_to_tensor, tensor_to_voigt
+from abqhom.utils import (tensor_to_voigt, voigt_to_tensor, reuss, voigt,
+                          export_to_csv_file)
 from abqhom.gmshmodel import GmshRVE, Boundary
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
-from abqhom.utils import reuss, voigt, export_to_csv_file
 
 
 def create_geometry(model_name, dx=1.0, dy=1.0, dz=1.0,
@@ -98,35 +116,17 @@ def isotropic_stiffness_tensor(E, nu):
 
 
 # ---------------------------------------------------------------
-# Set working directory
-workdir = os.path.join(base_path,
-                       "abqhom/examples/spherical_inclusion_3d/abq")
+# Working directory (created next to this script)
+workdir = os.path.join(here, "abq")
 if not os.path.isdir(workdir):
-    os.mkdir(workdir)
+    os.makedirs(workdir)
 os.chdir(workdir)
 
-# Create folders to store results
-result_path = os.path.join(workdir, "..", "results")
-if not os.path.isdir(result_path):
-    os.makedirs(os.path.join(result_path, "reuss"))
-    os.makedirs(os.path.join(result_path, "voigt"))
-    os.makedirs(os.path.join(result_path, "numerical"))
-
-debug_geometry = False
-
-# RVE size
+# RVE and material parameters (E - nu)
 dx = dy = dz = 10.0
-inclusion_fraction = 0.3  # Change the volume fraction of the inclusion here
-
-# Boundary conditions
-boundary_conditions = "PERIODIC"  # PERIODIC or DIRICHLET
-
-# Material parameters: Young's modulus - Poisson's ratio
-parameters = {"MATRIX":     [3.5, 0.35],   # Epoxy matrix
-              "INCLUSION":  [230.0, 0.2]}  # Carbon inclusion
-
-# Name folder to store VTK files
-vtk_path = os.path.join(workdir, "..", "vtk_output", str(inclusion_fraction))
+inclusion_fraction = 0.3       # volume fraction of the inclusion
+parameters = {"MATRIX":    [3.5, 0.35],    # epoxy matrix
+              "INCLUSION": [230.0, 0.2]}   # carbon inclusion
 
 # ---------------------------------------------------------------
 # Run homogenization routine
@@ -154,72 +154,45 @@ for i in range(6):
                                inclusion_fraction=inclusion_fraction)
     unit_cell = GmshRVE(model_name, Boundary(model_name, boundary))
     unit_cell.add_periodic_mesh_constraints()
-    unit_cell.generate_mesh(element_size=1.25)
+    unit_cell.generate_mesh(element_size=2.0)
 
-    if debug_geometry:
-        gmsh.fltk.run()
-        sys.exit()
-
-    # Load the model into Abaqus
+    # Load the model into Abaqus and assign the phase materials
     unit_cell = AbaqusRVE(unit_cell)
-
-    # Assign material
-    for name in parameters:
-        E, nu = parameters[name]
+    for name, (E, nu) in parameters.items():
         material = unit_cell.model.Material(name=name)
         material.Elastic(table=[[E, nu]])
-        unit_cell.assign_solid_section(name, name, name)
+        unit_cell.assign_solid_section(name, name)
 
-    # Define load step
-    step_name = "LOAD"
-    unit_cell.model.StaticStep(name=step_name, previous="Initial")
+    unit_cell.model.StaticStep(name="LOAD", previous="Initial")
+    unit_cell.apply_periodic_BC("LOAD", history)
+    unit_cell.run_analysis(field_outputs=["U", "S"])
 
-    # Apply boundary conditions and run analysis
-    if boundary_conditions.upper() == "PERIODIC":
-        unit_cell.apply_periodic_BC(step_name, history)
-    elif boundary_conditions.upper() == "DIRICHLET":
-        unit_cell.apply_affine_displacement_BC(step_name, history)
-    else:
-        raise RuntimeError("Invalid boundary conditions.")
-
-    unit_cell.run_analysis(field_outputs=["NFORC", "U", "S"])
-    stress = unit_cell.compute_averaged_stress(step_name)
-    stress = tensor_to_voigt(stress, "STRESS")
-    print("Stress = " + str(stress.round(3).tolist()))
-
-    # Compute effective stiffness tensor
+    stress = tensor_to_voigt(unit_cell.average_stress("LOAD"), "STRESS",
+                             check_symmetry=False)
     C[:, i] = stress/strain_magnitude
 
-    # Export to VTK
-    unit_cell.export_to_vtk(vtk_path, field_outputs=["U", ("S", "MISES")],
-                            element_sets=["MATRIX", "INCLUSION"])
-
+    unit_cell.export_to_vtk(os.path.join(here, "vtk_output"),
+                            field_outputs=["U", ("S", "MISES")],
+                            element_sets=["MATRIX", "INCLUSION"], clear=(i == 0))
     gmsh.finalize()
 
-print("\n------------------------------")
-print("Effective constitutive matrix:")
-print(C.round(3))
-
-# Compute Reuss and Voigt bounds
+# Voigt / Reuss bounds of the two-phase material
 C_matrix = isotropic_stiffness_tensor(*parameters["MATRIX"])
 C_inclusion = isotropic_stiffness_tensor(*parameters["INCLUSION"])
 C_reuss = reuss(inclusion_fraction, C_inclusion, C_matrix)
 C_voigt = voigt(inclusion_fraction, C_inclusion, C_matrix)
 
-# Compute eigenvalues for comparison
-eigen_reuss = np.sort(np.linalg.eig(C_reuss)[0])
-eigen_voigt = np.sort(np.linalg.eig(C_voigt)[0])
-eigen_numerical = np.sort(np.linalg.eig(C)[0])
-
-# Export eigenvalues
-file = str(inclusion_fraction) + ".csv"
-export_to_csv_file(eigen_reuss, os.path.join(result_path, "reuss", file))
-export_to_csv_file(eigen_voigt, os.path.join(result_path, "voigt", file))
-export_to_csv_file(eigen_numerical, os.path.join(result_path, "numerical",
-                                                 file))
-
+eig = lambda M: np.sort(np.linalg.eigvals(M)).real.round(3).tolist()
 print("\n------------------------------")
-print("Eigenvalues:")
-print("Voigt upper bound:     " + str(eigen_voigt.round(3).tolist()))
-print("Numerical:             " + str(eigen_numerical.round(3).tolist()))
-print("Reuss lower bound:     " + str(eigen_reuss.round(3).tolist()))
+print("Effective constitutive matrix (Voigt):")
+print(np.array2string(C, precision=4, suppress_small=True))
+print("\nEigenvalues (numerical must lie between the bounds):")
+print("  Voigt upper bound : {}".format(eig(C_voigt)))
+print("  numerical         : {}".format(eig(C)))
+print("  Reuss lower bound : {}".format(eig(C_reuss)))
+
+# Store the effective stiffness
+result_dir = os.path.join(here, "results")
+if not os.path.isdir(result_dir):
+    os.makedirs(result_dir)
+export_to_csv_file(C, os.path.join(result_dir, "stiffness.csv"))
