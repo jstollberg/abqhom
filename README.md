@@ -11,17 +11,22 @@ stiffness.
 
 ## Features
 
-- **Beam, truss and continuum RVEs** — and mixtures of them in one model.
+- **Beam, truss, shell and continuum RVEs** — and mixtures of them in one
+  model. Beam and shell sections are integrated during the analysis, so
+  nonlinear material behaviour is captured.
 - **General unit cells** — the struts/walls need not connect to the
   corners of the bounding box. Classic "cubic" cells as well as
   honeycomb, Kelvin and other lattices are supported; the boundary and
   its periodic connections are detected automatically from the geometry
   (or supplied manually).
 - **Periodic and affine (Dirichlet) displacement** boundary conditions,
-  with automatic suppression of rigid-body motion.
+  with automatic suppression of rigid-body motion. Periodic BCs support
+  beam/shell rotational degrees of freedom; the affine BCs are for
+  continua only (they raise for rotational/warping DOFs).
 - **Effective stress from element nodal forces (`NFORC`)** via the
   discrete Hill–Mandel identity — one material-agnostic routine for
-  periodic and displacement BCs, for continuum and beam/truss elements.
+  periodic and displacement BCs, for continuum, beam/truss and shell
+  elements.
 - **Automatic periodic strut-sharing weights**: struts lying on a
   bounding-box face (shared by 2 cells) or edge (shared by 4) contribute
   only their in-cell fraction to the effective stiffness.

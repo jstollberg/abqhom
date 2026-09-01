@@ -166,6 +166,34 @@ class TestWriteAbaqusInput(_GmshTestCase):
         # Gmsh 2-node line maps to the Abaqus B33 beam in 3d
         self.assertIn("*ELEMENT, TYPE=B33", content)
 
+    def test_custom_types_do_not_mutate_the_shared_type_map(self):
+        """Passing custom_types must not mutate the shared default element
+        type map (regression guard for the in-place update bug)."""
+        from abqhom.constants import ABAQUS_ELEMENT_TYPES_3D
+        before = dict(ABAQUS_ELEMENT_TYPES_3D)
+        fixtures.simple_cubic("WINP2", length=2.0)
+        rve = GmshRVE("WINP2")
+        rve.generate_mesh(element_size=2.0)
+        path = rve.write_abaqus_input(custom_types={1: "B31"})
+        try:
+            content = open(path, "r").read()
+        finally:
+            if os.path.isfile(path):
+                os.remove(path)
+        # The override reaches the written file ...
+        self.assertIn("*ELEMENT, TYPE=B31", content)
+        # ... but the shared default map is left untouched.
+        self.assertEqual(ABAQUS_ELEMENT_TYPES_3D, before)
+
+    def test_unsupported_element_type_is_rejected(self):
+        """Mapping an element to an unsupported type (a 5-DOF thin shell)
+        raises rather than writing an unusable input file."""
+        fixtures.simple_cubic("WINP3", length=2.0)
+        rve = GmshRVE("WINP3")
+        rve.generate_mesh(element_size=2.0)
+        self.assertRaises(NotImplementedError, rve.write_abaqus_input,
+                          {1: "S8R5"})
+
 
 if __name__ == "__main__":
     unittest.main()

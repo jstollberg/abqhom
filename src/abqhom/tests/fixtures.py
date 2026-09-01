@@ -95,6 +95,27 @@ def solid_cube(name="SOLID", length=1.0):
     return name
 
 
+def parallel_plates_3d(name="PLATES", size=1.0, spacing=1.0):
+    """Two flat shell plates at z = +/- spacing/2 spanning a size x size
+    square; one surface group 'SHELLS'. A periodic stack of membranes with
+    a 3d bounding box, so the surface elements map to shells."""
+    g = _new_model(name)
+    a = 0.5*size
+    hz = 0.5*spacing
+    surfaces = []
+    for z in (-hz, hz):
+        pts = [g.add_point(-a, -a, z), g.add_point(a, -a, z),
+               g.add_point(a, a, z), g.add_point(-a, a, z)]
+        lines = [g.add_line(pts[0], pts[1]), g.add_line(pts[1], pts[2]),
+                 g.add_line(pts[2], pts[3]), g.add_line(pts[3], pts[0])]
+        loop = g.add_curve_loop(lines)
+        surfaces.append(g.add_plane_surface([loop]))
+    g.synchronize()
+    group = gmsh.model.add_physical_group(2, surfaces)
+    gmsh.model.set_physical_name(2, group, "SHELLS")
+    return name
+
+
 def plus_lattice_2d(name="PLUS", size=1.0):
     """A 2d cell whose struts cross the boundary at the edge midpoints,
     i.e. not at the corners; one group 'STRUTS'."""

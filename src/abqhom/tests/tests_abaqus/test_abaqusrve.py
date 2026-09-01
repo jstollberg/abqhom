@@ -11,11 +11,22 @@ import numpy as np
 
 import gmsh
 
+from abqhom.utils import voigt_to_tensor
 from abqhom.gmshmodel import GmshRVE
-from abqhom.abqmodel import AbaqusRVE
+from abqhom.abqmodel import AbaqusRVE, LoadHistory
 from abqhom.tests import fixtures
 
-from abaqusConstants import THREE_D, TWO_D_PLANAR
+from abaqusConstants import (THREE_D, TWO_D_PLANAR, ON, OFF, DURING_ANALYSIS,
+                             BEFORE_ANALYSIS)
+
+
+def _uniaxial_history():
+    """A trivial uniaxial (symmetric) strain history for BC tests."""
+    def strain_history(time):
+        strain = np.zeros(6)
+        strain[0] = 1.0e-3
+        return time*voigt_to_tensor(strain, "STRAIN")
+    return LoadHistory(np.array([0.0, 1.0]), strain_history)
 
 
 def _build(builder, element_size=1.0, custom_types=None):
@@ -141,6 +152,89 @@ class TestSectionRadius(_AbaqusTestCase):
         unit.assign_truss_section("STRUTS", "MAT", area)
         self.assertAlmostEqual(unit._section_radius["STRUTS"],
                                (area/np.pi)**0.5)
+
+    def test_beam_section_is_integrated_during_analysis(self):
+        """By default the beam section is integrated during the analysis."""
+        unit = _build(lambda: fixtures.simple_cubic("P", 2.0))
+        material = unit.model.Material(name="MAT")
+        material.Elastic(table=[[1.0, 0.3]])
+        unit.assign_beam_section("STRUTS", "MAT", 0.07)
+        self.assertEqual(unit.model.sections["STRUTS"].integration,
+                         DURING_ANALYSIS)
+
+    def test_beam_section_can_be_pre_integrated(self):
+        """pre_integrate=True pre-integrates the beam section."""
+        unit = _build(lambda: fixtures.simple_cubic("Q", 2.0))
+        material = unit.model.Material(name="MAT")
+        material.Elastic(table=[[1.0, 0.3]])
+        unit.assign_beam_section("STRUTS", "MAT", 0.07, pre_integrate=True)
+        self.assertEqual(unit.model.sections["STRUTS"].integration,
+                         BEFORE_ANALYSIS)
+
+
+class TestShellSection(_AbaqusTestCase):
+
+    def test_shell_section_is_integrated_during_analysis(self):
+        """assign_shell_section integrates through the thickness during the
+        analysis (preIntegrate OFF) so nonlinear materials are supported."""
+        unit = _build(lambda: fixtures.parallel_plates_3d("SHS", 2.0),
+                      element_size=1.0)
+        material = unit.model.Material(name="MAT")
+        material.Elastic(table=[[1.0, 0.3]])
+        unit.assign_shell_section("SHELLS", "MAT", 0.05)
+        section = unit.model.sections["SHELLS"]
+        self.assertEqual(section.preIntegrate, OFF)
+        self.assertAlmostEqual(section.thickness, 0.05)
+
+    def test_shell_section_can_be_pre_integrated(self):
+        """pre_integrate=True pre-integrates the section (preIntegrate ON)."""
+        unit = _build(lambda: fixtures.parallel_plates_3d("SHP", 2.0),
+                      element_size=1.0)
+        material = unit.model.Material(name="MAT")
+        material.Elastic(table=[[1.0, 0.3]])
+        unit.assign_shell_section("SHELLS", "MAT", 0.05, pre_integrate=True)
+        self.assertEqual(unit.model.sections["SHELLS"].preIntegrate, ON)
+
+
+class TestAffineBoundaryConditions(_AbaqusTestCase):
+
+    def test_beam_elements_are_rejected(self):
+        """Affine displacement BCs do not support rotational DOFs; a beam
+        lattice must raise NotImplementedError (periodic BCs handle it)."""
+        unit = _build(lambda: fixtures.simple_cubic("AF1", 2.0))
+        material = unit.model.Material(name="M")
+        material.Elastic(table=[[210.0, 0.3]])
+        unit.assign_beam_section("STRUTS", "M", 0.05)
+        unit.model.StaticStep(name="LOAD", previous="Initial")
+        self.assertRaises(NotImplementedError,
+                          unit.apply_affine_displacement_BC,
+                          "LOAD", _uniaxial_history())
+
+    def test_warping_elements_are_rejected(self):
+        """Open-section beams (rotational and warping DOFs) are likewise
+        rejected by the affine BC."""
+        unit = _build(lambda: fixtures.simple_cubic("AF2", 2.0),
+                      custom_types={1: "B31OS"})
+        unit.model.StaticStep(name="LOAD", previous="Initial")
+        self.assertRaises(NotImplementedError,
+                          unit.apply_affine_displacement_BC,
+                          "LOAD", _uniaxial_history())
+
+    def test_continuum_is_supported(self):
+        """A pure continuum RVE has no rotational DOFs, so the affine BC
+        applies the translational Dirichlet BCs without raising."""
+        unit = _build(lambda: fixtures.solid_cube("AF3", 1.0))
+        material = unit.model.Material(name="M")
+        material.Elastic(table=[[100.0, 0.3]])
+        unit.assign_solid_section("SOLID", "M")
+        unit.model.StaticStep(name="LOAD", previous="Initial")
+        unit.apply_affine_displacement_BC("LOAD", _uniaxial_history())
+        has_dirichlet = False
+        for name in unit.model.boundaryConditions.keys():
+            if name.startswith("DIRICHLET_"):
+                has_dirichlet = True
+                break
+        self.assertTrue(has_dirichlet)
 
 
 if __name__ == "__main__":

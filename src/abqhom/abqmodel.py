@@ -13,8 +13,9 @@ from abqhom.constants import (PERIODIC_PAIRS, ELEMENTS_ROTATIONAL_DOFS,
 from abaqus import Mdb, mdb, session
 from regionToolset import Region
 from mesh import MeshNodeArray, MeshElementArray
-from abaqusConstants import (THREE_D, TWO_D_PLANAR, DEFORMABLE_BODY, ON, UNSET,
-                             CARTESIAN, N1_COSINES, DURING_ANALYSIS, TOTAL)
+from abaqusConstants import (THREE_D, TWO_D_PLANAR, DEFORMABLE_BODY, ON, OFF,
+                             UNSET, CARTESIAN, N1_COSINES, DURING_ANALYSIS,
+                             BEFORE_ANALYSIS, TOTAL)
 
 if PARAQUS_INSTALLED:
     from paraqus.abaqus import OdbReader
@@ -424,9 +425,9 @@ class AbaqusRVE():
         \boldsymbol{I}`
         for geometrically nonlinear analyses.
 
-        **Affine displacement boundary conditions are not supported for
-        models containing elements with rotational or warping degrees
-        of freedom.**
+        **Elements with rotational or warping degrees of freedom (beams,
+        shells, open-section beams) are not supported by the affine
+        displacement boundary conditions.**
 
         Parameters
         ----------
@@ -446,14 +447,17 @@ class AbaqusRVE():
             raise RuntimeError(
                 "Boundary conditions have already been initialized.")
 
-        # TODO: rotational degrees of freedom might be set to zero for this
-        # type of BC, that would indicate zero curvature on the macro scale
-        if (self._collect_element_types() <= ELEMENTS_ROTATIONAL_DOFS or
-                self._collect_element_types() <= ELEMENTS_WARPING_DOFS):
+        # Rotational/warping DOFs (beams, shells, open-section beams) are
+        # not supported: the consistent boundary rotation depends on the
+        # macroscopic rotation, which is only defined once a macroscopic
+        # rotation/curvature model is fixed. Use periodic BCs instead.
+        rotational_or_warping = ELEMENTS_ROTATIONAL_DOFS | ELEMENTS_WARPING_DOFS
+        if len(self._collect_element_types() & rotational_or_warping) > 0:
             raise NotImplementedError(
                 "Affine displacement boundary conditions are not supported "
-                "for elements with rotational or warping degrees of freedom. "
-                "Please use periodic boundary conditions.")
+                "for elements with rotational or warping degrees of freedom "
+                "(beams, shells, open-section beams). Please use periodic "
+                "boundary conditions instead.")
 
         time_history = strain_history.time_data
         strain_history = strain_history.load_data
@@ -470,91 +474,8 @@ class AbaqusRVE():
             self._add_dirichlet_from_displacement_history(
                 time_history, u_history, region, initialization_step, bc_name,
                 amplitude_name)
+
         self._bc_initialized = True
-
-    def _select_rigid_body_anchor(self, fixed_node=None):
-        r"""
-        Select a single node to suppress rigid-body motion.
-
-        Under periodic boundary conditions the macroscopic strain fixes
-        all relative boundary displacements, so only the rigid-body
-        translations remain. They are removed by prescribing the affine
-        displacement :math:`\boldsymbol{u} = \boldsymbol{\mathcal{E}}
-        \cdot \boldsymbol{X}` at a single anchor node. The anchor must not
-        be a dependent (slave) node of a periodic equation, otherwise
-        Abaqus reports an over-constraint. Nodes of the "pure master"
-        boundary groups (which never act as a slave) and interior nodes
-        satisfy this requirement.
-
-        Parameters
-        ----------
-        fixed_node : str, optional
-            The name of a node set whose first admissible node is used
-            as the anchor. If None, an anchor is selected automatically.
-            The default is None.
-
-        Returns
-        -------
-        region : Region
-            A region containing exactly the single anchor node.
-        node : MeshNode
-            The anchor node.
-
-        """
-
-        RVE_sets = self.instance.sets
-
-        # Collect the labels of all periodic slave nodes
-        slave_labels = set()
-        for slave in PERIODIC_PAIRS.keys():
-            set_name = "NSET_" + slave
-            if set_name in RVE_sets:
-                slave_labels.update(n.label for n in RVE_sets[set_name].nodes)
-
-        def first_valid_node(set_name):
-            if set_name not in RVE_sets:
-                return
-            for node in RVE_sets[set_name].nodes:
-                if node.label not in slave_labels:
-                    return node
-            return
-
-        # User-defined anchor
-        if fixed_node is not None:
-            set_name = (fixed_node if str(fixed_node).startswith("NSET_")
-                        else "NSET_" + str(fixed_node))
-            if set_name not in RVE_sets:
-                raise RuntimeError(
-                    "The node set '{}' selected for rigid-body suppression "
-                    "does not exist.".format(set_name))
-            node = first_valid_node(set_name)
-            if node is None:
-                raise RuntimeError(
-                    "The node set '{}' selected for rigid-body suppression "
-                    "does not contain a node that is free to be constrained. "
-                    "Choose an interior node or a master boundary node."
-                    .format(set_name))
-            return Region(nodes=MeshNodeArray(nodes=[node])), node
-
-        # Automatic anchor selection
-        pure_master_groups = ["POINT_1", "EDGE_1", "EDGE_4", "EDGE_9",
-                              "FACE_1", "FACE_3", "FACE_5"]
-        for group in pure_master_groups:
-            node = first_valid_node("NSET_" + group)
-            if node is not None:
-                return Region(nodes=MeshNodeArray(nodes=[node])), node
-
-        # Fallback: any boundary or inner node that is not a slave
-        for set_name in ("NSET_BOUNDARY_NODES", "NSET_INNER_NODES",
-                         "NSET_ALL_NODES"):
-            node = first_valid_node(set_name)
-            if node is not None:
-                return Region(nodes=MeshNodeArray(nodes=[node])), node
-
-        raise RuntimeError(
-            "Could not find a suitable node to suppress rigid-body motion. "
-            "Please provide one explicitly through the optional 'fixed_node' "
-            "argument.")
 
     def apply_periodic_BC(self, initialization_step, strain_history,
                           fixed_node=None):
@@ -662,46 +583,6 @@ class AbaqusRVE():
                 time_history, u_history, region, initialization_step, bc_name,
                 amplitude_name)
 
-        def apply_higher_order_constraints():
-            """
-            Apply periodic boundary conditions to higher-order DOFs.
-
-            Currently considered higher-order DOFs are rotational DOFs
-            (beams and shells) and warping DOFs (open section beams).
-
-            Returns
-            -------
-            None.
-
-            """
-
-            # Collect all element types present in the model
-            all_element_types = self._collect_element_types()
-
-            # Collect the dofs that need to be constrained
-            dofs = []
-            if len(all_element_types & ELEMENTS_ROTATIONAL_DOFS) > 0:
-                rotational_dofs = ([4, 5, 6] if self.model_dimension == THREE_D
-                                   else [6])
-                dofs.extend(rotational_dofs)  # Rotations
-
-            if len(all_element_types & ELEMENTS_WARPING_DOFS) > 0:
-                dofs.append(7)  # Warping
-
-            # Apply equation constraints to rotational degrees of freedom
-            for slave, master in PERIODIC_PAIRS.items():
-                if ("NSET_" + master not in self.instance.sets
-                        or "NSET_" + slave not in self.instance.sets):
-                    continue
-
-                for dof in dofs:
-                    base_name = self.model_name + ".NSET_"
-                    terms = [[1.0, base_name + slave, dof],
-                             [-1.0, base_name + master, dof]]
-
-                    self.model.Equation(name="PBC_{}_{}_{}".format(
-                        master, slave, dof), terms=terms)
-
         if not self.periodic_mesh:
             raise RuntimeError("The mesh is not suitable for periodic BCs.")
 
@@ -740,10 +621,136 @@ class AbaqusRVE():
                     master, slave, dof), terms=terms)
 
         # Apply constraints also to rotations and warping
-        apply_higher_order_constraints()
+        self._periodic_boundary_rotations()
 
         self._bc_initialized = True
         self._has_periodic_bc = True
+
+    def _periodic_boundary_rotations(self):
+        """
+        Apply periodic boundary conditions to higher-order DOFs.
+
+        Currently considered higher-order DOFs are rotational DOFs
+        (beams) and warping DOFs (open section beams). Coupling the
+        slave and master DOFs without a reference-point term implies a
+        vanishing macroscopic curvature.
+
+        Returns
+        -------
+        None.
+
+        """
+
+        # Collect all element types present in the model
+        all_element_types = self._collect_element_types()
+
+        # Collect the dofs that need to be constrained
+        dofs = []
+        if len(all_element_types & ELEMENTS_ROTATIONAL_DOFS) > 0:
+            rotational_dofs = ([4, 5, 6] if self.model_dimension == THREE_D
+                               else [6])
+            dofs.extend(rotational_dofs)  # Rotations
+
+        if len(all_element_types & ELEMENTS_WARPING_DOFS) > 0:
+            dofs.append(7)  # Warping
+
+        # Apply equation constraints to rotational degrees of freedom
+        for slave, master in PERIODIC_PAIRS.items():
+            if ("NSET_" + master not in self.instance.sets
+                    or "NSET_" + slave not in self.instance.sets):
+                continue
+
+            for dof in dofs:
+                base_name = self.model_name + ".NSET_"
+                terms = [[1.0, base_name + slave, dof],
+                         [-1.0, base_name + master, dof]]
+
+                self.model.Equation(name="PBC_{}_{}_{}".format(
+                    master, slave, dof), terms=terms)
+
+    def _select_rigid_body_anchor(self, fixed_node=None):
+        r"""
+        Select a single node to suppress rigid-body motion.
+
+        Under periodic boundary conditions the macroscopic strain fixes
+        all relative boundary displacements, so only the rigid-body
+        translations remain. They are removed by prescribing the affine
+        displacement :math:`\boldsymbol{u} = \boldsymbol{\mathcal{E}}
+        \cdot \boldsymbol{X}` at a single anchor node. The anchor must not
+        be a dependent (slave) node of a periodic equation, otherwise
+        Abaqus reports an over-constraint. Nodes of the "pure master"
+        boundary groups (which never act as a slave) and interior nodes
+        satisfy this requirement.
+
+        Parameters
+        ----------
+        fixed_node : str, optional
+            The name of a node set whose first admissible node is used
+            as the anchor. If None, an anchor is selected automatically.
+            The default is None.
+
+        Returns
+        -------
+        region : Region
+            A region containing exactly the single anchor node.
+        node : MeshNode
+            The anchor node.
+
+        """
+
+        RVE_sets = self.instance.sets
+
+        # Collect the labels of all periodic slave nodes
+        slave_labels = set()
+        for slave in PERIODIC_PAIRS.keys():
+            set_name = "NSET_" + slave
+            if set_name in RVE_sets:
+                slave_labels.update(n.label for n in RVE_sets[set_name].nodes)
+
+        def first_valid_node(set_name):
+            if set_name not in RVE_sets:
+                return
+            for node in RVE_sets[set_name].nodes:
+                if node.label not in slave_labels:
+                    return node
+            return
+
+        # User-defined anchor
+        if fixed_node is not None:
+            set_name = (fixed_node if str(fixed_node).startswith("NSET_")
+                        else "NSET_" + str(fixed_node))
+            if set_name not in RVE_sets:
+                raise RuntimeError(
+                    "The node set '{}' selected for rigid-body suppression "
+                    "does not exist.".format(set_name))
+            node = first_valid_node(set_name)
+            if node is None:
+                raise RuntimeError(
+                    "The node set '{}' selected for rigid-body suppression "
+                    "does not contain a node that is free to be constrained. "
+                    "Choose an interior node or a master boundary node."
+                    .format(set_name))
+            return Region(nodes=MeshNodeArray(nodes=[node])), node
+
+        # Automatic anchor selection
+        pure_master_groups = ["POINT_1", "EDGE_1", "EDGE_4", "EDGE_9",
+                              "FACE_1", "FACE_3", "FACE_5"]
+        for group in pure_master_groups:
+            node = first_valid_node("NSET_" + group)
+            if node is not None:
+                return Region(nodes=MeshNodeArray(nodes=[node])), node
+
+        # Fallback: any boundary or inner node that is not a slave
+        for set_name in ("NSET_BOUNDARY_NODES", "NSET_INNER_NODES",
+                         "NSET_ALL_NODES"):
+            node = first_valid_node(set_name)
+            if node is not None:
+                return Region(nodes=MeshNodeArray(nodes=[node])), node
+
+        raise RuntimeError(
+            "Could not find a suitable node to suppress rigid-body motion. "
+            "Please provide one explicitly through the optional 'fixed_node' "
+            "argument.")
 
     def assign_solid_section(self, element_set_name, material_name):
         """
@@ -767,11 +774,57 @@ class AbaqusRVE():
                                            material=material_name)
         self._assign_general_section(element_set_name, element_set_name)
 
-    def assign_beam_section(self, element_set_name, material_name, radius):
+    def assign_shell_section(self, element_set_name, material_name, thickness,
+                             num_integration_points=5, pre_integrate=False):
+        """
+        Assign a homogeneous shell section to an element set.
+
+        By default the section is integrated through the thickness during
+        the analysis (``preIntegrate=OFF``) rather than pre-integrated, so
+        that nonlinear material behaviour is captured correctly --
+        analogous to the beam section integrated during the analysis.
+
+        Parameters
+        ----------
+        element_set_name : str
+            The name of the element set that is assigned the section.
+        material_name : str
+            The name of the material that is associated with the
+            section. The material should exist already.
+        thickness : float
+            The thickness of the shell.
+        num_integration_points : int, optional
+            The number of integration points through the thickness. The
+            default is 5.
+        pre_integrate : bool, optional
+            If False (the default) the section is integrated through the
+            thickness during the analysis, supporting nonlinear material
+            behaviour. If True the section stiffness is pre-integrated
+            before the analysis, which is cheaper but restricted to
+            linear material behaviour. The default is False.
+
+        Returns
+        -------
+        None.
+
+        """
+
+        integration = ON if pre_integrate else OFF
+        self.model.HomogeneousShellSection(name=element_set_name,
+                                           material=material_name,
+                                           thickness=thickness,
+                                           preIntegrate=integration,
+                                           numIntPts=num_integration_points)
+        self._assign_general_section(element_set_name, element_set_name)
+
+    def assign_beam_section(self, element_set_name, material_name, radius,
+                            pre_integrate=False):
         """
         Assign a beam section with circular profile to an element set.
 
-        The orientation of the beams will be created automatically.
+        The orientation of the beams will be created automatically. By
+        default the section is integrated over the cross-section during
+        the analysis, so that nonlinear material behaviour is captured.
 
         Parameters
         ----------
@@ -782,6 +835,12 @@ class AbaqusRVE():
             section. The material should exist already.
         radius : float
             The radius of the circular cross-sectional area.
+        pre_integrate : bool, optional
+            If False (the default) the section is integrated over the
+            cross-section during the analysis, supporting nonlinear
+            material behaviour. If True the section stiffness is
+            pre-integrated before the analysis, which is cheaper but
+            restricted to linear material behaviour. The default is False.
 
         Returns
         -------
@@ -789,9 +848,10 @@ class AbaqusRVE():
 
         """
 
+        integration = BEFORE_ANALYSIS if pre_integrate else DURING_ANALYSIS
         self.model.CircularProfile(name=element_set_name, r=radius)
         self.model.BeamSection(name=element_set_name,
-                               integration=DURING_ANALYSIS,
+                               integration=integration,
                                profile=element_set_name,
                                material=material_name)
         self._assign_general_section(element_set_name, element_set_name)

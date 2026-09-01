@@ -172,3 +172,8 @@ ELEMENTS_ROTATIONAL_DOFS = {
 ELEMENTS_WARPING_DOFS = {
     "B31OS", "B31OSH", "B32OS", "B32OSH"
     }
+
+# Abaqus element types that are not supported by abqhom
+ELEMENTS_NOT_SUPPORTED = {
+    "STRI65", "S4R5", "S8R5", "S9R5"
+    }

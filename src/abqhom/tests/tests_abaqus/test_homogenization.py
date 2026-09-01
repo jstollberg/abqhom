@@ -20,9 +20,10 @@ STRAIN = 1.0e-3
 
 
 def _stiffness_column(build, assign_sections, comp, element_size,
-                      custom_types=None):
+                      custom_types=None, bc="periodic"):
     """Run one unit-strain load case and return the corresponding column
-    of the effective stiffness in Voigt notation."""
+    of the effective stiffness in Voigt notation. ``bc`` selects the
+    boundary conditions ('periodic' or 'affine')."""
     name = build()
     rve = GmshRVE(name)
     rve.add_periodic_mesh_constraints()
@@ -37,8 +38,11 @@ def _stiffness_column(build, assign_sections, comp, element_size,
         return time*voigt_to_tensor(strain, "STRAIN")
 
     unit_cell.model.StaticStep(name="LOAD", previous="Initial")
-    unit_cell.apply_periodic_BC("LOAD", LoadHistory(np.array([0.0, 1.0]),
-                                                    strain_history))
+    history = LoadHistory(np.array([0.0, 1.0]), strain_history)
+    if bc == "affine":
+        unit_cell.apply_affine_displacement_BC("LOAD", history)
+    else:
+        unit_cell.apply_periodic_BC("LOAD", history)
     unit_cell.run_analysis(field_outputs=["U"])
     stress = tensor_to_voigt(unit_cell.average_stress("LOAD"), "STRESS",
                              check_symmetry=False)
@@ -105,6 +109,29 @@ class TestBeamLattices(unittest.TestCase):
                                delta=1.0e-6*abs(cxx[0]) + 1.0e-9)
 
 
+class TestShells(unittest.TestCase):
+
+    def test_parallel_plates_membrane_modulus(self):
+        """Two parallel shell plates form a periodic stack of membranes.
+        Each plate lies on a bounding-box z-face (shared, weight 1/2), so
+        the effective membrane stiffness is C11 = E*t/((1-nu**2)*spacing)
+        with C12 = nu*C11. Exercises assign_shell_section end to end."""
+        E, nu, t, size, spacing = 210.0, 0.3, 0.01, 1.0, 1.0
+
+        def assign(unit_cell):
+            _elastic(unit_cell, "M", E, nu)
+            unit_cell.assign_shell_section("SHELLS", "M", t)
+
+        column = _stiffness_column(
+            lambda: fixtures.parallel_plates_3d("SH", size=size,
+                                                spacing=spacing),
+            assign, 0, 0.5*size)
+        C11 = E*t/((1.0 - nu**2)*spacing)
+        self.assertAlmostEqual(column[0], C11, delta=1.0e-4*C11)
+        self.assertAlmostEqual(column[1], nu*C11, delta=1.0e-4*C11)
+        self.assertLess(abs(column[2]), 1.0e-4*C11)
+
+
 class TestContinuum(unittest.TestCase):
 
     def test_homogeneous_cube_recovers_material(self):
@@ -123,6 +150,30 @@ class TestContinuum(unittest.TestCase):
             lambda: fixtures.solid_cube("CB", length=L), assign, 0, 0.5*L)
         cyz = _stiffness_column(
             lambda: fixtures.solid_cube("CB", length=L), assign, 3, 0.5*L)
+        self.assertAlmostEqual(cxx[0], C11, delta=1.0e-3*C11)
+        self.assertAlmostEqual(cxx[1], C12, delta=1.0e-3*C11)
+        self.assertAlmostEqual(cyz[3], C44, delta=1.0e-3*C44)
+
+    def test_affine_bc_recovers_material_for_homogeneous_cube(self):
+        """Affine (Taylor/KUBC) BCs on a homogeneous continuum recover the
+        material stiffness exactly, since the material deforms affinely.
+        This is the end-to-end coverage of the affine displacement BC."""
+        E, nu, L = 100.0, 0.3, 1.0
+
+        def assign(unit_cell):
+            _elastic(unit_cell, "M", E, nu)
+            unit_cell.assign_solid_section("SOLID", "M")
+
+        factor = E/((1 + nu)*(1 - 2*nu))
+        C11, C12 = factor*(1 - nu), factor*nu
+        C44 = E/(2*(1 + nu))
+
+        cxx = _stiffness_column(
+            lambda: fixtures.solid_cube("CBA", length=L), assign, 0, 0.5*L,
+            bc="affine")
+        cyz = _stiffness_column(
+            lambda: fixtures.solid_cube("CBA", length=L), assign, 3, 0.5*L,
+            bc="affine")
         self.assertAlmostEqual(cxx[0], C11, delta=1.0e-3*C11)
         self.assertAlmostEqual(cxx[1], C12, delta=1.0e-3*C11)
         self.assertAlmostEqual(cyz[3], C44, delta=1.0e-3*C44)

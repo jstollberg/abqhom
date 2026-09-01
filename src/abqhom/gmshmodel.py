@@ -20,7 +20,7 @@ from abqhom.constants import (POINT_GROUPS, EDGE_GROUPS, FACE_GROUPS,
                               PERIODIC_PAIRS, ABAQUS_ELEMENT_TYPES_2D,
                               ABAQUS_ELEMENT_TYPES_3D, BOUNDARY_CONNECTIVITY,
                               ABAQUS_CONNECTIVITY_ORDER,
-                              SLAVE_GROUPS_OFFSET_AXES)
+                              SLAVE_GROUPS_OFFSET_AXES, ELEMENTS_NOT_SUPPORTED)
 
 
 class GmshRVE():
@@ -858,14 +858,24 @@ class GmshRVE():
 
         # Load default element type map
         assert self.model_dimension in {2, 3}
-        el_type_map = ABAQUS_ELEMENT_TYPES_3D
+        el_type_map = dict(ABAQUS_ELEMENT_TYPES_3D)
         if self.model_dimension == 2:
-            el_type_map = ABAQUS_ELEMENT_TYPES_2D
+            el_type_map = dict(ABAQUS_ELEMENT_TYPES_2D)
         el_type_map.update(custom_types)
 
         # Get node information
         node_tags, node_coords = self.get_nodes()
         element_tags, conn = self.get_elements()
+
+        # Reject element types the homogenization does not support
+        used_types = set()
+        for el_type in element_tags.keys():
+            used_types.add(el_type_map[el_type])
+        unsupported = used_types & ELEMENTS_NOT_SUPPORTED
+        if len(unsupported) > 0:
+            raise NotImplementedError(
+                "The element type(s) {} are not supported by abqhom."
+                .format(sorted(unsupported)))
 
         # Initialize Abaqus input file
         path = os.path.abspath(self.model_name + ".inp")
