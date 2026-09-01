@@ -3,11 +3,15 @@ Tests for abqhom.utils (Voigt/tensor conversion and the analytical
 Voigt/Reuss bounds). These do not need Gmsh or Abaqus.
 
 """
+import os
+import shutil
+import tempfile
 import unittest
 
 import numpy as np
 
-from abqhom.utils import voigt_to_tensor, tensor_to_voigt, voigt, reuss
+from abqhom.utils import (voigt_to_tensor, tensor_to_voigt, voigt, reuss,
+                          export_to_csv_file, read_csv_file, find_all_files)
 
 
 class TestVoigtTensor(unittest.TestCase):
@@ -60,6 +64,32 @@ class TestBounds(unittest.TestCase):
         eig_voigt = np.sort(np.linalg.eigvals(C_voigt).real)
         eig_reuss = np.sort(np.linalg.eigvals(C_reuss).real)
         self.assertTrue(np.all(eig_reuss <= eig_voigt + 1e-9))
+
+
+class TestFileIO(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="abqhom_test_")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_csv_roundtrip(self):
+        """export_to_csv_file then read_csv_file recovers the array."""
+        data = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        base = os.path.join(self.tmp, "stiffness")
+        export_to_csv_file(data, base)
+        back = read_csv_file(base + ".csv")
+        self.assertTrue(np.allclose(back, data))
+
+    def test_find_all_files_with_extension(self):
+        """find_all_files returns only the files with the given extension."""
+        for name in ("a.csv", "b.csv", "c.txt"):
+            open(os.path.join(self.tmp, name), "w").close()
+        found = find_all_files(self.tmp, extension=".csv")
+        self.assertEqual(len(found), 2)
+        for path in found:
+            self.assertTrue(path.endswith(".csv"))
 
 
 if __name__ == "__main__":
