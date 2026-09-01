@@ -43,7 +43,7 @@ def voigt_to_tensor(voigt_tensor, quantity):
 
             tensor.append(np.array([[xx, xy, xz], [xy, yy, yz], [xz, yz, zz]]))
 
-        elif voigt_tensor.shape == (3,):
+        elif t.shape == (3,):
             xx, yy = t[0:2]
             xy = t[2]
 
