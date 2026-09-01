@@ -894,79 +894,6 @@ class GmshRVE():
 
         return path
 
-    def write_matlab_input(self):
-        """
-        Export the entities of the Gmsh model to an input file for the
-        voxel-based Matlab solver "3D Homogenization of cellular
-        materials" written by Guoying Dong.
-
-        The solver is available from the Matlab File Exchange:
-        https://de.mathworks.com/matlabcentral/fileexchange/67457-3d-homogenization-of-cellular-materials
-
-        Returns
-        -------
-        path : str
-            Absolute path to the Matlab input file.
-
-        """
-
-        # Activate the model in Gmsh
-        self.activate()
-
-        if self.model_dimension != 3 and self.mesh_dimension == 1:
-            raise RuntimeError("Matlab support is only available for 3d "
-                               "lattice unit cells.")
-
-        # Compute RVE size
-        bounding_box = np.array(
-            self.get_bounding_box_from_points).reshape(2, -1)
-        delta_x, delta_y, delta_z = bounding_box[1] - bounding_box[0]
-        x_min = bounding_box[0][0]
-        y_min = bounding_box[0][1]
-        z_min = bounding_box[0][2]
-
-        # Get grid point information
-        grid = gmsh.model.get_entities(0)
-        grid_coords = []
-        for dim, tag in grid:
-            grid_coords.append(gmsh.model.get_value(dim, tag, []))
-        grid_tag_map = {tag: i + 1 for i, (_, tag) in enumerate(grid)}
-        grid_tags = [i + 1 for i in range(len(grid))]
-
-        # Normalize grid coordinates
-        for coords in grid_coords:
-            coords[0] = (coords[0] - x_min)/delta_x
-            coords[1] = (coords[1] - y_min)/delta_y
-            coords[2] = (coords[2] - z_min)/delta_z
-
-        # Get connectivity information
-        struts = gmsh.model.get_entities(1)
-        connectivity = []
-        for dim, tag in struts:
-            _, nodes = gmsh.model.get_adjacencies(dim, tag)
-            assert len(nodes) == 2
-            nodes = [grid_tag_map[nodes[0]], grid_tag_map[nodes[1]]]
-            connectivity.append(nodes)
-        strut_tags = [i + 1 for i in range(len(struts))]
-
-        # Initialize output file
-        path = os.path.abspath(self.model_name + ".txt")
-        with open(path, "w") as file:
-
-            # Add grid nodes
-            file.write("//Grid\tID\tx\ty\tz\n")
-            for tag, coords in zip(grid_tags, grid_coords):
-                file.write(
-                    "GRID\t{}\t{}\t{}\t{}\n".format(
-                        tag, coords[0], coords[1], coords[2]))
-
-            # Add grid edges
-            file.write("//Strut\tID\tStart\tEnd\n")
-            for tag, conn in zip(strut_tags, connectivity):
-                file.write("STRUT\t{}\t{}\t{}\n".format(tag, conn[0], conn[1]))
-
-        return path
-
 
 class Boundary(UserDict, object):
     """
@@ -1003,7 +930,7 @@ class Boundary(UserDict, object):
         A flag to mark whether the boundary is periodic.
     model_name : str
         The name of the underlying Gmsh model.
-    sampling_density : bool
+    sampling_density : int
         The number of sampling points per spatial direction that will be
         generated to check for periodicity and validity of the model.
     data : dict[str, list[tuple[int, int]]]

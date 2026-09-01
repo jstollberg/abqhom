@@ -61,11 +61,10 @@ class AbaqusRVE():
     >>> gmsh_RVE = GmshRVE("GMSH_MODEL")
     >>> gmsh_RVE.add_periodic_mesh_constraints()
     >>> gmsh_RVE.generate_mesh()
-    >>> input_file_path = unit_cell.write_abaqus_input()
     >>>
     >>> # Strain in x-direction
     >>> def strain_path(time):
-    >>>     strain = np.zeros((3,3))
+    >>>     strain = np.zeros((3, 3))
     >>>     strain[0, 0] = 0.1*time
     >>>     return strain
     >>>
@@ -73,23 +72,23 @@ class AbaqusRVE():
     >>> time = np.linspace(0.0, 1.0, 50)
     >>> history = LoadHistory(time, strain_path)
     >>>
-    >>> # Assume there exists a GmshRVE, create an AbaqusRVE from that
-    >>> unit_cell = AbaqusRVE(gmsh_RVE, input_file_path)
+    >>> # Create an AbaqusRVE from the GmshRVE (the input file is written
+    >>> # and imported automatically)
+    >>> unit_cell = AbaqusRVE(gmsh_RVE)
     >>>
-    >>> # Assign material and sections
+    >>> # Assign a material and a solid section to an element set
     >>> material = unit_cell.model.Material(name="Steel")
     >>> material.Elastic(table=[[210.0, 0.3]])
-    >>> unit_cell.assign_solid_section("Steel", "Steel", "ALL_ELEMENTS")
+    >>> unit_cell.assign_solid_section("ALL_ELEMENTS", "Steel")
     >>>
-    >>> # Generate assembly and step
+    >>> # Add a step, apply periodic boundary conditions and run
     >>> unit_cell.model.StaticStep(name="Load", previous="Initial")
-    >>>
-    >>> # Apply periodic boundary conditions and run analysis
     >>> unit_cell.apply_periodic_BC("Load", history)
-    >>> unit_cell.run_analysis(field_outputs=["NFORC", "U", "S", "E"])
+    >>> unit_cell.run_analysis(field_outputs=["U", "S"])
     >>>
-    >>> # Export the results to VTK file format
-    >>> unit_cell.export_to_vtk(vtk_path, field_outputs=["U", "S", "E"])
+    >>> # Compute the effective stress and export the results to VTK
+    >>> stress = unit_cell.average_stress("Load")
+    >>> unit_cell.export_to_vtk(vtk_path, field_outputs=["U", ("S", "MISES")])
 
     """
 
@@ -308,7 +307,10 @@ class AbaqusRVE():
 
     def get_bounding_box(self):
         """
-        Compute the bounding box of the mesh.
+        Return the geometric bounding box of the RVE.
+
+        The bounding box is the one stored at construction (computed from
+        the Gmsh CAD points), not recomputed from the mesh.
 
         Returns
         -------
@@ -914,8 +916,9 @@ class AbaqusRVE():
         Parameters
         ----------
         field_outputs : list[str], optional
-            The field outputs that shall be computed. The default is
-            [].
+            The field outputs that shall be computed. The element nodal
+            forces 'NFORC' needed by average_stress are always requested
+            in addition. The default is [].
         history_outputs : list[str], optional
             The history outputs that shall be computed. The default is
             [].
@@ -1257,7 +1260,7 @@ class AbaqusRVE():
 
 class LoadHistory():
     """
-    An RVE representation to set up a homogenization problem in Abaqus.
+    A time-dependent stress or strain load history for a homogenization.
 
     Parameters
     ----------
