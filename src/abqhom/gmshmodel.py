@@ -23,7 +23,7 @@ from abqhom.constants import (POINT_GROUPS, EDGE_GROUPS, FACE_GROUPS,
                               SLAVE_GROUPS_OFFSET_AXES, ELEMENTS_NOT_SUPPORTED)
 
 
-class GmshRVE():
+class GmshRVE(object):
     """
     An RVE representation to prepare a Gmsh model for the Abaqus export.
 
@@ -743,6 +743,154 @@ class GmshRVE():
         self.element_sets["ALL_ELEMENTS"] = np.array(all_elements,
                                                      dtype=np.uint64)
 
+    @classmethod
+    def read_from_mesh(cls, model_name):
+        """
+        Build a GmshRVE from a model that already contains a mesh.
+
+        This is useful for meshes that cannot be produced from CAD
+        geometry, e.g. an implicit TPMS surface (such as a gyroid) meshed
+        with an external routine. The mesh is checked for periodicity
+        automatically.
+
+
+        Parameters
+        ----------
+        model_name : str
+            The name of the Gmsh model holding the mesh.
+
+        Returns
+        -------
+        rve : GmshRVE
+            The RVE built from the existing mesh.
+
+        """
+
+        cell = cls.__new__(cls)
+        cell._node_sets = {}
+        cell._element_sets = {}
+        cell._periodic_mesh = False
+        empty = {g: [] for g in (POINT_GROUPS + EDGE_GROUPS + FACE_GROUPS)}
+        cell._boundary = Boundary(model_name, initial_data=empty,
+                                  check_periodic=False)
+        if cell.model_dimension != 3:
+            raise NotImplementedError(
+                "read_from_mesh currently supports three-dimensional "
+                "box-shaped meshes only.")
+        cell._build_node_sets_from_mesh()
+        cell.build_element_sets()
+        return cell
+
+    def _build_node_sets_from_mesh(self, tol=None):
+        """
+        Build the boundary node sets by classifying the mesh nodes onto
+        the bounding-box faces, edges and corners by coordinate, and set
+        ``periodic_mesh`` according to whether the mesh is periodic.
+
+        This is used for pre-built meshes (see read_from_mesh) for which
+        the CAD-based boundary detection is not available.
+
+        Parameters
+        ----------
+        tol : float, optional
+            Absolute tolerance for locating nodes on the bounding box.
+            If this is None, use a small fraction of the box size. The
+            default is None.
+
+        Returns
+        -------
+        None.
+
+        """
+
+        self.activate()
+        tags, coords, _ = gmsh.model.mesh.get_nodes()
+        tags = np.array(tags, dtype=np.uint64)
+        coords = np.array(coords, dtype=float).reshape(-1, 3)
+
+        bbox = np.array(self.get_bounding_box_from_points()).reshape(2, 3)
+        lo, hi = bbox[0], bbox[1]
+        if tol is None:
+            tol = 1e-6*float(np.max(hi - lo))
+
+        # Flag nodes on the boundary of the RVE
+        flags = np.zeros((len(coords), 3), dtype=int)
+        for axis in range(3):
+            flags[np.abs(coords[:, axis] - lo[axis]) < tol, axis] = -1
+            flags[np.abs(coords[:, axis] - hi[axis]) < tol, axis] = 1
+
+        # Analogously, flag the boundary group identifiers
+        group_to_coords = self.boundary.get_group_coordinate_identifiers()
+        group_signature, signature_to_group = {}, {}
+        for group, coord_id in group_to_coords.items():
+            s = []
+            for axis in range(3):
+                if np.isnan(coord_id[axis]):
+                    s.append(0)
+                elif (abs(coord_id[axis] - lo[axis])
+                      < abs(coord_id[axis] - hi[axis])):
+                    s.append(-1)
+                else:
+                    s.append(1)
+            group_signature[group] = tuple(s)
+            signature_to_group[tuple(s)] = group
+
+        # Assign every boundary node to its group
+        members = {}
+        for i in range(len(coords)):
+            signature = (flags[i, 0], flags[i, 1], flags[i, 2])
+            if signature == (0, 0, 0):
+                continue
+            group = signature_to_group.get(signature)
+            if group is not None:
+                members.setdefault(group, []).append(i)
+
+        # Order each group by its free axes (so periodic partners share the
+        # same index) and record its set of free coordinates
+        group_free = {}
+        for group, inds in members.items():
+            inds = np.array(inds, dtype=int)
+            free_axes = [axis for axis in range(3)
+                         if group_signature[group][axis] == 0]
+            if len(free_axes) > 0:
+                keys = [np.round(coords[inds, a], 8) for a in free_axes]
+                inds = inds[np.lexsort(keys)]
+            self.node_sets[group] = tags[inds]
+            free = set()
+            for i in inds:
+                free.add(tuple([round(float(coords[i, axis]), 8)
+                                for axis in free_axes]))
+            group_free[group] = free
+
+        # The mesh is periodic when every partner pair shares the same set
+        # of free coordinates
+        periodic = True
+        for slave, master in PERIODIC_PAIRS.items():
+            if group_free.get(master, set()) != group_free.get(slave, set()):
+                periodic = False
+                break
+        self._periodic_mesh = periodic
+
+        # Collections and inner/all-node sets.
+        special = [("POINT_NODES", POINT_GROUPS),
+                   ("EDGE_NODES", EDGE_GROUPS),
+                   ("FACE_NODES", FACE_GROUPS),
+                   ("BOUNDARY_NODES", POINT_GROUPS + EDGE_GROUPS + FACE_GROUPS)]
+        for set_name, groups in special:
+            self._new_set_from_union(self.node_sets, set_name, *groups)
+        self.node_sets["ALL_NODES"] = np.unique(tags).astype(np.uint64)
+        self.node_sets["INNER_NODES"] = np.setdiff1d(
+            self.node_sets["ALL_NODES"], self.node_sets["BOUNDARY_NODES"])
+
+        # Node sets for the material physical groups
+        for dim, tag in gmsh.model.get_physical_groups():
+            name = gmsh.model.get_physical_name(dim, tag)
+            if len(name) == 0 or name in (POINT_GROUPS + EDGE_GROUPS
+                                          + FACE_GROUPS):
+                continue
+            nodes, _ = gmsh.model.mesh.get_nodes_for_physical_group(dim, tag)
+            self.node_sets[name] = np.array(nodes, dtype=np.uint64)
+
     def _new_set_from_union(self, set_dictionary, set_name, *set_items):
         """
         Add node or element sets as the union of existing sets.
@@ -1134,8 +1282,16 @@ class Boundary(UserDict, object):
 
         # Get all point entities
         points = gmsh.model.get_entities(0)
+
+        # Fall back to the mesh nodes, e.g. for a pre-built discrete
+        # mesh that carries no CAD points
         if len(points) == 0:
-            return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+            _, node_coords, _ = gmsh.model.mesh.get_nodes()
+            if len(node_coords) == 0:
+                return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+            node_coords = np.array(node_coords).reshape(-1, 3)
+            mn, mx = node_coords.min(axis=0), node_coords.max(axis=0)
+            return mn[0], mn[1], mn[2], mx[0], mx[1], mx[2]
 
         # Compare coordinates of points to find minimum and maximum
         min_coords = gmsh.model.get_value(points[0][0], points[0][1], [])

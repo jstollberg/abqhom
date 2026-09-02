@@ -19,6 +19,53 @@ def _new_model(name):
     return gmsh.model.geo
 
 
+def discrete_periodic_plates(name="PLATES", size=1.0, perturb=0.0):
+    """Two parallel plates at z=0 and z=size, each a 3x3 grid of nodes, as
+    a pre-built discrete surface mesh with one physical group 'PLATES'.
+    Used to exercise GmshRVE.read_from_mesh. With perturb=0 the mesh is
+    node-matched (periodic); a non-zero perturb shifts the top plate's
+    centre node in x so that the mesh is no longer periodic."""
+    if not gmsh.is_initialized():
+        gmsh.initialize()
+    if name in gmsh.model.list():
+        gmsh.model.set_current(name)
+        gmsh.model.remove()
+    gmsh.model.add(name)
+
+    grid = [0.0, 0.5*size, size]
+    nodes = []
+    for z in (0.0, size):
+        for x in grid:
+            for y in grid:
+                nodes.append((x, y, z))
+    if perturb != 0.0:
+        # Move the top plate's centre node (index 9 + 1*3 + 1) off the grid.
+        nodes[13] = (0.5*size + perturb, 0.5*size, size)
+
+    tris = []
+    for plate in (0, 1):
+        base = plate*9
+        for ix in range(2):
+            for iy in range(2):
+                a = base + ix*3 + iy
+                b = base + (ix + 1)*3 + iy
+                c = base + (ix + 1)*3 + (iy + 1)
+                d = base + ix*3 + (iy + 1)
+                tris.append((a, b, c))
+                tris.append((a, c, d))
+
+    surface = gmsh.model.add_discrete_entity(2)
+    coords = [v for node in nodes for v in node]
+    gmsh.model.mesh.add_nodes(2, surface, list(range(1, len(nodes) + 1)),
+                              coords)
+    conn = [t + 1 for tri in tris for t in tri]
+    gmsh.model.mesh.add_elements_by_type(surface, 2,
+                                         list(range(1, len(tris) + 1)), conn)
+    group = gmsh.model.add_physical_group(2, [surface])
+    gmsh.model.set_physical_name(2, group, "PLATES")
+    return name
+
+
 def simple_cubic(name="SIMPLE_CUBIC", length=1.0):
     """Twelve edge struts of a cube; one physical group 'STRUTS'."""
     g = _new_model(name)

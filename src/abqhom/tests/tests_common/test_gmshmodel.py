@@ -195,5 +195,43 @@ class TestWriteAbaqusInput(_GmshTestCase):
                           {1: "S8R5"})
 
 
+class TestReadFromMesh(_GmshTestCase):
+
+    def test_pairs_periodic_faces_of_a_prebuilt_mesh(self):
+        """read_from_mesh classifies the nodes of a ready-made periodic mesh
+        onto the box groups, detects periodicity and pairs opposite faces
+        one to one."""
+        L = 2.0
+        fixtures.discrete_periodic_plates("DPP", size=L)
+        rve = GmshRVE.read_from_mesh("DPP")
+
+        self.assertEqual(rve.model_dimension, 3)
+        self.assertTrue(rve.periodic_mesh)
+        ns = rve.node_sets
+        self.assertEqual(len(ns["ALL_NODES"]), 18)
+        self.assertIn("PLATES", ns)
+
+        # The two plates lie on the z-faces: FACE_1 (z=0) and FACE_2 (z=L)
+        # each hold the single interior node and must pair up.
+        self.assertEqual(len(ns["FACE_1"]), len(ns["FACE_2"]))
+        self.assertGreater(len(ns["FACE_1"]), 0)
+
+        # The paired nodes differ by exactly the lattice vector in z.
+        tags, coords, _ = gmsh.model.mesh.get_nodes()
+        coords = np.array(coords).reshape(-1, 3)
+        coord = {int(t): coords[i] for i, t in enumerate(tags)}
+        for master_tag, slave_tag in zip(ns["FACE_1"], ns["FACE_2"]):
+            offset = coord[int(slave_tag)] - coord[int(master_tag)]
+            self.assertTrue(np.allclose(offset, [0.0, 0.0, L]))
+
+    def test_detects_a_non_periodic_mesh(self):
+        """A mesh whose opposite faces are not node-matched is reported as
+        non-periodic (periodic_mesh is False)."""
+        fixtures.discrete_periodic_plates("DPP2", size=2.0, perturb=0.3)
+        rve = GmshRVE.read_from_mesh("DPP2")
+        self.assertEqual(rve.model_dimension, 3)
+        self.assertFalse(rve.periodic_mesh)
+
+
 if __name__ == "__main__":
     unittest.main()

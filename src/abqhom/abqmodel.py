@@ -22,7 +22,7 @@ if PARAQUS_INSTALLED:
     from paraqus.writers import BinaryWriter, CollectionWriter
 
 
-class AbaqusRVE():
+class AbaqusRVE(object):
     """
     An RVE representation to set up a homogenization problem in Abaqus.
 
@@ -1318,7 +1318,7 @@ class AbaqusRVE():
         return weights
 
 
-class LoadHistory():
+class LoadHistory(object):
     """
     A time-dependent stress or strain load history for a homogenization.
 
