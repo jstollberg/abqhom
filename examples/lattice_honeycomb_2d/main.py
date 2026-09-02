@@ -152,49 +152,49 @@ element_size = 0.2  # beam element length
 components = [0, 1, 5]  # Voigt indices: xx, yy, xy(engineering)
 strain_magnitude = 1.0e-3
 
+# Build the model once (geometry, mesh, material, section, step). Only the
+# macroscopic strain changes between load cases, so the model is reused and
+# only the periodic boundary conditions are updated in the loop. The anchor
+# is picked automatically -- no corner point required.
+create_honeycomb("RVE", a=a)
+unit_cell = GmshRVE("RVE")
+unit_cell.add_periodic_mesh_constraints()
+unit_cell.generate_mesh(element_size=element_size)
+
+unit_cell = AbaqusRVE(unit_cell)
+material = unit_cell.model.Material(name="LINEAR_ELASTICITY")
+material.Elastic(table=[[E, nu]])
+unit_cell.assign_beam_section("STRUTS", "LINEAR_ELASTICITY", radius)
+unit_cell.model.StaticStep(name="LOAD", previous="Initial")
+
 C = np.empty((3, 3))
 for col, comp in enumerate(components):
     print("\n------------------------------")
     print("Run load case {}.".format(col + 1))
 
-    def strain_history(time):
+    def strain_history(time, component=comp):
         strain = np.zeros(6)
-        strain[comp] = strain_magnitude
+        strain[component] = strain_magnitude
         return time*voigt_to_tensor(strain, "STRAIN")
 
     history = LoadHistory(np.array([0.0, 1.0]), strain_history)
-
-    # Create geometry and periodic mesh in Gmsh
-    model_name = "RVE_{}".format(col + 1)
-    create_honeycomb(model_name, a=a)
-    unit_cell = GmshRVE(model_name)
-    unit_cell.add_periodic_mesh_constraints()
-    unit_cell.generate_mesh(element_size=element_size)
-
-    # Load the model into Abaqus and assign a beam section to the struts
-    unit_cell = AbaqusRVE(unit_cell)
-    material = unit_cell.model.Material(name="LINEAR_ELASTICITY")
-    material.Elastic(table=[[E, nu]])
-    unit_cell.assign_beam_section("STRUTS", "LINEAR_ELASTICITY", radius)
-
-    # Add load step and periodic boundary conditions (anchor is picked
-    # automatically -- no corner point required)
-    unit_cell.model.StaticStep(name="LOAD", previous="Initial")
     unit_cell.apply_periodic_BC("LOAD", history)
 
     # Run the analysis and compute the average stress
     unit_cell.run_analysis(field_outputs=["U"])
     stress = unit_cell.average_stress("LOAD")
-    stress = tensor_to_voigt(stress, "STRESS", check_symmetry=False)
+    stress = tensor_to_voigt(stress, "STRESS")
     print("Stress = " + str(stress.round(8).tolist()))
 
     C[:, col] = stress/strain_magnitude
 
     # Export the deformed struts to VTK (the strut radius is taken
     # automatically from the assigned beam section)
-    unit_cell.export_to_vtk(os.path.join(here, "vtk_output"),
-                            field_outputs=["U"], clear=(col == 0))
-    gmsh.finalize()
+    unit_cell.export_to_vtk(os.path.join(here, "vtk_output",
+                                         "case_{}".format(col + 1)),
+                            field_outputs=["U"], clear=True)
+
+gmsh.finalize()
 
 print("\n------------------------------")
 print("Effective constitutive matrix (Voigt):")

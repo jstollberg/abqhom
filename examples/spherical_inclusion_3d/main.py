@@ -129,18 +129,33 @@ parameters = {"MATRIX":    [3.5, 0.35],    # epoxy matrix
               "INCLUSION": [230.0, 0.2]}   # carbon inclusion
 
 # ---------------------------------------------------------------
-# Run homogenization routine
+# Build the model once (geometry with manual boundary, mesh, materials,
+# sections, step). Only the macroscopic strain changes between load cases,
+# so the model is reused and only the periodic BCs are updated in the loop.
+boundary = create_geometry("RVE", dx=dx, dy=dy, dz=dz,
+                           inclusion_fraction=inclusion_fraction)
+unit_cell = GmshRVE("RVE", Boundary("RVE", boundary))
+unit_cell.add_periodic_mesh_constraints()
+unit_cell.generate_mesh(element_size=2.0)
+
+unit_cell = AbaqusRVE(unit_cell)
+for name, (E, nu) in parameters.items():
+    material = unit_cell.model.Material(name=name)
+    material.Elastic(table=[[E, nu]])
+    unit_cell.assign_solid_section(name, name)
+unit_cell.model.StaticStep(name="LOAD", previous="Initial")
+
+# Run homogenization routine (larger strain for the shear cases)
 C = np.empty((6, 6))
 for i in range(6):
     print("\n------------------------------")
     print("Run case {}.".format(i + 1))
 
-    # Define load history
     strain_magnitude = 0.1 if i < 3 else 0.2
 
-    def strain_history(time):
+    def strain_history(time, component=i, magnitude=strain_magnitude):
         strain = np.zeros(6)
-        strain[i] = strain_magnitude
+        strain[component] = magnitude
         strain = voigt_to_tensor(strain, "STRAIN")
         return time*strain
 
@@ -148,33 +163,18 @@ for i in range(6):
     print("Strain = " + str(tensor_to_voigt(history(1.0), "STRAIN")
                             .round(3).tolist()))
 
-    # Create geometry in Gmsh and dump it to an input file
-    model_name = "RVE_{}".format(i + 1)
-    boundary = create_geometry(model_name, dx=dx, dy=dy, dz=dz,
-                               inclusion_fraction=inclusion_fraction)
-    unit_cell = GmshRVE(model_name, Boundary(model_name, boundary))
-    unit_cell.add_periodic_mesh_constraints()
-    unit_cell.generate_mesh(element_size=2.0)
-
-    # Load the model into Abaqus and assign the phase materials
-    unit_cell = AbaqusRVE(unit_cell)
-    for name, (E, nu) in parameters.items():
-        material = unit_cell.model.Material(name=name)
-        material.Elastic(table=[[E, nu]])
-        unit_cell.assign_solid_section(name, name)
-
-    unit_cell.model.StaticStep(name="LOAD", previous="Initial")
     unit_cell.apply_periodic_BC("LOAD", history)
     unit_cell.run_analysis(field_outputs=["U", "S"])
 
-    stress = tensor_to_voigt(unit_cell.average_stress("LOAD"), "STRESS",
-                             check_symmetry=False)
+    stress = tensor_to_voigt(unit_cell.average_stress("LOAD"), "STRESS")
     C[:, i] = stress/strain_magnitude
 
-    unit_cell.export_to_vtk(os.path.join(here, "vtk_output"),
+    unit_cell.export_to_vtk(os.path.join(here, "vtk_output",
+                                         "case_{}".format(i + 1)),
                             field_outputs=["U", ("S", "MISES")],
-                            element_sets=["MATRIX", "INCLUSION"], clear=(i == 0))
-    gmsh.finalize()
+                            element_sets=["MATRIX", "INCLUSION"], clear=True)
+
+gmsh.finalize()
 
 # Voigt / Reuss bounds of the two-phase material
 C_matrix = isotropic_stiffness_tensor(*parameters["MATRIX"])

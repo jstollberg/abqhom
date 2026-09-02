@@ -34,3 +34,17 @@ Kelvin) rely on the automatic periodic sharing weights in
 | `fiber_reinforced_2d` | fibers in a matrix (plane strain) | Voigt / Reuss bounds |
 | `spherical_inclusion_3d` | spherical inclusion (manual boundary) | Voigt / Reuss bounds |
 | `beam_fibers_in_matrix_3d` | beam fibers embedded in a continuum | transverse isotropy |
+
+## Shell RVEs
+
+| Example | RVE | Check |
+|---|---|---|
+| `gyroid_shell_microgen_3d` | sheet-gyroid TPMS (shell), meshed with microgen | cubic symmetry |
+
+The gyroid is an implicit surface, which Gmsh cannot build as CAD
+geometry. The periodic surface mesh is generated with the
+[microgen](https://github.com/3MAH/microgen) package: it is pre-computed
+and exported to `gyroid.msh` by `generate_mesh.py` (run once in an
+environment that has microgen installed), so Abaqus itself does not need
+microgen -- `main.py` only reads the mesh file and hands it to abqhom via
+`GmshRVE.read_from_mesh`.

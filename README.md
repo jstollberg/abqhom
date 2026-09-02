@@ -18,7 +18,10 @@ stiffness.
   corners of the bounding box. Classic "cubic" cells as well as
   honeycomb, Kelvin and other lattices are supported; the boundary and
   its periodic connections are detected automatically from the geometry
-  (or supplied manually).
+  (or supplied manually). A ready-made mesh (e.g. an implicit TPMS surface
+  such as a gyroid, meshed outside the CAD kernel) can be ingested
+  directly with `GmshRVE.read_from_mesh`, which classifies its boundary
+  nodes and checks it for periodicity.
 - **Periodic and affine (Dirichlet) displacement** boundary conditions,
   with automatic suppression of rigid-body motion. Periodic BCs support
   beam/shell rotational degrees of freedom; the affine BCs are for
@@ -127,6 +130,7 @@ with `abaqus cae noGUI=main.py`:
 | `fiber_reinforced_2d` | fibers in a matrix | Voigt/Reuss bounds |
 | `spherical_inclusion_3d` | spherical inclusion (manual boundary) | Voigt/Reuss bounds |
 | `beam_fibers_in_matrix_3d` | beam fibers embedded in a continuum | transverse isotropy |
+| `gyroid_shell_microgen_3d` | sheet-gyroid TPMS (shell), meshed with microgen | cubic symmetry |
 
 ## Tests
 

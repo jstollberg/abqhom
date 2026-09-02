@@ -92,6 +92,22 @@ radius = 0.5     # strut radius (same for both strut families here)
 element_size = 1.0
 
 # ---------------------------------------------------------------
+# Build the model once (geometry, mesh, material, section, step). Only the
+# macroscopic strain changes between load cases, so the model is reused and
+# only the periodic boundary conditions are updated in the loop.
+model_name = "RVE"
+create_geometry(model_name, length)
+unit_cell = GmshRVE(model_name)
+unit_cell.add_periodic_mesh_constraints()
+unit_cell.generate_mesh(element_size=element_size)
+
+unit_cell = AbaqusRVE(unit_cell)
+material = unit_cell.model.Material(name="STRUT")
+material.Elastic(table=[[E, nu]])
+unit_cell.assign_beam_section("CUBIC", "STRUT", radius)
+unit_cell.assign_beam_section("BCC", "STRUT", radius)
+unit_cell.model.StaticStep(name="LOAD", previous="Initial")
+
 # Run the homogenization routine (6 load cases in 3d)
 strain_magnitude = 1.0e-3
 C = np.zeros((6, 6))
@@ -99,36 +115,23 @@ for i in range(6):
     print("\n------------------------------")
     print("Run load case {}.".format(i + 1))
 
-    def strain_history(time):
+    def strain_history(time, component=i):
         strain = np.zeros(6)
-        strain[i] = strain_magnitude
+        strain[component] = strain_magnitude
         return time*voigt_to_tensor(strain, "STRAIN")
 
     history = LoadHistory(np.array([0.0, 1.0]), strain_history)
-
-    model_name = "RVE_{}".format(i + 1)
-    create_geometry(model_name, length)
-    unit_cell = GmshRVE(model_name)
-    unit_cell.add_periodic_mesh_constraints()
-    unit_cell.generate_mesh(element_size=element_size)
-
-    unit_cell = AbaqusRVE(unit_cell)
-    material = unit_cell.model.Material(name="STRUT")
-    material.Elastic(table=[[E, nu]])
-    unit_cell.assign_beam_section("CUBIC", "STRUT", radius)
-    unit_cell.assign_beam_section("BCC", "STRUT", radius)
-
-    unit_cell.model.StaticStep(name="LOAD", previous="Initial")
     unit_cell.apply_periodic_BC("LOAD", history)
     unit_cell.run_analysis(field_outputs=["U"])
 
-    stress = tensor_to_voigt(unit_cell.average_stress("LOAD"), "STRESS",
-                             check_symmetry=False)
+    stress = tensor_to_voigt(unit_cell.average_stress("LOAD"), "STRESS")
     C[:, i] = stress/strain_magnitude
 
-    unit_cell.export_to_vtk(os.path.join(here, "vtk_output"),
-                            field_outputs=["U"], clear=(i == 0))
-    gmsh.finalize()
+    unit_cell.export_to_vtk(os.path.join(here, "vtk_output",
+                                         "case_{}".format(i + 1)),
+                            field_outputs=["U"], clear=True)
+
+gmsh.finalize()
 
 # ---------------------------------------------------------------
 print("\n------------------------------")

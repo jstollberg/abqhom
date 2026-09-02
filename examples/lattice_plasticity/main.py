@@ -33,8 +33,7 @@ for path in (abqhom_path, gmsh_path, paraqus_path):
 
 import gmsh
 
-from abqhom.utils import (tensor_to_voigt, voigt_to_tensor,
-                          export_to_csv_file)
+from abqhom.utils import voigt_to_tensor, export_to_csv_file
 from abqhom.gmshmodel import GmshRVE
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
 
@@ -134,9 +133,11 @@ unit_cell.close_odb_file()
 
 curve = []
 for index, frame_time in enumerate(frame_times):
-    stress = tensor_to_voigt(unit_cell.average_stress(step_name, frame=index),
-                             "STRESS", check_symmetry=False)
-    curve.append([eps_max*frame_time, stress[0]])
+    # The nonlinear analysis yields the first Piola-Kirchhoff stress, which
+    # is not symmetric and hence not converted to Voigt notation; only the
+    # axial component P_xx is needed for the effective response.
+    stress = unit_cell.average_stress(step_name, frame=index)
+    curve.append([eps_max*frame_time, stress[0, 0]])
 curve = np.array(curve)
 
 print("\n------------------------------")

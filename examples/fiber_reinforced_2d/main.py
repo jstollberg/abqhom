@@ -91,42 +91,45 @@ parameters = {"MATRIX": [3.5, 0.35],    # epoxy matrix
 # Run the homogenization routine (3 load cases in 2d: xx, yy, xy)
 components = [0, 1, 5]  # Voigt indices: xx, yy, xy(engineering)
 strain_magnitude = 1.0e-3
+
+# Build the model once (geometry, mesh, materials, sections, step). Only the
+# macroscopic strain changes between load cases, so the model is reused and
+# only the periodic boundary conditions are updated in the loop.
+create_geometry("RVE", dx, dy, fiber_fraction)
+unit_cell = GmshRVE("RVE")
+unit_cell.add_periodic_mesh_constraints()
+unit_cell.generate_mesh(element_size=0.4)
+
+unit_cell = AbaqusRVE(unit_cell)
+for name, (E, nu) in parameters.items():
+    material = unit_cell.model.Material(name=name)
+    material.Elastic(table=[[E, nu]])
+    unit_cell.assign_solid_section(name, name)
+unit_cell.model.StaticStep(name="LOAD", previous="Initial")
+
 C = np.zeros((3, 3))
 for col, comp in enumerate(components):
     print("\n------------------------------")
     print("Run load case {}.".format(col + 1))
 
-    def strain_history(time):
+    def strain_history(time, component=comp):
         strain = np.zeros(6)
-        strain[comp] = strain_magnitude
+        strain[component] = strain_magnitude
         return time*voigt_to_tensor(strain, "STRAIN")
 
     history = LoadHistory(np.array([0.0, 1.0]), strain_history)
-
-    model_name = "RVE_{}".format(col + 1)
-    create_geometry(model_name, dx, dy, fiber_fraction)
-    unit_cell = GmshRVE(model_name)
-    unit_cell.add_periodic_mesh_constraints()
-    unit_cell.generate_mesh(element_size=0.4)
-
-    unit_cell = AbaqusRVE(unit_cell)
-    for name, (E, nu) in parameters.items():
-        material = unit_cell.model.Material(name=name)
-        material.Elastic(table=[[E, nu]])
-        unit_cell.assign_solid_section(name, name)
-
-    unit_cell.model.StaticStep(name="LOAD", previous="Initial")
     unit_cell.apply_periodic_BC("LOAD", history)
     unit_cell.run_analysis(field_outputs=["U", "S"])
 
-    stress = tensor_to_voigt(unit_cell.average_stress("LOAD"), "STRESS",
-                             check_symmetry=False)
+    stress = tensor_to_voigt(unit_cell.average_stress("LOAD"), "STRESS")
     C[:, col] = stress/strain_magnitude
 
-    unit_cell.export_to_vtk(os.path.join(here, "vtk_output"),
+    unit_cell.export_to_vtk(os.path.join(here, "vtk_output",
+                                         "case_{}".format(col + 1)),
                             field_outputs=["U", ("S", "MISES")],
-                            element_sets=["MATRIX", "FIBER"], clear=(col == 0))
-    gmsh.finalize()
+                            element_sets=["MATRIX", "FIBER"], clear=True)
+
+gmsh.finalize()
 
 # ---------------------------------------------------------------
 # Voigt / Reuss bounds of the two-phase material

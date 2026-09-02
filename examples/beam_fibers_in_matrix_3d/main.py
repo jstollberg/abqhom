@@ -125,18 +125,39 @@ parameters = {"MATRIX": [50.0, 0.35],
 
 
 # ---------------------------------------------------------------
-# Run homogenization routine
+# Build the model once (geometry, mesh, materials, sections, embedded
+# region, step). Only the macroscopic strain changes between load cases,
+# so the model is reused and only the periodic BCs are updated in the loop.
+create_geometry("RVE", nodes_matrix=9, nodes_fibers=5)
+unit_cell = GmshRVE("RVE")
+unit_cell.add_periodic_mesh_constraints()
+unit_cell.generate_mesh()
+
+unit_cell = AbaqusRVE(unit_cell)
+for name, (E, nu) in parameters.items():
+    material = unit_cell.model.Material(name=name)
+    material.Elastic(table=[[E, nu]])
+unit_cell.assign_solid_section("MATRIX", "MATRIX")
+unit_cell.assign_beam_section("FIBER", "FIBER", 0.1)
+
+# Embed the beam fibers into the continuum matrix. This constraint is kept
+# across load cases -- re-applying the periodic BC does not remove it.
+matrix_elements = unit_cell.instance.sets["ELSET_MATRIX"]
+fiber_elements = unit_cell.instance.sets["ELSET_FIBER"]
+unit_cell.model.EmbeddedRegion("COUPLING", fiber_elements, matrix_elements)
+unit_cell.model.StaticStep(name="LOAD", previous="Initial")
+
+# Run homogenization routine (larger strain for the shear cases)
 C = np.empty((6, 6))
 for i in range(6):
     print("\n------------------------------")
     print("Run case {}.".format(i + 1))
 
-    # Define load history
     strain_magnitude = 0.1 if i < 3 else 0.2
 
-    def strain_history(time):
+    def strain_history(time, component=i, magnitude=strain_magnitude):
         strain = np.zeros(6)
-        strain[i] = strain_magnitude
+        strain[component] = magnitude
         strain = voigt_to_tensor(strain, "STRAIN")
         return time*strain
 
@@ -144,37 +165,17 @@ for i in range(6):
     print("Strain = " + str(tensor_to_voigt(history(1.0), "STRAIN")
                             .round(3).tolist()))
 
-    # Create geometry and periodic mesh in Gmsh
-    model_name = "RVE_{}".format(i + 1)
-    create_geometry(model_name, nodes_matrix=9, nodes_fibers=5)
-    unit_cell = GmshRVE(model_name)
-    unit_cell.add_periodic_mesh_constraints()
-    unit_cell.generate_mesh()
-
-    # Load the model into Abaqus and assign the phase sections
-    unit_cell = AbaqusRVE(unit_cell)
-    for name, (E, nu) in parameters.items():
-        material = unit_cell.model.Material(name=name)
-        material.Elastic(table=[[E, nu]])
-    unit_cell.assign_solid_section("MATRIX", "MATRIX")
-    unit_cell.assign_beam_section("FIBER", "FIBER", 0.1)
-
-    # Embed the beam fibers into the continuum matrix
-    matrix_elements = unit_cell.instance.sets["ELSET_MATRIX"]
-    fiber_elements = unit_cell.instance.sets["ELSET_FIBER"]
-    unit_cell.model.EmbeddedRegion("COUPLING", fiber_elements, matrix_elements)
-
-    unit_cell.model.StaticStep(name="LOAD", previous="Initial")
     unit_cell.apply_periodic_BC("LOAD", history)
     unit_cell.run_analysis(field_outputs=["U", "S"])
 
-    stress = tensor_to_voigt(unit_cell.average_stress("LOAD"), "STRESS",
-                             check_symmetry=False)
+    stress = tensor_to_voigt(unit_cell.average_stress("LOAD"), "STRESS")
     C[:, i] = stress/strain_magnitude
 
-    unit_cell.export_to_vtk(vtk_path, field_outputs=["U", ("S", "MISES")],
-                            element_sets=["MATRIX", "FIBER"], clear=(i == 0))
-    gmsh.finalize()
+    unit_cell.export_to_vtk(os.path.join(vtk_path, "case_{}".format(i + 1)),
+                            field_outputs=["U", ("S", "MISES")],
+                            element_sets=["MATRIX", "FIBER"], clear=True)
+
+gmsh.finalize()
 
 print("\n------------------------------")
 print("Effective constitutive matrix (Voigt):")
