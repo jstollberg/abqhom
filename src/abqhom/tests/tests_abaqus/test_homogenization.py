@@ -108,6 +108,41 @@ class TestBeamLattices(unittest.TestCase):
         self.assertAlmostEqual(cxx[1], cyy[0],
                                delta=1.0e-6*abs(cxx[0]) + 1.0e-9)
 
+    def test_one_model_runs_several_load_cases(self):
+        """A single AbaqusRVE can run several load cases in sequence:
+        re-applying the periodic BC clears the previous one and
+        run_analysis re-runs on the same model. Cases 0 and 1 of a
+        simple-cubic lattice must give C11 == C22."""
+        E, nu, r, L = 210.0, 0.3, 0.05, 1.0
+        fixtures.simple_cubic("REUSE", length=L)
+        rve = GmshRVE("REUSE")
+        rve.add_periodic_mesh_constraints()
+        rve.generate_mesh(element_size=L)
+        unit = AbaqusRVE(rve)
+        _elastic(unit, "M", E, nu)
+        unit.assign_beam_section("STRUTS", "M", r)
+        unit.model.StaticStep(name="LOAD", previous="Initial")
+
+        columns = []
+        for comp in (0, 1):
+            def strain_history(time, c=comp):
+                strain = np.zeros(6)
+                strain[c] = STRAIN
+                return time*voigt_to_tensor(strain, "STRAIN")
+
+            unit.apply_periodic_BC("LOAD", LoadHistory(np.array([0.0, 1.0]),
+                                                       strain_history))
+            unit.run_analysis(field_outputs=["U"])
+            columns.append(tensor_to_voigt(unit.average_stress("LOAD"),
+                                           "STRESS", check_symmetry=False)
+                           / STRAIN)
+
+        analytical = E*np.pi*r**2/L**2
+        self.assertAlmostEqual(columns[0][0], analytical,
+                               delta=1.0e-3*analytical)
+        self.assertAlmostEqual(columns[0][0], columns[1][1],
+                               delta=1.0e-6*columns[0][0])
+
 
 class TestShells(unittest.TestCase):
 

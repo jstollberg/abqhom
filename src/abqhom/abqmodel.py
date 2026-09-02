@@ -400,6 +400,38 @@ class AbaqusRVE(object):
                                       amplitude=amplitude_name_i,
                                       u1=u[0], u2=u[1], u3=u[2])
 
+    def _clear_boundary_conditions(self):
+        """
+        Remove the boundary conditions created by this class.
+
+        Returns
+        -------
+        None.
+
+        """
+
+        model = self.model
+        assembly = model.rootAssembly
+
+        for name in list(model.boundaryConditions.keys()):
+            if name.startswith("DIRICHLET"):
+                del model.boundaryConditions[name]
+        for name in list(model.amplitudes.keys()):
+            if name.startswith("DIRICHLET"):
+                del model.amplitudes[name]
+        for name in list(model.constraints.keys()):
+            if name.startswith("PBC_"):
+                del model.constraints[name]
+        for name in list(assembly.instances.keys()):
+            if name.startswith("REFERENCE_POINT_"):
+                del assembly.instances[name]
+        for name in list(model.parts.keys()):
+            if name.startswith("REFERENCE_POINT_"):
+                del model.parts[name]
+
+        self._bc_initialized = False
+        self._has_periodic_bc = False
+
     def apply_affine_displacement_BC(self, initialization_step,
                                      strain_history):
         r"""
@@ -444,8 +476,7 @@ class AbaqusRVE(object):
         """
 
         if self._bc_initialized:
-            raise RuntimeError(
-                "Boundary conditions have already been initialized.")
+            self._clear_boundary_conditions()
 
         # Rotational/warping DOFs (beams, shells, open-section beams) are
         # not supported: the consistent boundary rotation depends on the
@@ -532,8 +563,7 @@ class AbaqusRVE(object):
         """
 
         if self._bc_initialized:
-            raise RuntimeError(
-                "Boundary conditions have already been initialized.")
+            self._clear_boundary_conditions()
 
         time_history = strain_history.time_data
         strain_history = strain_history.load_data
@@ -1007,23 +1037,28 @@ class AbaqusRVE(object):
             for step in self.model.steps.keys():
                 if step == "Initial":
                     continue
+                name = "FIELD_OUTPUT_" + step
+                if name in self.model.fieldOutputRequests:
+                    del self.model.fieldOutputRequests[name]
                 self.model.FieldOutputRequest(
-                    name="FIELD_OUTPUT_" + step, createStepName=step,
-                    variables=field_outputs)
-                    # timeInterval=EVERY_TIME_INCREMENT)
+                    name=name, createStepName=step, variables=field_outputs)
 
         # Request the history outputs
         if len(history_outputs) > 0:
             for step in self.model.steps.keys():
                 if step == "Initial":
                     continue
+                name = "HISTORY_OUTPUT_" + step
+                if name in self.model.historyOutputRequests:
+                    del self.model.historyOutputRequests[name]
                 self.model.HistoryOutputRequest(
-                    name="HISTORY_OUTPUT_" + step, createStepName=step,
-                    variables=history_outputs)
-                    # timeInterval=EVERY_TIME_INCREMENT)
+                    name=name, createStepName=step, variables=history_outputs)
 
         # Create and run the job
+        self.close_odb_file()
         job_name = "JOB_" + self.model_name
+        if job_name in mdb.jobs.keys():
+            del mdb.jobs[job_name]
         mdb.Job(name=job_name, model=self.model_name, **kwargs)
         mdb.jobs[job_name].submit()
         mdb.jobs[job_name].waitForCompletion()
