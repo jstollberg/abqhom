@@ -21,7 +21,7 @@ top of each script. Results are written next to the script into `abq/`
 | `lattice_bcc` | cubic edges + body diagonals | cubic symmetry |
 | `lattice_honeycomb_2d` | regular hexagonal honeycomb | in-plane isotropy |
 | `lattice_kelvin_3d` | Kelvin (truncated octahedron) | cubic symmetry |
-| `lattice_plasticity` | simple cubic, elasto-plastic | nonlinear (explicit) |
+| `lattice_plasticity` | simple cubic, cyclic elasto-plastic | isotropic hardening, hysteresis |
 
 The lattices whose struts lie on the bounding box (simple cubic, BCC,
 Kelvin) rely on the automatic periodic sharing weights in
@@ -39,7 +39,18 @@ Kelvin) rely on the automatic periodic sharing weights in
 
 | Example | RVE | Check |
 |---|---|---|
+| `auxetic_lattice` | re-entrant honeycomb, shell walls | negative in-plane Poisson's ratio |
 | `gyroid_shell_microgen_3d` | sheet-gyroid TPMS (shell), meshed with microgen | cubic symmetry |
+
+The `auxetic_lattice` cell is the classic 2d re-entrant (bow-tie) honeycomb
+given a finite depth: its ribs (in the x-z plane) are extruded along y into
+thin plate walls. The inclined ribs point inward (re-entrant angle), so
+stretching the honeycomb in-plane swings them outward and the cell expands
+laterally -- a negative Poisson's ratio in the x-z plane. Along the extrusion
+axis y the walls just stretch, so the effective stiffness is orthotropic
+(auxetic in-plane, an ordinary stiff honeycomb prism along y). The in-plane
+honeycomb is built by clipping the infinite lattice to one period before
+extrusion, like the beam honeycomb example.
 
 The gyroid is an implicit surface, which Gmsh cannot build as CAD
 geometry. The periodic surface mesh is generated with the

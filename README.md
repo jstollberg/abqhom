@@ -126,7 +126,8 @@ with `abaqus cae noGUI=main.py`:
 | `lattice_bcc` | cubic + body-diagonal struts | cubic symmetry |
 | `lattice_honeycomb_2d` | regular honeycomb | in-plane isotropy |
 | `lattice_kelvin_3d` | Kelvin (truncated octahedron) | cubic symmetry |
-| `lattice_plasticity` | elasto-plastic beam lattice | nonlinear response |
+| `auxetic_lattice` | re-entrant honeycomb (shell walls) | negative in-plane Poisson's ratio |
+| `lattice_plasticity` | cyclic elasto-plastic beam lattice | isotropic hardening (hysteresis) |
 | `fiber_reinforced_2d` | fibers in a matrix | Voigt/Reuss bounds |
 | `spherical_inclusion_3d` | spherical inclusion (manual boundary) | Voigt/Reuss bounds |
 | `beam_fibers_in_matrix_3d` | beam fibers embedded in a continuum | transverse isotropy |
