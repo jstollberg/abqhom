@@ -5,6 +5,13 @@ constraint). This demonstrates that continuum (solid) and beam elements
 can be combined in the same RVE; the effective stiffness is assembled
 from the element nodal forces of both.
 
+The fibers run the full height of the cell, so their end nodes lie on the
+periodic boundary and are shared, through the periodic tiling, into
+continuous fibers along z. The embedded-region constraint eliminates those
+nodes' translational DOFs, and apply_periodic_BC excludes them from the
+translational periodic equations -- their translational periodicity is
+inherited from the periodic matrix host.
+
 Run with:  abaqus cae noGUI=main.py
 """
 
@@ -87,13 +94,16 @@ def create_geometry(model_name, edge_length=1.0, nodes_matrix=10,
 
     gmsh.model.geo.mesh.set_transfinite_volume(volume)
 
-    # Add two fibers. The endpoints are inset by a small offset so the
-    # fibers stay fully embedded in the matrix (their nodes do not touch
-    # the periodic boundary faces).
-    fiber_p1 = gmsh.model.geo.add_point(-0.25*dx, 0.25*dy, -0.5*dz + 1e-3)
-    fiber_p2 = gmsh.model.geo.add_point(-0.25*dx, 0.25*dy, 0.5*dz - 1e-3)
-    fiber_p3 = gmsh.model.geo.add_point(0.25*dx, -0.25*dy, -0.5*dz + 1e-3)
-    fiber_p4 = gmsh.model.geo.add_point(0.25*dx, -0.25*dy, 0.5*dz - 1e-3)
+    # Add two fibers running the full height of the cell, so their end
+    # nodes lie on the z-boundary faces (and, through the periodic tiling,
+    # the fibers are continuous along z). The embedded-region constraint
+    # eliminates those nodes' translational DOFs; apply_periodic_BC excludes
+    # them from the translational equations, so the fibers may reach the
+    # boundary.
+    fiber_p1 = gmsh.model.geo.add_point(-0.25*dx, 0.25*dy, -0.5*dz)
+    fiber_p2 = gmsh.model.geo.add_point(-0.25*dx, 0.25*dy, 0.5*dz)
+    fiber_p3 = gmsh.model.geo.add_point(0.25*dx, -0.25*dy, -0.5*dz)
+    fiber_p4 = gmsh.model.geo.add_point(0.25*dx, -0.25*dy, 0.5*dz)
     fiber_1 = gmsh.model.geo.add_line(fiber_p1, fiber_p2)
     fiber_2 = gmsh.model.geo.add_line(fiber_p3, fiber_p4)
     gmsh.model.geo.mesh.set_transfinite_curve(fiber_1, nodes_fibers)
