@@ -163,6 +163,45 @@ def parallel_plates_3d(name="PLATES", size=1.0, spacing=1.0):
     return name
 
 
+def matrix_with_boundary_fiber(name="MATRIXFIBER", size=1.0, n=5):
+    """A continuum cube (transfinite hex, group 'MATRIX') with a single beam
+    fiber running the full height, so its end nodes lie ON the z-faces
+    (group 'FIBER'). Meant to be tied to the matrix with an embedded-region
+    constraint: its boundary nodes exercise the exclusion of embedded
+    (translation-eliminated) nodes from the translational periodic equations."""
+    g = _new_model(name)
+    h = 0.5*size
+    c = [(-h, -h, -h), (-h, -h, h), (h, -h, h), (h, -h, -h),
+         (-h, h, -h), (-h, h, h), (h, h, h), (h, h, -h)]
+    pts = [g.add_point(*p) for p in c]
+    lc = [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4],
+          [0, 4], [1, 5], [2, 6], [3, 7]]
+    lines = [g.add_line(pts[a], pts[b]) for a, b in lc]
+    sc = [[0, 1, 2, 3], [4, 5, 6, 7], [0, 9, 4, 8], [1, 10, 5, 9],
+          [2, 11, 6, 10], [3, 8, 7, 11]]
+    surfaces = []
+    for s in sc:
+        loop = g.add_curve_loop([lines[i] for i in s], reorient=True)
+        surfaces.append(g.add_plane_surface([loop]))
+    vol = g.add_volume([g.add_surface_loop(surfaces)])
+    for i in lines:
+        g.mesh.set_transfinite_curve(i, n)
+    for i in surfaces:
+        g.mesh.set_transfinite_surface(i)
+        g.mesh.set_recombine(2, i)
+    g.mesh.set_transfinite_volume(vol)
+    fp1 = g.add_point(-0.25*size, 0.25*size, -h)
+    fp2 = g.add_point(-0.25*size, 0.25*size, h)
+    fiber = g.add_line(fp1, fp2)
+    g.mesh.set_transfinite_curve(fiber, 3)
+    g.synchronize()
+    gm = gmsh.model.add_physical_group(3, [vol])
+    gmsh.model.set_physical_name(3, gm, "MATRIX")
+    gf = gmsh.model.add_physical_group(1, [fiber])
+    gmsh.model.set_physical_name(1, gf, "FIBER")
+    return name
+
+
 def plus_lattice_2d(name="PLUS", size=1.0):
     """A 2d cell whose struts cross the boundary at the edge midpoints,
     i.e. not at the corners; one group 'STRUTS'."""

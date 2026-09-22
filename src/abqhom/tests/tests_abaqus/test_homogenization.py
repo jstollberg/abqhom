@@ -214,5 +214,50 @@ class TestContinuum(unittest.TestCase):
         self.assertAlmostEqual(cyz[3], C44, delta=1.0e-3*C44)
 
 
+class TestEmbeddedFibers(unittest.TestCase):
+
+    def test_boundary_fiber_excluded_from_translation_bc(self):
+        """A beam fiber embedded in a continuum matrix whose end nodes lie
+        ON the periodic boundary. The embedded-region constraint eliminates
+        those nodes' translational DOFs, so apply_periodic_BC must drop them
+        from the translational equations (Abaqus cannot form an equation on
+        an eliminated DOF). The analysis must run and return a finite
+        effective stress that is stiffer than the bare matrix along the
+        fibre (z) axis."""
+        E_m, nu_m, E_f, nu_f = 50.0, 0.3, 210.0, 0.2
+
+        fixtures.matrix_with_boundary_fiber("EMB", size=1.0)
+        rve = GmshRVE("EMB")
+        rve.add_periodic_mesh_constraints()
+        rve.generate_mesh()
+
+        unit = AbaqusRVE(rve)
+        _elastic(unit, "M", E_m, nu_m)
+        _elastic(unit, "F", E_f, nu_f)
+        unit.assign_solid_section("MATRIX", "M")
+        unit.assign_beam_section("FIBER", "F", 0.1)
+        unit.model.EmbeddedRegion("COUPLING",
+                                  unit.instance.sets["ELSET_FIBER"],
+                                  unit.instance.sets["ELSET_MATRIX"])
+        unit.model.StaticStep(name="LOAD", previous="Initial")
+
+        def strain_history(time):
+            strain = np.zeros(6)
+            strain[2] = STRAIN            # uniaxial along the fibre axis z
+            return time*voigt_to_tensor(strain, "STRAIN")
+
+        unit.apply_periodic_BC("LOAD", LoadHistory(np.array([0.0, 1.0]),
+                                                   strain_history))
+        unit.run_analysis(field_outputs=["U"])
+        stress = tensor_to_voigt(unit.average_stress("LOAD"), "STRESS")
+
+        gmsh.model.set_current("EMB")
+        gmsh.model.remove()
+
+        self.assertTrue(np.all(np.isfinite(stress)))
+        # z-response present and stiffer than the bare matrix modulus
+        self.assertGreater(stress[2]/STRAIN, E_m)
+
+
 if __name__ == "__main__":
     unittest.main()

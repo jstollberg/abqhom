@@ -348,6 +348,29 @@ class AbaqusRVE(object):
         element_types = {str(element.type) for element in all_elements}
         return element_types
 
+    def _embedded_region_nodes(self):
+        """
+        Labels of the nodes tied by an embedded-region constraint.
+
+        Returns
+        -------
+        labels : set[int]
+            The labels of the embedded nodes.
+
+        """
+
+        labels = set()
+        for name in self.model.constraints.keys():
+            constraint = self.model.constraints[name]
+            if constraint.__class__.__name__ != "EmbeddedRegion":
+                continue
+
+            set_name = constraint.embeddedRegion[0]
+            if set_name in self.part.sets:
+                labels.update(n.label for n in self.part.sets[set_name].nodes)
+
+        return labels
+
     def _add_dirichlet_from_displacement_history(self, time_history, u_history,
                                                  region, step_name, bc_name,
                                                  amplitude_name):
@@ -538,11 +561,18 @@ class AbaqusRVE(object):
         constraints of the form
 
         .. math::
-            \boldsymbol{\theta}^{+} - \boldsymbol{\theta}^{-} =
+            \boldsymbol{Q}^{+} - \boldsymbol{Q}^{-} =
             \boldsymbol{0}
 
         will be enforced, implying that the macroscopic curvature is
         assumed to be zero.
+
+        Nodes whose translational degrees of freedom are eliminated by an
+        embedded-region constraint (e.g. fibers embedded in a matrix) are
+        excluded from the translational equations, since Abaqus cannot form
+        an equation on an eliminated DOF. Their translational periodicity
+        is inherited from the periodic host. Any rotational DOFs are still
+        coupled as above.
 
         Parameters
         ----------
@@ -630,21 +660,58 @@ class AbaqusRVE(object):
             time_history, u_history, region, initialization_step, bc_name,
             amplitude_name)
 
+        # Nodes tied by an embedded-region constraint
+        embedded = self._embedded_region_nodes()
+
         # Add periodic coupling to edges and faces
         for slave, master in PERIODIC_PAIRS.items():
-            if ("NSET_" + master not in RVE_sets
-                    or "NSET_" + slave not in RVE_sets):
+            slave_set, master_set = "NSET_" + slave, "NSET_" + master
+            if master_set not in RVE_sets or slave_set not in RVE_sets:
                 continue
 
             # Create a reference point for the RHS of the equation
             create_reference_point(master, slave)
 
+            # Restrict the equation to node pairs whose translations are not
+            # eliminated by an embedded constraint
+            if embedded:
+                slave_labels, master_labels = [], []
+
+                # Collect slave-master node pairs that are not entirely
+                # embedded
+                for slave_node, master_node in zip(
+                        self.part.sets[slave_set].nodes,
+                        self.part.sets[master_set].nodes):
+
+                    if (slave_node.label not in embedded
+                            and master_node.label not in embedded):
+                        slave_labels.append(slave_node.label)
+                        master_labels.append(master_node.label)
+
+                if not slave_labels:
+                    continue  # whole pair embedded and handled by the host
+
+                # Create subset of nodes containing only the nodes not
+                # handled by the embedded region host
+                if len(slave_labels) < len(self.part.sets[slave_set].nodes):
+                    slave_set = "NSET_{}_INDEPENDENT".format(slave)
+                    master_set = "NSET_{}_INDEPENDENT".format(master)
+
+                    if slave_set not in self.part.sets:
+                        self.part.SetFromNodeLabels(name=slave_set,
+                                                    nodeLabels=slave_labels,
+                                                    unsorted=True)
+                    if master_set not in self.part.sets:
+                        self.part.SetFromNodeLabels(name=master_set,
+                                                    nodeLabels=master_labels,
+                                                    unsorted=True)
+
+            base_name = self.model_name + "."
             for dof in range(1, dim + 1):
-                base_name = self.model_name + ".NSET_"
                 ref_set_name = ("REFERENCE_POINT_{}_{}.REFERENCE_POINT"
                                 .format(master, slave))
-                terms = [[1.0, base_name + slave, dof],
-                         [-1.0, base_name + master, dof],
+                terms = [[1.0, base_name + slave_set, dof],
+                         [-1.0, base_name + master_set, dof],
                          [-1.0, ref_set_name, dof]]
 
                 self.model.Equation(name="PBC_{}_{}_{}".format(
