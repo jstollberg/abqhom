@@ -140,8 +140,8 @@ ABAQUS_CONNECTIVITY_ORDER = {
     16: [0, 1, 2, 3, 4, 5, 6, 7],             # 8-node 2nd quadrangle
     17: [0, 1, 2, 3, 4, 5, 6, 7, 8, 11, 13,
          9, 16, 18, 19, 17, 10, 12, 14, 15],  # 20-node 2nd hexahedron
-    18: [0, 1, 2, 3, 4, 5, 7, 9,
-         7, 12, 14, 12, 8, 10, 11],           # 15-node 2nd prism
+    18: [0, 1, 2, 3, 4, 5, 6, 9,
+         7, 12, 14, 13, 8, 10, 11],           # 15-node 2nd prism
                              }
 
 # Abaqus element types with rotational degrees of freedom
