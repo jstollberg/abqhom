@@ -10,7 +10,8 @@ with isotropic hardening. The macroscopic load is a strain-controlled cycle
 whose amplitude grows a little every cycle, so the struts yield in tension
 and compression and the (isotropically hardening) hysteresis loops nest
 outward without crossing. The struts use their true material parameters;
-periodic strut sharing is handled automatically in average_stress.
+redundant periodic copies of boundary struts are removed automatically
+before the analysis.
 
 Because the analysis is geometrically nonlinear (nlgeom=ON), the prescribed
 macroscopic quantity is the displacement gradient H = F - I (F being the

@@ -4,9 +4,9 @@ Homogenization of a body-centered-cubic (BCC) beam-lattice unit cell.
 The unit cell combines the twelve edge struts of the cubic bounding box
 (group CUBIC) with the eight body diagonals connecting the corners to the
 center node (group BCC). The edge struts lie on the bounding box and are
-shared by four neighboring cells, whereas the diagonals are interior; the
-automatic periodic sharing weights in average_stress account for this, so
-no manual correction of the material stiffness is needed.
+shared by four neighboring cells, whereas the diagonals are interior.
+Redundant secondary copies of the boundary struts are removed before the
+analysis, so no manual correction of the material stiffness is needed.
 
 By its cubic symmetry the effective stiffness has only three independent
 constants (C11=C22=C33, C12=C13=C23, C44=C55=C66).

@@ -30,9 +30,10 @@ stiffness.
   discrete Hill–Mandel identity — one material-agnostic routine for
   periodic and displacement BCs, for continuum, beam/truss and shell
   elements.
-- **Automatic periodic strut-sharing weights**: struts lying on a
-  bounding-box face (shared by 2 cells) or edge (shared by 4) contribute
-  only their in-cell fraction to the effective stiffness.
+- **Automatic ownership of periodic boundary elements**: redundant
+  secondary copies of struts and shells on the RVE boundary are removed
+  before analysis, while their nodes are retained for the periodic
+  constraints.
 - **VTK export** of the results via
   [Paraqus](https://github.com/InstituteOfMechanics/Paraqus) (optional),
   with per-strut radii taken automatically from the assigned sections.

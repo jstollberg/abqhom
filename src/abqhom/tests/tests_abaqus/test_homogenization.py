@@ -76,9 +76,9 @@ class TestBeamLattices(unittest.TestCase):
                                delta=1.0e-3*analytical)
         self.assertLess(abs(column[1]), 1.0e-3*analytical)
 
-    def test_boundary_strut_sharing_weight(self):
-        """The four edge struts of a 2d square cell are shared by two cells
-        each, so C11 = E*A (not 2*E*A) thanks to the sharing weights."""
+    def test_boundary_strut_ownership(self):
+        """After redundant periodic copies are removed, the retained edge
+        struts of a 2d square cell give C11 = E*A (not 2*E*A)."""
         E, nu, r = 1.0, 0.3, 0.05
         area = np.pi*r*r
 
@@ -148,9 +148,9 @@ class TestShells(unittest.TestCase):
 
     def test_parallel_plates_membrane_modulus(self):
         """Two parallel shell plates form a periodic stack of membranes.
-        Each plate lies on a bounding-box z-face (shared, weight 1/2), so
-        the effective membrane stiffness is C11 = E*t/((1-nu**2)*spacing)
-        with C12 = nu*C11. Exercises assign_shell_section end to end."""
+        One periodic copy of the plates is retained, so the effective
+        membrane stiffness is C11 = E*t/((1-nu**2)*spacing) with
+        C12 = nu*C11. Exercises assign_shell_section end to end."""
         E, nu, t, size, spacing = 210.0, 0.3, 0.01, 1.0, 1.0
 
         def assign(unit_cell):

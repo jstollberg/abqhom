@@ -136,6 +136,13 @@ class AbaqusRVE(object):
             gmsh_RVE.build_element_sets()
         self._add_element_sets(gmsh_RVE.element_sets)
 
+        # Remove redundant periodic copies while retaining their nodes
+        if (self.periodic_mesh
+                and "ELSET_SECONDARY_ELEMENTS" in self.part.sets):
+            self.part.deleteElement(
+                elements=self.part.sets["ELSET_SECONDARY_ELEMENTS"],
+                deleteUnreferencedNodes=OFF)
+
         # Add part instance to the assembly
         assembly = self.model.rootAssembly
         assembly.DatumCsysByDefault(CARTESIAN)
@@ -1311,7 +1318,7 @@ class AbaqusRVE(object):
         self.close_odb_file()
         return n_frames
 
-    def average_stress(self, step_name, frame=-1, share_boundary_struts=True):
+    def average_stress(self, step_name, frame=-1):
         r"""
         Compute the averaged stress.
 
@@ -1325,9 +1332,6 @@ class AbaqusRVE(object):
             Name of the step.
         frame : int, optional
             The frame index. The default is -1.
-        share_boundary_struts : bool, optional
-            If True, weight boundary struts by their periodic sharing
-            fraction. The default is True.
 
         Returns
         -------
@@ -1358,8 +1362,6 @@ class AbaqusRVE(object):
         odb_instance = self.odb.rootAssembly.instances[self.model_name]
         node_coords = {n.label: np.array(n.coordinates[0:dim])
                        for n in odb_instance.nodes}
-        weights = (self._element_sharing_weights() if share_boundary_struts
-                   else {})
 
         # Assemble the internal nodal force vectors per (element, node)
         forces = {}
@@ -1372,52 +1374,14 @@ class AbaqusRVE(object):
                     forces[key] = np.zeros(dim)
                 forces[key][i] = f.data
 
-        # Virial sum with the per-element sharing weights
+        # Virial sum over the retained RVE elements
         stress = np.zeros((dim, dim), dtype=float)
-        for (element_label, node_label), force in forces.items():
-            weight = weights.get(element_label, 1.0)
-            stress += weight*np.outer(force, node_coords[node_label])
+        for (_, node_label), force in forces.items():
+            stress += np.outer(force, node_coords[node_label])
         stress *= -1.0/volume
 
         self.close_odb_file()
         return stress
-
-    def _element_sharing_weights(self):
-        r"""
-        Compute the periodic sharing weight of every element.
-
-        Returns
-        -------
-        weights : dict[int, float]
-            A map from element label to sharing weight.
-
-        """
-
-        x_min, y_min, z_min, x_max, y_max, z_max = self._bounding_box
-        planes = [(0, x_min), (0, x_max), (1, y_min), (1, y_max)]
-        if self.model_dimension == THREE_D:
-            planes += [(2, z_min), (2, z_max)]
-        delta = max(x_max - x_min, y_max - y_min, z_max - z_min)
-        tol = 1e-6*delta + 1e-12
-
-        nodes = self.part.nodes
-        weights = {}
-        for element in self.part.elements:
-            coords = []
-            for index in element.connectivity:
-                coords.append(np.array(nodes[index].coordinates))
-
-            n_faces = 0
-            for axis, value in planes:
-                on_face = True
-                for coord in coords:
-                    if abs(coord[axis] - value) >= tol:
-                        on_face = False
-                        break
-                if on_face:
-                    n_faces += 1
-            weights[element.label] = 0.5**n_faces
-        return weights
 
 
 class LoadHistory(object):

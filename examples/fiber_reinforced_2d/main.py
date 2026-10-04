@@ -5,8 +5,8 @@ strain) with a square fiber arrangement.
 The effective in-plane stiffness is bracketed by the Voigt (upper) and
 Reuss (lower) bounds of a two-phase material, which are computed here for
 comparison. This example also exercises the homogenization for continuum
-(solid) elements: the automatic strut sharing weights leave continuum
-elements untouched (weight 1), so the result is unaffected by them.
+(solid) elements, which are not treated as redundant boundary elements
+merely because they have nodes on the RVE boundary.
 
 Run with:  abaqus cae noGUI=main.py
 """

@@ -3,15 +3,14 @@ Homogenization of a simple-cubic beam-lattice unit cell.
 
 The unit cell consists of the twelve struts along the edges of the cubic
 bounding box. Because the edge struts are shared by four neighboring
-cells, this is the simplest example that exercises the automatic periodic
-sharing weights in average_stress.
+cells, this is the simplest example that exercises the automatic removal
+of redundant secondary element copies.
 
 Analytical check
 ----------------
 Under uniaxial strain only the four struts parallel to the loading
 direction carry an axial force N = E*A*eps. Each edge is shared by four
-cells (weight 1/4), so their effective contribution is that of a single
-strut and
+cells, so only one periodic copy is retained and
 
     C11 = E*A / L**2 = E*pi*r**2 / L**2 ,
 

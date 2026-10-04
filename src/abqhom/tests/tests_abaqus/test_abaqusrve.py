@@ -1,8 +1,8 @@
 """
 Granular tests for AbaqusRVE that exercise individual pieces of the API
 without running a finite element analysis: construction, set transfer,
-the periodic sharing weights, the rigid-body anchor selection and the
-recorded section radii. These need the Abaqus kernel.
+the removal of redundant periodic elements, the rigid-body anchor
+selection and the recorded section radii. These need the Abaqus kernel.
 
 """
 import unittest
@@ -68,37 +68,22 @@ class TestConstruction(_AbaqusTestCase):
         self.assertIn("NSET_ALL_NODES", unit.part.sets)
         self.assertIn("NSET_POINT_1", unit.part.sets)
 
+    def test_secondary_elements_are_removed_but_nodes_are_retained(self):
+        fixtures.simple_cubic("D2", length=2.0)
+        rve = GmshRVE("D2")
+        rve.add_periodic_mesh_constraints()
+        rve.generate_mesh(element_size=1.0)
+        rve.build_element_sets()
+        all_nodes, _ = rve.get_nodes()
+        remaining_elements = (len(rve.element_sets["ALL_ELEMENTS"])
+                              - len(rve.element_sets["SECONDARY_ELEMENTS"]))
 
-class TestSharingWeights(_AbaqusTestCase):
+        unit = AbaqusRVE(rve)
 
-    def test_cube_edge_struts_get_one_quarter(self):
-        """Every strut of the simple-cubic cell lies on a bounding-box
-        edge (two faces) and is therefore weighted 1/4."""
-        unit = _build(lambda: fixtures.simple_cubic("E", 2.0))
-        weights = unit._element_sharing_weights()
-        self.assertEqual(set(weights.values()), set([0.25]))
-
-    def test_square_edge_struts_get_one_half(self):
-        """Each strut of the 2d square cell lies on one bounding-box face
-        and is weighted 1/2."""
-        unit = _build(lambda: fixtures.square_lattice("F", 2.0))
-        weights = unit._element_sharing_weights()
-        self.assertEqual(set(weights.values()), set([0.5]))
-
-    def test_transversal_struts_are_not_weighted(self):
-        """Struts that only cross the boundary keep weight 1."""
-        unit = _build(lambda: fixtures.plus_lattice_2d("G", 2.0))
-        weights = unit._element_sharing_weights()
-        self.assertEqual(set(weights.values()), set([1.0]))
-
-    def test_bcc_has_mixed_weights(self):
-        """The BCC cell mixes edge struts (1/4) and interior diagonals
-        (1)."""
-        unit = _build(lambda: fixtures.bcc("H", 2.0))
-        values = list(unit._element_sharing_weights().values())
-        self.assertIn(0.25, values)
-        self.assertIn(1.0, values)
-        self.assertNotIn(0.5, values)
+        self.assertEqual(len(unit.part.nodes), len(all_nodes))
+        self.assertEqual(len(unit.part.elements), remaining_elements)
+        self.assertEqual(len(unit.part.sets["ELSET_STRUTS"].elements),
+                         remaining_elements)
 
 
 class TestRigidBodyAnchor(_AbaqusTestCase):

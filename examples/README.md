@@ -24,8 +24,8 @@ top of each script. Results are written next to the script into `abq/`
 | `lattice_plasticity` | simple cubic, cyclic elasto-plastic | isotropic hardening, hysteresis |
 
 The lattices whose struts lie on the bounding box (simple cubic, BCC,
-Kelvin) rely on the automatic periodic sharing weights in
-`average_stress`; no manual stiffness correction is applied.
+Kelvin) rely on the automatic removal of redundant secondary element
+copies; no manual stiffness correction is applied.
 
 ## Continuum and mixed RVEs
 
