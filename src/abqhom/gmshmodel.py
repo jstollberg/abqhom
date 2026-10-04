@@ -700,12 +700,120 @@ class GmshRVE(object):
                                                                         tag)
                 self.node_sets[name] = np.array(nodes, dtype=np.uint64)
 
+    def _get_boundary_signatures(self):
+        """
+        Get the coordinate signatures of the RVE boundary groups.
+
+        Returns
+        -------
+        group_signature : dict[str, tuple[int]]
+            The coordinate signature of each boundary group.
+        signature_to_group : dict[tuple[int], str]
+            The boundary group corresponding to each coordinate signature.
+        active_axes : ndarray
+            Flags marking the spatial axes of the RVE.
+
+        """
+
+        bounding_box = np.array(
+            self.get_bounding_box_from_points()).reshape(2, -1)
+        bounds_min, bounds_max = bounding_box
+        delta = bounds_max - bounds_min
+        active_axes = ~np.isclose(
+            delta, 0.0, atol=gmsh.option.get_number("Geometry.Tolerance"))
+
+        boundary_groups = POINT_GROUPS + EDGE_GROUPS + FACE_GROUPS
+        if self.model_dimension == 2:
+            boundary_groups = POINT_GROUPS[:4] + EDGE_GROUPS[:4]
+
+        group_to_coords = self.boundary.get_group_coordinate_identifiers()
+        group_signature, signature_to_group = {}, {}
+        for group in boundary_groups:
+            signature = []
+            for axis, value in enumerate(group_to_coords[group]):
+                if (not active_axes[axis]) or np.isnan(value):
+                    signature.append(0)
+                elif (abs(value - bounds_min[axis])
+                      < abs(value - bounds_max[axis])):
+                    signature.append(-1)
+                else:
+                    signature.append(1)
+            group_signature[group] = tuple(signature)
+            signature_to_group[tuple(signature)] = group
+
+        return group_signature, signature_to_group, active_axes
+
+    def _get_boundary_element_sets(self, element_tags,
+                                   element_connectivity, tol=None):
+        """
+        Classify elements located entirely on an RVE boundary group.
+
+        Parameters
+        ----------
+        element_tags : dict[int, ndarray]
+            The element tags per Gmsh element type.
+        element_connectivity : dict[int, ndarray]
+            The element connectivity per Gmsh element type.
+        tol : float, optional
+            Absolute tolerance for locating elements on the RVE boundary.
+            If this is None, use a small fraction of the box size. The
+            default is None.
+
+        Returns
+        -------
+        element_sets : dict[str, ndarray]
+            The elements located on each RVE boundary group.
+
+        """
+
+        bounding_box = np.array(
+            self.get_bounding_box_from_points()).reshape(2, -1)
+        bounds_min, bounds_max = bounding_box
+        if tol is None:
+            tol = 1e-6*float(np.max(bounds_max - bounds_min)) + 1e-12
+
+        _, signature_to_group, active_axes = self._get_boundary_signatures()
+
+        node_tags, node_coords = self.get_nodes()
+        node_indices = {int(tag): i for i, tag in enumerate(node_tags)}
+        boundary_groups = POINT_GROUPS + EDGE_GROUPS + FACE_GROUPS
+        element_sets = {group: [] for group in boundary_groups}
+
+        for el_type, tags in element_tags.items():
+            connectivity = element_connectivity[el_type]
+            for tag, nodes in zip(tags, connectivity):
+                indices = [node_indices[int(node)] for node in nodes]
+                coords = node_coords[indices]
+
+                signature = []
+                for axis in range(3):
+                    if not active_axes[axis]:
+                        signature.append(0)
+                    elif np.all(np.abs(coords[:, axis]
+                                       - bounds_min[axis]) < tol):
+                        signature.append(-1)
+                    elif np.all(np.abs(coords[:, axis]
+                                       - bounds_max[axis]) < tol):
+                        signature.append(1)
+                    else:
+                        signature.append(0)
+
+                group = signature_to_group.get(tuple(signature))
+                if group is not None:
+                    element_sets[group].append(tag)
+
+        for group, tags in element_sets.items():
+            element_sets[group] = np.array(tags, dtype=np.uint64)
+
+        return element_sets
+
     def build_element_sets(self):
         """
-        Build node sets based on the physical groups from Gmsh.
+        Build element sets based on the physical groups from Gmsh.
 
         The element sets are needed to assign e.g. material to the
-        elements.
+        elements. Elements located entirely on an RVE boundary group are
+        additionally collected in the corresponding boundary element set.
 
         Returns
         -------
@@ -720,8 +828,7 @@ class GmshRVE(object):
         if self.mesh_dimension < 0:
             raise RuntimeError("There are no elements in the model.")
 
-        # Add all sets containing elements of the highest available
-        # dimension
+        # Add element sets based on the physical groups
         for group in gmsh.model.get_physical_groups():
             name = gmsh.model.get_physical_name(*group)
             if (len(name) == 0) or (name in (POINT_GROUPS + EDGE_GROUPS
@@ -738,10 +845,29 @@ class GmshRVE(object):
                 np.unique(group_elements).astype(np.uint64))
 
         # Add a set for all elements in the model
-        all_elements, _ = self.get_elements()
-        all_elements = [e for t in all_elements.values() for e in t]
+        element_tags, element_connectivity = self.get_elements()
+        all_elements = [e for t in element_tags.values() for e in t]
         self.element_sets["ALL_ELEMENTS"] = np.array(all_elements,
                                                      dtype=np.uint64)
+
+        # Add element sets for the RVE boundary groups
+        boundary_sets = self._get_boundary_element_sets(
+            element_tags, element_connectivity)
+        self.element_sets.update(boundary_sets)
+
+        # Add sets collecting elements for points, edges and faces
+        special_sets = [("POINT_ELEMENTS", POINT_GROUPS),
+                        ("EDGE_ELEMENTS", EDGE_GROUPS),
+                        ("FACE_ELEMENTS", FACE_GROUPS),
+                        ("BOUNDARY_ELEMENTS", (POINT_GROUPS + EDGE_GROUPS
+                                               + FACE_GROUPS)),
+                        ("SECONDARY_ELEMENTS", PERIODIC_PAIRS.keys())]
+        for set_name, set_items in special_sets:
+            self._new_set_from_union(self.element_sets, set_name, *set_items)
+
+        # Add a set for all elements not located entirely on the boundary
+        self._new_set_from_cut(self.element_sets, "INNER_ELEMENTS",
+                               "ALL_ELEMENTS", "BOUNDARY_ELEMENTS")
 
     @classmethod
     def read_from_mesh(cls, model_name):
@@ -820,20 +946,9 @@ class GmshRVE(object):
             flags[np.abs(coords[:, axis] - hi[axis]) < tol, axis] = 1
 
         # Analogously, flag the boundary group identifiers
-        group_to_coords = self.boundary.get_group_coordinate_identifiers()
-        group_signature, signature_to_group = {}, {}
-        for group, coord_id in group_to_coords.items():
-            s = []
-            for axis in range(3):
-                if np.isnan(coord_id[axis]):
-                    s.append(0)
-                elif (abs(coord_id[axis] - lo[axis])
-                      < abs(coord_id[axis] - hi[axis])):
-                    s.append(-1)
-                else:
-                    s.append(1)
-            group_signature[group] = tuple(s)
-            signature_to_group[tuple(s)] = group
+        (group_signature,
+         signature_to_group,
+         _) = self._get_boundary_signatures()
 
         # Assign every boundary node to its group
         members = {}
@@ -978,7 +1093,7 @@ class GmshRVE(object):
         """
 
         cut = set(set_dictionary[item]) - set(set_dictionary[tool])
-        set_dictionary[set_name] = np.array(list(cut), dtype=np.int64)
+        set_dictionary[set_name] = np.array(list(cut), dtype=np.uint64)
 
     def write_abaqus_input(self, custom_types={}):
         """

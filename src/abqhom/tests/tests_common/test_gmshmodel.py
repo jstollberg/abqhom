@@ -12,6 +12,8 @@ import numpy as np
 
 import gmsh
 
+from abqhom.constants import (POINT_GROUPS, EDGE_GROUPS, FACE_GROUPS,
+                              PERIODIC_PAIRS)
 from abqhom.gmshmodel import GmshRVE
 from abqhom.tests import fixtures
 
@@ -149,6 +151,72 @@ class TestNodeSets(_GmshTestCase):
         self.assertEqual(len(rve.element_sets["CUBIC"]), 12)  # twelve edges
         self.assertEqual(len(rve.element_sets["BCC"]), 8)     # eight diagonals
 
+    def test_boundary_element_sets_classify_cubic_edges(self):
+        fixtures.bcc("BOUNDARY_ESETS", length=2.0)
+        rve = GmshRVE("BOUNDARY_ESETS")
+        rve.generate_mesh(element_size=1.0)  # two elements per strut
+        rve.build_element_sets()
+
+        edge_elements = set()
+        for group in EDGE_GROUPS:
+            self.assertEqual(len(rve.element_sets[group]), 2)
+            edge_elements.update(rve.element_sets[group].tolist())
+
+        self.assertEqual(edge_elements,
+                         set(rve.element_sets["CUBIC"].tolist()))
+        self.assertTrue(edge_elements.isdisjoint(
+            set(rve.element_sets["BCC"].tolist())))
+        for group in POINT_GROUPS + FACE_GROUPS:
+            self.assertEqual(len(rve.element_sets[group]), 0)
+
+        self.assertEqual(set(rve.element_sets["EDGE_ELEMENTS"]),
+                         edge_elements)
+        self.assertEqual(set(rve.element_sets["BOUNDARY_ELEMENTS"]),
+                         edge_elements)
+        self.assertEqual(set(rve.element_sets["INNER_ELEMENTS"]),
+                         set(rve.element_sets["BCC"]))
+        self.assertEqual(len(rve.element_sets["POINT_ELEMENTS"]), 0)
+        self.assertEqual(len(rve.element_sets["FACE_ELEMENTS"]), 0)
+
+        secondary_elements = set()
+        for group in PERIODIC_PAIRS:
+            secondary_elements.update(rve.element_sets[group])
+        self.assertEqual(set(rve.element_sets["SECONDARY_ELEMENTS"]),
+                         secondary_elements)
+
+    def test_boundary_element_sets_support_two_dimensions(self):
+        fixtures.square_lattice("BOUNDARY_ESETS_2D", size=2.0)
+        rve = GmshRVE("BOUNDARY_ESETS_2D")
+        rve.generate_mesh(element_size=1.0)
+        rve.build_element_sets()
+
+        boundary_elements = set()
+        for group in EDGE_GROUPS[:4]:
+            self.assertEqual(len(rve.element_sets[group]), 2)
+            boundary_elements.update(rve.element_sets[group].tolist())
+
+        self.assertEqual(boundary_elements,
+                         set(rve.element_sets["STRUTS"].tolist()))
+        for group in POINT_GROUPS + EDGE_GROUPS[4:] + FACE_GROUPS:
+            self.assertEqual(len(rve.element_sets[group]), 0)
+
+        secondary_elements = (set(rve.element_sets["EDGE_2"])
+                              | set(rve.element_sets["EDGE_3"]))
+        self.assertEqual(set(rve.element_sets["SECONDARY_ELEMENTS"]),
+                         secondary_elements)
+
+    def test_continuum_elements_are_not_boundary_elements(self):
+        fixtures.solid_cube("CONTINUUM_ESETS", length=2.0)
+        rve = GmshRVE("CONTINUUM_ESETS")
+        rve.generate_mesh(element_size=1.0)
+        rve.build_element_sets()
+
+        for group in POINT_GROUPS + EDGE_GROUPS + FACE_GROUPS:
+            self.assertEqual(len(rve.element_sets[group]), 0)
+        self.assertEqual(len(rve.element_sets["BOUNDARY_ELEMENTS"]), 0)
+        self.assertEqual(set(rve.element_sets["INNER_ELEMENTS"]),
+                         set(rve.element_sets["ALL_ELEMENTS"]))
+
 
 class TestWriteAbaqusInput(_GmshTestCase):
 
@@ -215,6 +283,13 @@ class TestReadFromMesh(_GmshTestCase):
         # each hold the single interior node and must pair up.
         self.assertEqual(len(ns["FACE_1"]), len(ns["FACE_2"]))
         self.assertGreater(len(ns["FACE_1"]), 0)
+
+        # The shell elements are classified on their respective faces.
+        es = rve.element_sets
+        self.assertEqual(len(es["FACE_1"]), 8)
+        self.assertEqual(len(es["FACE_2"]), 8)
+        face_elements = set(es["FACE_1"]) | set(es["FACE_2"])
+        self.assertEqual(face_elements, set(es["PLATES"]))
 
         # The paired nodes differ by exactly the lattice vector in z.
         tags, coords, _ = gmsh.model.mesh.get_nodes()
