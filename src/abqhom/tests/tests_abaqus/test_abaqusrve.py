@@ -17,7 +17,7 @@ from abqhom.abqmodel import AbaqusRVE, LoadHistory
 from abqhom.tests import fixtures
 
 from abaqusConstants import (THREE_D, TWO_D_PLANAR, ON, OFF, DURING_ANALYSIS,
-                             BEFORE_ANALYSIS)
+                             BEFORE_ANALYSIS, TIME, FREQUENCY)
 
 
 def _uniaxial_history():
@@ -62,6 +62,81 @@ class TestConstruction(_AbaqusTestCase):
         self.assertTrue(np.allclose(unit.get_bounding_box(),
                                     [-1, -1, -1, 1, 1, 1]))
 
+    def test_volume_matches_3d_geometry(self):
+        unit = _build(lambda: fixtures.simple_cubic("C3", 2.0))
+        self.assertAlmostEqual(unit.get_volume(), 8.0)
+
+    def test_volume_is_area_for_2d_geometry(self):
+        unit = _build(lambda: fixtures.square_lattice("C2", 2.0))
+        self.assertAlmostEqual(unit.get_volume(), 4.0)
+
+    def test_frame_time_includes_time_accumulated_before_step(self):
+        class Frame(object):
+            def __init__(self, value):
+                self.frameValue = value
+
+        class Step(object):
+            domain = TIME
+            totalTime = 2.0
+            frames = [Frame(0.0), Frame(0.75)]
+
+        class Odb(object):
+            steps = {"LOAD": Step()}
+
+        unit = object.__new__(AbaqusRVE)
+        unit.open_odb_file = lambda: setattr(unit, "_odb", Odb())
+        unit.close_odb_file = lambda: setattr(unit, "_odb", None)
+
+        self.assertAlmostEqual(unit.get_frame_time("LOAD", -1), 2.75)
+        self.assertIsNone(unit.odb)
+
+    def test_frame_time_rejects_non_time_domain_step(self):
+        class Step(object):
+            domain = FREQUENCY
+
+        class Odb(object):
+            steps = {"FREQUENCY": Step()}
+
+        unit = object.__new__(AbaqusRVE)
+        unit.open_odb_file = lambda: setattr(unit, "_odb", Odb())
+        unit.close_odb_file = lambda: setattr(unit, "_odb", None)
+
+        self.assertRaises(ValueError, unit.get_frame_time, "FREQUENCY")
+        self.assertIsNone(unit.odb)
+
+    def test_number_of_frames_closes_odb(self):
+        class Step(object):
+            frames = [object(), object()]
+
+        class Odb(object):
+            steps = {"LOAD": Step()}
+
+        unit = object.__new__(AbaqusRVE)
+        unit.open_odb_file = lambda: setattr(unit, "_odb", Odb())
+        unit.close_odb_file = lambda: setattr(unit, "_odb", None)
+
+        self.assertEqual(unit.get_number_of_frames("LOAD"), 2)
+        self.assertIsNone(unit.odb)
+
+    def test_average_stress_closes_odb_after_error(self):
+        class Frame(object):
+            fieldOutputs = {}
+
+        class Step(object):
+            frames = [Frame()]
+
+        class Odb(object):
+            steps = {"LOAD": Step()}
+
+        unit = object.__new__(AbaqusRVE)
+        unit._model_dimension = THREE_D
+        unit._bounding_box = (0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
+        unit.open_odb_file = lambda: setattr(unit, "_odb", Odb())
+        unit.close_odb_file = lambda: setattr(unit, "_odb", None)
+
+        self.assertRaises(RuntimeError, unit.average_stress, "LOAD")
+        self.assertIsNone(unit.odb)
+
     def test_node_and_element_sets_are_transferred(self):
         unit = _build(lambda: fixtures.simple_cubic("D", 2.0))
         self.assertIn("ELSET_STRUTS", unit.part.sets)
@@ -84,6 +159,46 @@ class TestConstruction(_AbaqusTestCase):
         self.assertEqual(len(unit.part.elements), remaining_elements)
         self.assertEqual(len(unit.part.sets["ELSET_STRUTS"].elements),
                          remaining_elements)
+
+    def test_secondary_elements_can_be_retained(self):
+        fixtures.simple_cubic("D3", length=2.0)
+        rve = GmshRVE("D3")
+        rve.add_periodic_mesh_constraints()
+        rve.generate_mesh(element_size=1.0)
+        rve.build_element_sets()
+
+        unit = AbaqusRVE(rve, remove_secondary=False)
+
+        self.assertEqual(len(unit.part.elements),
+                         len(rve.element_sets["ALL_ELEMENTS"]))
+        self.assertEqual(
+            len(unit.part.sets["ELSET_SECONDARY_ELEMENTS"].elements),
+            len(rve.element_sets["SECONDARY_ELEMENTS"]))
+
+    def test_orphaned_structural_nodes_keep_periodic_rotations(self):
+        fixtures.simple_cubic("D4", length=2.0)
+        rve = GmshRVE("D4")
+        rve.add_periodic_mesh_constraints()
+        rve.generate_mesh(element_size=1.0)
+        unit = AbaqusRVE(rve)
+
+        retained = set()
+        for element in unit.part.elements:
+            for index in element.connectivity:
+                retained.add(unit.part.nodes[index].label)
+        orphaned = {node.label for node in unit.part.nodes} - retained
+
+        self.assertTrue(orphaned)
+        self.assertTrue(orphaned.issubset(
+            set(unit._unreduced_node_element_types)))
+
+        unit._periodic_boundary_rotations()
+        constrained = set()
+        for name in unit.part.sets.keys():
+            if name.endswith("_DOF_4"):
+                constrained.update(node.label
+                                   for node in unit.part.sets[name].nodes)
+        self.assertTrue(orphaned.issubset(constrained))
 
 
 class TestRigidBodyAnchor(_AbaqusTestCase):

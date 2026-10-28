@@ -122,6 +122,43 @@ def tensor_to_voigt(tensor, quantity, check_symmetry=True):
     return voigt
 
 
+def hill_mandel_residual(macroscopic_power, microscopic_power,
+                         power_tolerance):
+    """
+    Compute the normalized Hill--Mandel power residual.
+
+    Parameters
+    ----------
+    macroscopic_power : float or ndarray
+        Macroscopic power density.
+    microscopic_power : float or ndarray
+        Volume-averaged microscopic power density.
+    power_tolerance : float
+        Positive regularizing power-density scale. It must have the same
+        physical units as the supplied power densities.
+
+    Returns
+    -------
+    residual : float or ndarray
+        The normalized residual. Array inputs are evaluated elementwise.
+
+    """
+    power_tolerance = float(power_tolerance)
+    if power_tolerance <= 0.0:
+        raise ValueError("The power tolerance must be positive.")
+
+    macroscopic_power = np.asarray(macroscopic_power, dtype=float)
+    microscopic_power = np.asarray(microscopic_power, dtype=float)
+    scale = np.maximum(np.maximum(np.abs(macroscopic_power),
+                                  np.abs(microscopic_power)),
+                       power_tolerance)
+    residual = np.abs(macroscopic_power - microscopic_power)/scale
+
+    if residual.ndim == 0:
+        return float(residual)
+    return residual
+
+
 def reuss(volume_fraction, C1, C2):
     """
     Compute the homogenized stiffness tensor following the Reuss theory.

@@ -87,8 +87,42 @@ class TestBeamLattices(unittest.TestCase):
             unit_cell.assign_beam_section("STRUTS", "M", r)
 
         column = _stiffness_column(
-            lambda: fixtures.square_lattice("SQ", size=1.0), assign, 0, 1.0)
+            lambda: fixtures.square_lattice("SQ", size=1.0), assign, 0, 0.5)
         self.assertAlmostEqual(column[0], E*area, delta=1.0e-4*E*area)
+
+    def test_2d_virtual_power_matches_macroscopic_power(self):
+        """The incremental element-force power supports the shorter 2d
+        translation vector and the single out-of-plane beam rotation."""
+        E, nu, r = 1.0, 0.3, 0.05
+        fixtures.square_lattice("VP2", size=1.0)
+        rve = GmshRVE("VP2")
+        rve.add_periodic_mesh_constraints()
+        rve.generate_mesh(element_size=1.0)
+
+        unit = AbaqusRVE(rve)
+        _elastic(unit, "M", E, nu)
+        unit.assign_beam_section("STRUTS", "M", r)
+        unit.model.StaticStep(name="LOAD", previous="Initial")
+
+        def strain_history(time):
+            strain = np.zeros(6)
+            strain[0] = time*STRAIN
+            return voigt_to_tensor(strain, "STRAIN")
+
+        history = LoadHistory(np.array([0.0, 1.0]), strain_history)
+        unit.apply_periodic_BC("LOAD", history)
+        unit.run_analysis()
+
+        stress = unit.average_stress("LOAD")
+        macroscopic_power = float(np.sum(
+            stress*strain_history(1.0)[:2, :2]))
+        microscopic_power = unit.average_virtual_power("LOAD")
+
+        gmsh.model.set_current("VP2")
+        gmsh.model.remove()
+
+        self.assertAlmostEqual(microscopic_power, macroscopic_power,
+                               delta=1.0e-6*abs(macroscopic_power))
 
     def test_bcc_cubic_symmetry(self):
         """The BCC lattice has cubic symmetry (C11 = C22) and the effective

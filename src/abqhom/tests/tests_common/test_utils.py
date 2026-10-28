@@ -11,7 +11,8 @@ import unittest
 import numpy as np
 
 from abqhom.utils import (voigt_to_tensor, tensor_to_voigt, voigt, reuss,
-                          export_to_csv_file, read_csv_file, find_all_files)
+                          hill_mandel_residual, export_to_csv_file,
+                          read_csv_file, find_all_files)
 
 
 class TestVoigtTensor(unittest.TestCase):
@@ -64,6 +65,34 @@ class TestBounds(unittest.TestCase):
         eig_voigt = np.sort(np.linalg.eigvals(C_voigt).real)
         eig_reuss = np.sort(np.linalg.eigvals(C_reuss).real)
         self.assertTrue(np.all(eig_reuss <= eig_voigt + 1e-9))
+
+
+class TestHillMandelResidual(unittest.TestCase):
+
+    def test_equal_powers_give_zero(self):
+        """Equal microscopic and macroscopic powers satisfy the condition."""
+        residual = hill_mandel_residual(2.0, 2.0, 1.0e-12)
+        self.assertEqual(residual, 0.0)
+
+    def test_larger_power_sets_normalization(self):
+        """The larger absolute power determines the normalization."""
+        residual = hill_mandel_residual(2.0, 1.0, 0.1)
+        self.assertAlmostEqual(residual, 0.5)
+
+    def test_tolerance_regularizes_small_powers(self):
+        """The supplied power scale regularizes states near zero power."""
+        residual = hill_mandel_residual(1.0e-9, 0.0, 1.0e-6)
+        self.assertAlmostEqual(residual, 1.0e-3)
+
+    def test_array_inputs_are_evaluated_elementwise(self):
+        """Power histories may be passed as arrays."""
+        residual = hill_mandel_residual(np.array([2.0, 1.0e-9]),
+                                        np.array([1.0, 0.0]), 1.0e-6)
+        self.assertTrue(np.allclose(residual, np.array([0.5, 1.0e-3])))
+
+    def test_nonpositive_tolerance_is_rejected(self):
+        """A nonpositive regularizing scale is not admissible."""
+        self.assertRaises(ValueError, hill_mandel_residual, 1.0, 1.0, 0.0)
 
 
 class TestFileIO(unittest.TestCase):

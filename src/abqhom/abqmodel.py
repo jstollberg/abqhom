@@ -15,7 +15,7 @@ from regionToolset import Region
 from mesh import MeshNodeArray, MeshElementArray
 from abaqusConstants import (THREE_D, TWO_D_PLANAR, DEFORMABLE_BODY, ON, OFF,
                              UNSET, CARTESIAN, N1_COSINES, DURING_ANALYSIS,
-                             BEFORE_ANALYSIS, TOTAL)
+                             BEFORE_ANALYSIS, TOTAL, TIME)
 
 if PARAQUS_INSTALLED:
     from paraqus.abaqus import OdbReader
@@ -34,6 +34,11 @@ class AbaqusRVE(object):
         Map from Gmsh element types to Abaqus element types. If this
         is an empty dict a default map will be used. The default is
         {}.
+    remove_secondary : bool, optional
+        If True, redundant periodic element copies are removed. Setting
+        this to False retains the complete periodic representation for
+        inspection or visualization, but does not provide an ownership-
+        consistent unweighted boundary-value problem. The default is True.
 
     Attributes
     ----------
@@ -93,7 +98,7 @@ class AbaqusRVE(object):
 
     """
 
-    def __init__(self, gmsh_RVE, custom_types={}):
+    def __init__(self, gmsh_RVE, custom_types={}, remove_secondary=True):
         if gmsh_RVE.model_dimension not in {2, 3}:
             raise RuntimeError("Only 2d and 3d models are supported.")
         dim = THREE_D if gmsh_RVE.model_dimension == 3 else TWO_D_PLANAR
@@ -136,8 +141,15 @@ class AbaqusRVE(object):
             gmsh_RVE.build_element_sets()
         self._add_element_sets(gmsh_RVE.element_sets)
 
+        # Record the element-supported nodal DOFs before periodic element
+        # copies are removed. This retains the original structural trace for
+        # the subsequent construction of periodic rotational constraints.
+        self._unreduced_element_types = self._collect_element_types()
+        self._unreduced_node_element_types = (
+            self._collect_node_element_types())
+
         # Remove redundant periodic copies while retaining their nodes
-        if (self.periodic_mesh
+        if (remove_secondary and self.periodic_mesh
                 and "ELSET_SECONDARY_ELEMENTS" in self.part.sets):
             self.part.deleteElement(
                 elements=self.part.sets["ELSET_SECONDARY_ELEMENTS"],
@@ -340,6 +352,23 @@ class AbaqusRVE(object):
         x_min, y_min, z_min, x_max, y_max, z_max = self._bounding_box
         return x_min, y_min, z_min, x_max, y_max, z_max
 
+    def get_volume(self):
+        """
+        Return the reference-cell volume.
+
+        Returns
+        -------
+        float
+            Reference-cell volume in 3d or area in 2d.
+
+        """
+
+        bounding_box = np.array(self.get_bounding_box()).reshape(2, -1)
+        delta = bounding_box[1] - bounding_box[0]
+        if self.model_dimension == TWO_D_PLANAR:
+            delta[-1] = 1.0
+        return float(np.prod(delta))
+
     def _collect_element_types(self):
         """
         Create a set containing the names of all occuring element types.
@@ -354,6 +383,25 @@ class AbaqusRVE(object):
         all_elements = self.part.sets["ELSET_ALL_ELEMENTS"].elements
         element_types = {str(element.type) for element in all_elements}
         return element_types
+
+    def _collect_node_element_types(self):
+        """
+        Map each node to the types of its attached elements.
+
+        Returns
+        -------
+        node_element_types : dict[int, set[str]]
+            Element types connected to each node of the current part mesh.
+
+        """
+
+        node_element_types = {}
+        for element in self.part.elements:
+            element_type = str(element.type)
+            for index in element.connectivity:
+                label = self.part.nodes[index].label
+                node_element_types.setdefault(label, set()).add(element_type)
+        return node_element_types
 
     def _embedded_region_nodes(self):
         """
@@ -475,15 +523,15 @@ class AbaqusRVE(object):
 
         .. math::
             \boldsymbol{u} =
-            \boldsymbol{\mathcal{E}} \cdot \boldsymbol{X}
+            \bar{\boldsymbol{H}} \boldsymbol{X}
 
-        whereby the prescribed macroscopic strain
-        :math:`\boldsymbol{\mathcal{E}}`
+        whereby the prescribed macroscopic displacement gradient
+        :math:`\bar{\boldsymbol{H}}`
         is the linearized strain tensor
-        :math:`\boldsymbol{\mathcal{E}} = \boldsymbol{\varepsilon}`
+        :math:`\bar{\boldsymbol{H}} = \bar{\boldsymbol{\varepsilon}}`
         for geometrically linear analyses and the deformation gradient
         minus the identity tensor
-        :math:`\boldsymbol{\mathcal{E}} = \boldsymbol{F} -
+        :math:`\bar{\boldsymbol{H}} = \bar{\boldsymbol{F}} -
         \boldsymbol{I}`
         for geometrically nonlinear analyses.
 
@@ -551,16 +599,16 @@ class AbaqusRVE(object):
 
         .. math::
             \boldsymbol{u}^{+} - \boldsymbol{u}^{-} =
-            \boldsymbol{\mathcal{E}} \cdot \left[
-                \boldsymbol{X}^{+} - \boldsymbol{X}^{-} \right]
+            \bar{\boldsymbol{H}} \left(
+                \boldsymbol{X}^{+} - \boldsymbol{X}^{-} \right)
 
         whereby the prescribed macroscopic strain
-        :math:`\boldsymbol{\mathcal{E}}`
+        :math:`\bar{\boldsymbol{H}}`
         is the linearized strain tensor
-        :math:`\boldsymbol{\mathcal{E}} = \boldsymbol{\varepsilon}`
+        :math:`\bar{\boldsymbol{H}} = \bar{\boldsymbol{\varepsilon}}`
         for geometrically linear analyses and the deformation gradient
         minus the identity tensor
-        :math:`\boldsymbol{\mathcal{E}} = \boldsymbol{F} -
+        :math:`\bar{\boldsymbol{H}} = \bar{\boldsymbol{F}} -
         \boldsymbol{I}`
         for geometrically nonlinear analyses.
 
@@ -745,29 +793,67 @@ class AbaqusRVE(object):
 
         """
 
-        # Collect all element types present in the model
-        all_element_types = self._collect_element_types()
-
-        # Collect the dofs that need to be constrained
-        dofs = []
+        all_element_types = self._unreduced_element_types
+        dof_element_types = []
         if len(all_element_types & ELEMENTS_ROTATIONAL_DOFS) > 0:
             rotational_dofs = ([4, 5, 6] if self.model_dimension == THREE_D
                                else [6])
-            dofs.extend(rotational_dofs)  # Rotations
-
+            dof_element_types.extend(
+                (dof, ELEMENTS_ROTATIONAL_DOFS) for dof in rotational_dofs)
         if len(all_element_types & ELEMENTS_WARPING_DOFS) > 0:
-            dofs.append(7)  # Warping
+            dof_element_types.append((7, ELEMENTS_WARPING_DOFS))
 
-        # Apply equation constraints to rotational degrees of freedom
+        node_element_types = self._unreduced_node_element_types
+
+        # Use the unreduced structural trace so that a node orphaned by the
+        # ownership reduction remains periodically tied to its partner. Pure
+        # continuum pairs remain excluded and acquire no artificial rotations.
         for slave, master in PERIODIC_PAIRS.items():
-            if ("NSET_" + master not in self.instance.sets
-                    or "NSET_" + slave not in self.instance.sets):
+            slave_set = "NSET_" + slave
+            master_set = "NSET_" + master
+            if (master_set not in self.instance.sets
+                    or slave_set not in self.instance.sets):
                 continue
 
-            for dof in dofs:
-                base_name = self.model_name + ".NSET_"
-                terms = [[1.0, base_name + slave, dof],
-                         [-1.0, base_name + master, dof]]
+            for dof, supported_types in dof_element_types:
+                slave_nodes = self.part.sets[slave_set].nodes
+                master_nodes = self.part.sets[master_set].nodes
+                if len(slave_nodes) != len(master_nodes):
+                    raise RuntimeError(
+                        "Nodes of periodic sets '{}' and '{}' do not form "
+                        "one-to-one pairs.".format(slave_set, master_set))
+
+                # Retain pairs for which both nodes possessed the respective
+                # DOF before redundant periodic element copies were removed.
+                paired_labels = []
+                for slave_node, master_node in zip(slave_nodes, master_nodes):
+                    slave_types = node_element_types.get(
+                        slave_node.label, set())
+                    master_types = node_element_types.get(
+                        master_node.label, set())
+                    if ((slave_types & supported_types)
+                            and (master_types & supported_types)):
+                        paired_labels.append(
+                            (slave_node.label, master_node.label))
+
+                if not paired_labels:
+                    continue
+                slave_labels, master_labels = zip(*paired_labels)
+
+                slave_subset = "{}_DOF_{}".format(slave_set, dof)
+                master_subset = "{}_DOF_{}".format(master_set, dof)
+                if slave_subset not in self.part.sets:
+                    self.part.SetFromNodeLabels(
+                        name=slave_subset, nodeLabels=slave_labels,
+                        unsorted=True)
+                if master_subset not in self.part.sets:
+                    self.part.SetFromNodeLabels(
+                        name=master_subset, nodeLabels=master_labels,
+                        unsorted=True)
+
+                base_name = self.model_name + "."
+                terms = [[1.0, base_name + slave_subset, dof],
+                         [-1.0, base_name + master_subset, dof]]
 
                 self.model.Equation(name="PBC_{}_{}_{}".format(
                     master, slave, dof), terms=terms)
@@ -779,8 +865,8 @@ class AbaqusRVE(object):
         Under periodic boundary conditions the macroscopic strain fixes
         all relative boundary displacements, so only the rigid-body
         translations remain. They are removed by prescribing the affine
-        displacement :math:`\boldsymbol{u} = \boldsymbol{\mathcal{E}}
-        \cdot \boldsymbol{X}` at a single anchor node. The anchor must not
+        displacement :math:`\boldsymbol{u} = \bar{\boldsymbol{H}}
+        \boldsymbol{X}` at a single anchor node. The anchor must not
         be a dependent (slave) node of a periodic equation, otherwise
         Abaqus reports an over-constraint. Nodes of the "pure master"
         boundary groups (which never act as a slave) and interior nodes
@@ -1081,8 +1167,9 @@ class AbaqusRVE(object):
         ----------
         field_outputs : list[str], optional
             The field outputs that shall be computed. The element nodal
-            forces 'NFORC' needed by average_stress are always requested
-            in addition. The default is [].
+            forces 'NFORC', nodal translations 'U', and nodal rotations
+            'UR' needed by the homogenization post-processing are always
+            requested in addition. The default is [].
         history_outputs : list[str], optional
             The history outputs that shall be computed. The default is
             [].
@@ -1102,9 +1189,15 @@ class AbaqusRVE(object):
         if "H-Output-1" in self.model.historyOutputRequests:
             del self.model.historyOutputRequests["H-Output-1"]
 
-        # Request at least the outputs needed by average_stress
-        if "NFORC" not in field_outputs:
-            field_outputs.append("NFORC")
+        # Do not modify a list supplied by the caller or the mutable default.
+        field_outputs = list(field_outputs)
+        history_outputs = list(history_outputs)
+
+        # Request at least the outputs needed by average_stress and
+        # average_virtual_power.
+        for output in ("NFORC", "U", "UR"):
+            if output not in field_outputs:
+                field_outputs.append(output)
 
         # Request the field outputs
         if len(field_outputs) > 0:
@@ -1140,6 +1233,10 @@ class AbaqusRVE(object):
     def open_odb_file(self):
         """
         Open the output database file containing the simulation results.
+
+        Post-processing methods reuse an output database opened through this
+        method and leave it open when they return. If they open the database
+        themselves, they also close it before returning.
 
         Returns
         -------
@@ -1256,45 +1353,49 @@ class AbaqusRVE(object):
         if not os.path.isdir(path):
             os.makedirs(path)
 
-        if self.odb is None:
-            self.open_odb_file()
+        close_odb = self.odb is None
+        self.open_odb_file()
+        try:
+            # Initialize the reader and request fields and sets
+            odb_file = "JOB_" + self.model_name + ".odb"
+            reader = OdbReader(odb_path=odb_file,
+                               model_name=self.model_name,
+                               instance_names=[self.model_name])
+            for output in field_outputs:
+                if type(output) is not str and len(output) == 2:
+                    reader.add_field_export_request(
+                        output[0], invariant=output[1])
+                else:
+                    reader.add_field_export_request(output)
+            for name in element_sets:
+                set_name = (name if name.startswith("ELSET_")
+                            else "ELSET_" + name)
+                reader.add_set_export_request(
+                    set_name, set_type="ELEMENTS",
+                    instance_name=self.model_name)
+            for name in node_sets:
+                set_name = (name if name.startswith("NSET_")
+                            else "NSET_" + name)
+                reader.add_set_export_request(
+                    set_name, set_type="NODES",
+                    instance_name=self.model_name)
 
-        # Initialize the reader and request fields and sets
-        odb_file = "JOB_" + self.model_name + ".odb"
-        reader = OdbReader(odb_path=odb_file,
-                           model_name=self.model_name,
-                           instance_names=[self.model_name])
-        for output in field_outputs:
-            if type(output) is not str and len(output) == 2:
-                reader.add_field_export_request(output[0], invariant=output[1])
-            else:
-                reader.add_field_export_request(output)
-        for name in element_sets:
-            set_name = name if name.startswith("ELSET_") else "ELSET_" + name
-            reader.add_set_export_request(set_name,
-                                          set_type="ELEMENTS",
-                                          instance_name=self.model_name)
-        for name in node_sets:
-            set_name = name if name.startswith("NSET_") else "NSET_" + name
-            reader.add_set_export_request(set_name,
-                                          set_type="NODES",
-                                          instance_name=self.model_name)
+            # Run over steps and frames for the export
+            vtu_writer = BinaryWriter(path, clear_output_dir=clear)
+            with CollectionWriter(vtu_writer, self.model_name) as writer:
+                for step_name in self.odb.steps.keys():
+                    if step_name == "Initial":
+                        continue
+                    for frame in reader.get_frame_indices(step_name):
+                        instance_model = list(reader.read_instances(
+                            step_name=step_name, frame_index=frame))[0]
+                        add_radius_field(instance_model)
+                        writer.write(instance_model)
+        finally:
+            if close_odb:
+                self.close_odb_file()
 
-        # Run over steps and frames for the export
-        vtu_writer = BinaryWriter(path, clear_output_dir=clear)
-        with CollectionWriter(vtu_writer, self.model_name) as writer:
-            for step_name in self.odb.steps.keys():
-                if step_name == "Initial":
-                    continue
-                for frame in reader.get_frame_indices(step_name):
-                    instance_model = list(reader.read_instances(
-                        step_name=step_name, frame_index=frame))[0]
-                    add_radius_field(instance_model)
-                    writer.write(instance_model)
-
-        self.close_odb_file()
-
-    def get_number_of_frames(self, step_name, close=False):
+    def get_number_of_frames(self, step_name):
         """
         Return the number of frames for a given step.
 
@@ -1302,10 +1403,6 @@ class AbaqusRVE(object):
         ----------
         step_name : str
             The name of the step.
-        close : bool, optional
-            If True, the ODB file will be closed after getting the
-            number of frames. The default is False.
-
         Returns
         -------
         n_frames : int
@@ -1313,10 +1410,47 @@ class AbaqusRVE(object):
 
         """
 
+        close_odb = self.odb is None
         self.open_odb_file()
-        n_frames = len(self.odb.steps[step_name].frames)
-        self.close_odb_file()
-        return n_frames
+        try:
+            return len(self.odb.steps[step_name].frames)
+        finally:
+            if close_odb:
+                self.close_odb_file()
+
+    def get_frame_time(self, step_name, frame=-1):
+        """
+        Return the total analysis time of an output frame.
+
+        Abaqus stores a frame value relative to the beginning of its step.
+        The total time is therefore the sum of the time accumulated before
+        the step and the frame value within the step.
+
+        Parameters
+        ----------
+        step_name : str
+            Name of the analysis step.
+        frame : int, optional
+            Frame index. The default is -1.
+
+        Returns
+        -------
+        float
+            Total analysis time at the requested frame.
+
+        """
+
+        close_odb = self.odb is None
+        self.open_odb_file()
+        try:
+            step = self.odb.steps[step_name]
+            if step.domain != TIME:
+                raise ValueError(
+                    "Frame time is only defined for time-domain steps.")
+            return float(step.totalTime + step.frames[frame].frameValue)
+        finally:
+            if close_odb:
+                self.close_odb_file()
 
     def average_stress(self, step_name, frame=-1):
         r"""
@@ -1341,47 +1475,241 @@ class AbaqusRVE(object):
 
         """
 
+        close_odb = self.odb is None
         self.open_odb_file()
+        try:
+            dim = 3 if self.model_dimension == THREE_D else 2
+            volume = self.get_volume()
+            output_frame = self.odb.steps[step_name].frames[frame]
 
-        dim = 3 if self.model_dimension == THREE_D else 2
+            # NFORC is stored as scalar components
+            field_outputs = output_frame.fieldOutputs
+            if "NFORC1" not in field_outputs.keys():
+                raise RuntimeError("Field output 'NFORC' is not available.")
 
-        # Compute the RVE volume
-        bounding_box = np.array(self.get_bounding_box()).reshape(2, -1)
-        delta = bounding_box[1] - bounding_box[0]
-        if dim == 2:
-            delta[-1] = 1.0
-        volume = float(np.prod(delta))
+            odb_instance = self.odb.rootAssembly.instances[self.model_name]
+            node_coords = {n.label: np.array(n.coordinates[0:dim])
+                           for n in odb_instance.nodes}
 
-        frame = self.odb.steps[step_name].frames[frame]
+            # Assemble the internal nodal force vectors per (element, node)
+            forces = {}
+            for i in range(dim):
+                for f in field_outputs["NFORC{}".format(i + 1)].values:
+                    if f.elementLabel is None:
+                        continue
+                    key = (f.elementLabel, f.nodeLabel)
+                    if key not in forces:
+                        forces[key] = np.zeros(dim)
+                    forces[key][i] = f.data
 
-        # NFORC is stored as scalar components
-        field_outputs = frame.fieldOutputs
-        if "NFORC1" not in field_outputs.keys():
-            raise RuntimeError("Field output 'NFORC' is not available.")
+            # Virial sum over the retained RVE elements
+            stress = np.zeros((dim, dim), dtype=float)
+            for (_, node_label), force in forces.items():
+                stress += np.outer(force, node_coords[node_label])
+            stress *= -1.0/volume
+            return stress
+        finally:
+            if close_odb:
+                self.close_odb_file()
 
-        odb_instance = self.odb.rootAssembly.instances[self.model_name]
-        node_coords = {n.label: np.array(n.coordinates[0:dim])
-                       for n in odb_instance.nodes}
+    def average_virtual_power(self, step_name, frame=-1):
+        r"""
+        Compute the averaged microscopic internal virtual power.
 
-        # Assemble the internal nodal force vectors per (element, node)
-        forces = {}
-        for i in range(dim):
-            for f in field_outputs["NFORC{}".format(i + 1)].values:
-                if f.elementLabel is None:
+        The virtual translations and rotations are taken as the increments
+        between the selected frame and the immediately preceding output
+        frame. Element nodal forces and moments are evaluated at the selected
+        frame. The returned power density is
+
+        .. math::
+            p_\mathrm{micro} = -\frac{1}{V}\sum_e\sum_{j\in e}
+            \left(\boldsymbol{f}^{(e)}_j\cdot\Delta\boldsymbol{u}_j
+            +\boldsymbol{m}^{(e)}_j\cdot\boldsymbol{\eta}_j\right),
+
+        where :math:`\boldsymbol{\eta}_j =
+        \boldsymbol{J}_\mathrm{l}(\boldsymbol{\phi}_j)
+        \Delta\boldsymbol{\phi}_j`. In two-dimensional models only the
+        out-of-plane rotational component is considered. Nodes without
+        rotational degrees of freedom contribute only through their
+        translations.
+
+        The analysis must contain the field outputs ``NFORC``, ``U`` and,
+        when rotational degrees of freedom are present, ``UR``. These are
+        requested by default by :meth:`run_analysis`.
+
+        Parameters
+        ----------
+        step_name : str
+            Name of the analysis step.
+        frame : int, optional
+            Current frame index. The immediately preceding frame supplies
+            the virtual increment. The default is -1.
+
+        Returns
+        -------
+        float
+            Averaged microscopic internal virtual-power density.
+
+        """
+
+        def hat(vector):
+            return np.array([[0.0, -vector[2], vector[1]],
+                             [vector[2], 0.0, -vector[0]],
+                             [-vector[1], vector[0], 0.0]])
+
+        def left_jacobian(rotation):
+            angle = np.linalg.norm(rotation)
+            rotation_hat = hat(rotation)
+            if angle < 1.0e-8:
+                return (np.eye(3) + 0.5*rotation_hat
+                        + rotation_hat.dot(rotation_hat)/6.0)
+            return (np.eye(3)
+                    + (1.0 - np.cos(angle))/angle**2*rotation_hat
+                    + (angle - np.sin(angle))/angle**3
+                    * rotation_hat.dot(rotation_hat))
+
+        def vector_field(outputs, name, instance):
+            if name not in outputs:
+                return {}
+            field = outputs[name].getSubset(region=instance)
+            return {value.nodeLabel: np.atleast_1d(
+                        np.asarray(value.data, dtype=float))
+                    for value in field.values}
+
+        def rotation_field(outputs, instance, dim):
+            # Abaqus stores UR as a three-component vector in 3d but as the
+            # scalar component UR3 in planar analyses.
+            if "UR" in outputs:
+                rotations = vector_field(outputs, "UR", instance)
+                result = {}
+                for node, value in rotations.items():
+                    if len(value) < 3:
+                        raise RuntimeError(
+                            "Rotational output 'UR' has fewer than three "
+                            "components.")
+                    result[node] = np.asarray(value[:3], dtype=float)
+                return result
+
+            component_names = (("UR1", "UR2", "UR3") if dim == 3
+                               else ("UR3",))
+            result = {}
+            for local_index, name in enumerate(component_names):
+                if name not in outputs:
                     continue
-                key = (f.elementLabel, f.nodeLabel)
-                if key not in forces:
-                    forces[key] = np.zeros(dim)
-                forces[key][i] = f.data
+                field = outputs[name].getSubset(region=instance)
+                component = local_index if dim == 3 else 2
+                for value in field.values:
+                    result.setdefault(value.nodeLabel, np.zeros(3))
+                    result[value.nodeLabel][component] = float(value.data)
+            return result
 
-        # Virial sum over the retained RVE elements
-        stress = np.zeros((dim, dim), dtype=float)
-        for (_, node_label), force in forces.items():
-            stress += np.outer(force, node_coords[node_label])
-        stress *= -1.0/volume
+        close_odb = self.odb is None
+        self.open_odb_file()
+        try:
+            step = self.odb.steps[step_name]
+            n_frames = len(step.frames)
+            frame_index = frame if frame >= 0 else n_frames + frame
+            if frame_index <= 0 or frame_index >= n_frames:
+                raise IndexError(
+                    "The selected frame must have a preceding output frame.")
 
-        self.close_odb_file()
-        return stress
+            current = step.frames[frame_index]
+            previous = step.frames[frame_index - 1]
+            current_outputs = current.fieldOutputs
+            previous_outputs = previous.fieldOutputs
+            if "U" not in current_outputs or "U" not in previous_outputs:
+                raise RuntimeError(
+                    "Field output 'U' is required in both consecutive "
+                    "frames.")
+            if "NFORC1" not in current_outputs:
+                raise RuntimeError(
+                    "Field output 'NFORC' is required in the current frame.")
+
+            dim = 3 if self.model_dimension == THREE_D else 2
+            odb_instance = self.odb.rootAssembly.instances[self.model_name]
+
+            translations_current = vector_field(
+                current_outputs, "U", odb_instance)
+            translations_previous = vector_field(
+                previous_outputs, "U", odb_instance)
+            rotations_current = rotation_field(
+                current_outputs, odb_instance, dim)
+            rotations_previous = rotation_field(
+                previous_outputs, odb_instance, dim)
+
+            moment_names = (["NFORC4", "NFORC5", "NFORC6"] if dim == 3
+                            else ["NFORC6"])
+            has_moments = any(
+                name in current_outputs
+                and len(current_outputs[name].getSubset(
+                    region=odb_instance).values) > 0
+                for name in moment_names)
+            if (has_moments
+                    and (not rotations_current or not rotations_previous)):
+                raise RuntimeError(
+                    "Field output 'UR' is required in both consecutive "
+                    "frames when nodal moments are present.")
+
+            translation_increment = {}
+            for node, value in translations_current.items():
+                if node not in translations_previous:
+                    raise RuntimeError(
+                        "Nodal translation output is inconsistent between "
+                        "the consecutive frames.")
+                translation_increment[node] = (
+                    value[:dim] - translations_previous[node][:dim])
+
+            virtual_rotation = {}
+            for node, value in rotations_current.items():
+                if node not in rotations_previous:
+                    raise RuntimeError(
+                        "Nodal rotation output is inconsistent between the "
+                        "consecutive frames.")
+                rotation = value
+                increment = rotation - rotations_previous[node]
+                virtual_rotation[node] = left_jacobian(rotation).dot(
+                    increment)
+
+            virtual_work = 0.0
+
+            # Translational components have the same numbering as the
+            # spatial axes in both two and three dimensions.
+            for component in range(dim):
+                name = "NFORC{}".format(component + 1)
+                if name not in current_outputs:
+                    raise RuntimeError(
+                        "Field output '{}' is required.".format(name))
+                field = current_outputs[name].getSubset(region=odb_instance)
+                for value in field.values:
+                    if value.elementLabel is None:
+                        continue
+                    increment = translation_increment.get(value.nodeLabel)
+                    if increment is not None:
+                        virtual_work -= (float(value.data)
+                                         * increment[component])
+
+            # Abaqus moment components are NFORC4--6 in 3d and NFORC6 in
+            # two dimensions. Missing moment outputs are admissible when the
+            # model does not contain rotational degrees of freedom.
+            moment_components = ((3, 4, 5) if dim == 3 else (5,))
+            for component in moment_components:
+                name = "NFORC{}".format(component + 1)
+                if name not in current_outputs:
+                    continue
+                field = current_outputs[name].getSubset(region=odb_instance)
+                rotation_component = component - 3 if dim == 3 else 2
+                for value in field.values:
+                    if value.elementLabel is None:
+                        continue
+                    rotation = virtual_rotation.get(value.nodeLabel)
+                    if rotation is not None:
+                        virtual_work -= (float(value.data)
+                                         * rotation[rotation_component])
+
+            return virtual_work/self.get_volume()
+        finally:
+            if close_odb:
+                self.close_odb_file()
 
 
 class LoadHistory(object):
