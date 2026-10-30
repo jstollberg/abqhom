@@ -9,6 +9,7 @@ import unittest
 
 import numpy as np
 
+import abqhom.abqmodel as abqmodel
 from abqhom.utils import voigt_to_tensor
 from abqhom.gmshmodel import GmshRVE
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
@@ -89,6 +90,26 @@ class TestLoadHistory(unittest.TestCase):
 
 
 class TestConstruction(AbaqusTestCase):
+
+    def test_vtk_reader_uses_current_job_name(self):
+        """VTK export reads the most recently submitted repeated job."""
+        class Reader(object):
+            def __init__(self, odb_path, **kwargs):
+                self.odb_path = odb_path
+
+        original_reader = getattr(abqmodel, "OdbReader", None)
+        abqmodel.OdbReader = Reader
+        try:
+            unit = object.__new__(AbaqusRVE)
+            unit._model_name = "REPEATED"
+            unit._job_name = "JOB_REPEATED_6"
+            reader = unit._create_vtk_reader([], [], [])
+            self.assertEqual(reader.odb_path, "JOB_REPEATED_6.odb")
+        finally:
+            if original_reader is None:
+                delattr(abqmodel, "OdbReader")
+            else:
+                abqmodel.OdbReader = original_reader
 
     def test_missing_odb_raises_io_error(self):
         """Opening a nonexistent output database raises an I/O error."""
@@ -273,7 +294,7 @@ class TestRigidBodyAnchor(AbaqusTestCase):
     def test_anchor_is_a_corner_for_a_cubic_cell(self):
         """Automatic rigid-body anchoring selects a primary corner."""
         unit = _build(lambda: fixtures.simple_cubic("K", 2.0))
-        region, node = unit._select_rigid_body_anchor()
+        region, node = unit.select_rigid_body_anchor()
         corner_labels = [n.label for n
                          in unit.instance.sets["NSET_POINT_1"].nodes]
         self.assertIn(node.label, corner_labels)
@@ -283,7 +304,7 @@ class TestRigidBodyAnchor(AbaqusTestCase):
         carry a Dirichlet BC without over-constraining a periodic
         equation."""
         unit = _build(lambda: fixtures.plus_lattice_2d("L", 2.0))
-        _, node = unit._select_rigid_body_anchor()
+        _, node = unit.select_rigid_body_anchor()
         from abqhom.constants import PERIODIC_PAIRS
         secondary_labels = set()
         for secondary in PERIODIC_PAIRS.keys():
@@ -298,7 +319,7 @@ class TestRigidBodyAnchor(AbaqusTestCase):
         # The BCC cell has an interior center node, so INNER_NODES is not
         # empty and can be used as a user-defined anchor.
         unit = _build(lambda: fixtures.bcc("M", 2.0))
-        _, node = unit._select_rigid_body_anchor(fixed_node="INNER_NODES")
+        _, node = unit.select_rigid_body_anchor(fixed_node="INNER_NODES")
         inner_labels = [n.label for n
                         in unit.instance.sets["NSET_INNER_NODES"].nodes]
         self.assertIn(node.label, inner_labels)
@@ -309,7 +330,7 @@ class TestRigidBodyAnchor(AbaqusTestCase):
                       element_size=1.0)
         embedded = unit.instance.sets["NSET_POINT_1"].nodes[0].label
         unit._embedded_region_nodes = lambda: {embedded}
-        _, node = unit._select_rigid_body_anchor()
+        _, node = unit.select_rigid_body_anchor()
         self.assertNotEqual(node.label, embedded)
 
 

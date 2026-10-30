@@ -595,7 +595,7 @@ class AbaqusRVE(object):
         dim = 3 if self.model_dimension == THREE_D else 2
 
         # Suppress rigid-body translation
-        region, anchor_node = self._select_rigid_body_anchor(fixed_node)
+        region, anchor_node = self.select_rigid_body_anchor(fixed_node)
         x = np.array(anchor_node.coordinates)
         u_history = np.dot(displacement_gradients, x)
         amplitude_name = "DIRICHLET_ANCHOR_{}".format(anchor_node.label)
@@ -749,8 +749,29 @@ class AbaqusRVE(object):
                 self.model.Equation(name="PBC_{}_{}_{}".format(
                     primary, secondary, dof), terms=terms)
 
-    def _select_rigid_body_anchor(self, fixed_node=None):
-        """Select a primary or interior node that suppresses translation."""
+    def select_rigid_body_anchor(self, fixed_node=None):
+        """
+        Select an independent node for suppressing rigid-body translation.
+
+        The selected node is either an interior node or a node on a primary
+        periodic boundary entity. Nodes belonging to an embedded region and
+        nodes on secondary periodic entities are excluded.
+
+        Parameters
+        ----------
+        fixed_node : str, optional
+            Node-set name from which the anchor shall be selected. The
+            ``NSET_`` prefix is optional. If omitted, a suitable node is
+            selected automatically.
+
+        Returns
+        -------
+        region
+            Abaqus region containing the selected node.
+        MeshNode
+            Selected Abaqus mesh node.
+
+        """
 
         RVE_sets = self.instance.sets
         embedded_labels = self._embedded_region_nodes()
@@ -1119,7 +1140,7 @@ class AbaqusRVE(object):
     def _create_vtk_reader(self, field_outputs, node_sets, element_sets):
         """Create and configure the Paraqus output-database reader."""
 
-        odb_file = "JOB_" + self.model_name + ".odb"
+        odb_file = self.job_name + ".odb"
         reader = OdbReader(odb_path=odb_file,
                            model_name=self.model_name,
                            instance_names=[self.model_name])
