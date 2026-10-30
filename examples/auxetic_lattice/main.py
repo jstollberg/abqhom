@@ -1,29 +1,14 @@
-"""
-Linear homogenization of a re-entrant (bow-tie) honeycomb modelled with
-SHELL walls -- the classic 2d auxetic honeycomb given a finite depth.
+"""Homogenize a re-entrant shell honeycomb in the linear regime.
 
-The cell walls are the ribs of the 2d re-entrant honeycomb (in the x-z
-plane) extruded a depth ``d`` along y, so each rib becomes a thin plate.
-This "2.5d" prism is the natural shell model of a honeycomb: the inclined
-ribs point inward (re-entrant angle theta < 0), so when the honeycomb is
-stretched in-plane the ribs swing outward and the cell expands laterally --
-a negative Poisson's ratio in the x-z plane. Along the extrusion axis y the
-walls simply stretch, so the response there is that of an ordinary
-honeycomb prism (stiff, non-auxetic). The effective stiffness is therefore
-orthotropic, auxetic in the honeycomb plane.
-
-The infinite honeycomb is clipped to one in-plane period before extrusion.
-Clipping is translation-covariant, so opposite x/z boundaries match; the
-walls are uniform in y, so the y-boundaries match trivially -- the cell is
-periodic. The whole effective stiffness (6 load cases) is computed and the
-in-plane auxetic response is reported.
-
-Run with:  abaqus cae noGUI=main.py
+The ribs of a two-dimensional re-entrant honeycomb in the x--z plane are
+extruded along y to form thin shell walls. The infinite honeycomb is clipped
+to one periodic cell before extrusion. The example computes the complete
+effective stiffness and reports the in-plane auxetic response.
 """
 
+import inspect
 import os
 import sys
-import inspect
 
 import numpy as np
 
@@ -34,22 +19,19 @@ import numpy as np
 here = os.path.dirname(os.path.abspath(
     inspect.getframeinfo(inspect.currentframe()).filename))
 abqhom_path = os.path.abspath(os.path.join(here, os.pardir, os.pardir, "src"))
-gmsh_path = "C:/Users/jonat/Documents/gmsh/lib"        # TODO: set gmsh path
-paraqus_path = "C:/Users/jonat/Documents/Paraqus/src"  # optional (VTK export)
-for path in (abqhom_path, gmsh_path, paraqus_path):
-    if path not in sys.path:
-        sys.path.insert(0, path)
+if abqhom_path not in sys.path:
+    sys.path.insert(0, abqhom_path)
 
 import gmsh
 
-from abqhom.utils import voigt_to_tensor, tensor_to_voigt, export_to_csv_file
-from abqhom.gmshmodel import GmshRVE
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
+from abqhom.constants import PARAQUS_INSTALLED
+from abqhom.gmshmodel import GmshRVE
+from abqhom.utils import export_to_csv_file, tensor_to_voigt, voigt_to_tensor
 
 
 def _clip_segment(a, b, box, tol=1e-9):
-    """Liang-Barsky clip of the in-plane (x, z) segment a->b to
-    box=(xmin, xmax, zmin, zmax). Returns the clipped end points or None."""
+    """Clip an in-plane segment to a box with the Liang--Barsky method."""
     x0, z0 = a
     x1, z1 = b
     dx, dz = x1 - x0, z1 - z0
@@ -76,13 +58,13 @@ def _clip_segment(a, b, box, tol=1e-9):
 
 def create_reentrant_honeycomb(model_name, h=1.0, l=1.0, theta_deg=-18.0,
                                depth=1.0, offset=(0.37, 0.29)):
-    """Create the re-entrant honeycomb as shell walls in a periodic cell.
+    """Create a periodic re-entrant honeycomb from shell walls.
 
-    The 2d honeycomb ribs (vertical ribs of length ``h`` plus inclined ribs
+    The 2D honeycomb ribs (vertical ribs of length ``h`` plus inclined ribs
     of length ``l`` at the re-entrant angle ``theta_deg`` < 0) are laid out
     on the node set {(i, k) : i + k even}, clipped to one in-plane period
     (2*l*cos(theta) x 2*(h + l*sin(theta))), and each rib is extruded a
-    depth ``d`` along y into a plate wall (physical group "WALLS").
+    depth ``depth`` along y into a plate wall (physical group "WALLS").
     """
     if theta_deg >= 0.0:
         raise ValueError("Need theta < 0 for a re-entrant (auxetic) cell.")
@@ -121,6 +103,7 @@ def create_reentrant_honeycomb(model_name, h=1.0, l=1.0, theta_deg=-18.0,
     point_tags = {}
 
     def get_point(x, y, z):
+        """Return the coordinate key of a deduplicated geometric point."""
         key = (round(x, 6), round(y, 6), round(z, 6))
         if key not in point_tags:
             point_tags[key] = g.add_point(*key)
@@ -129,6 +112,7 @@ def create_reentrant_honeycomb(model_name, h=1.0, l=1.0, theta_deg=-18.0,
     line_tags = {}
 
     def get_line(ka, kb):
+        """Return an oriented line tag between two point keys."""
         key = tuple(sorted((ka, kb)))
         if key not in line_tags:
             line_tags[key] = g.add_line(point_tags[key[0]],
@@ -159,92 +143,106 @@ def create_reentrant_honeycomb(model_name, h=1.0, l=1.0, theta_deg=-18.0,
     gmsh.model.set_physical_name(2, grp, "WALLS")
 
 
-# ---------------------------------------------------------------
-# Working directory (created next to this script)
-workdir = os.path.join(here, "abq")
-if not os.path.isdir(workdir):
-    os.makedirs(workdir)
-os.chdir(workdir)
+def main():
+    """Run the example workflow."""
+    try:
+        # ---------------------------------------------------------------
+        # Working directory (created next to this script)
+        workdir = os.path.join(here, "abq")
+        if not os.path.isdir(workdir):
+            os.makedirs(workdir)
+        os.chdir(workdir)
 
-# Material parameters (of the solid wall material)
-E = 210.0    # Young's modulus
-nu = 0.3     # Poisson's ratio
+        # Material parameters (of the solid wall material)
+        E = 210.0    # Young's modulus
+        nu = 0.3     # Poisson's ratio
 
-# Honeycomb parameters
-h = 1.0             # vertical rib length
-l = 1.0             # inclined rib length
-theta_deg = -18.0   # re-entrant angle (< 0)
-depth = 1.0         # extrusion depth along y (the prism axis)
-thickness = 0.05    # shell wall thickness
-element_size = 0.25  # shell element size
+        # Honeycomb parameters
+        h = 1.0             # vertical rib length
+        l = 1.0             # inclined rib length
+        theta_deg = -18.0   # re-entrant angle (< 0)
+        depth = 1.0         # extrusion depth along y (the prism axis)
+        thickness = 0.05    # shell wall thickness
+        element_size = 0.25  # shell element size
 
-# ---------------------------------------------------------------
-# Build the model once (geometry, mesh, material, section, step). Only the
-# macroscopic strain changes between load cases, so the model is reused and
-# only the periodic boundary conditions are updated in the loop. The anchor
-# node used to suppress rigid-body motion is picked automatically.
-create_reentrant_honeycomb("RVE", h=h, l=l, theta_deg=theta_deg, depth=depth)
-unit_cell = GmshRVE("RVE")
-unit_cell.add_periodic_mesh_constraints()
-unit_cell.generate_mesh(element_size=element_size)
+        # ---------------------------------------------------------------
+        # Build the model once (geometry, mesh, material, section, step). Only the
+        # macroscopic strain changes between load cases, so the model is reused and
+        # only the periodic boundary conditions are updated in the loop. The anchor
+        # node used to suppress rigid-body motion is picked automatically.
+        create_reentrant_honeycomb("RVE", h=h, l=l, theta_deg=theta_deg, depth=depth)
+        unit_cell = GmshRVE("RVE")
+        unit_cell.add_periodic_mesh_constraints()
+        unit_cell.generate_mesh(element_size=element_size)
 
-unit_cell = AbaqusRVE(unit_cell)
-material = unit_cell.model.Material(name="LINEAR_ELASTICITY")
-material.Elastic(table=[[E, nu]])
-unit_cell.assign_shell_section("WALLS", "LINEAR_ELASTICITY", thickness)
-unit_cell.model.StaticStep(name="LOAD", previous="Initial")
+        unit_cell = AbaqusRVE(unit_cell)
+        material = unit_cell.model.Material(name="LINEAR_ELASTICITY")
+        material.Elastic(table=[[E, nu]])
+        unit_cell.assign_shell_section("WALLS", "LINEAR_ELASTICITY", thickness)
+        unit_cell.model.StaticStep(name="LOAD", previous="Initial")
 
-# Run the homogenization routine (6 load cases in 3d)
-strain_magnitude = 1.0e-4
-C = np.empty((6, 6))
-for i in range(6):
-    print("\n------------------------------")
-    print("Run load case {}.".format(i + 1))
+        # Run the homogenization routine (six load cases in 3D)
+        strain_magnitude = 0.03
+        C = np.empty((6, 6))
+        for i in range(6):
+            print("\n------------------------------")
+            print("Run load case {}.".format(i + 1))
 
-    def strain_history(time, component=i):
-        strain = np.zeros(6)
-        strain[component] = strain_magnitude
-        return time*voigt_to_tensor(strain, "STRAIN")
+            def strain_history(time, component=i):
+                """Return the ramped macroscopic strain at ``time``."""
+                strain = np.zeros(6)
+                strain[component] = strain_magnitude
+                return time*voigt_to_tensor(strain, "STRAIN")
 
-    history = LoadHistory(np.array([0.0, 1.0]), strain_history)
-    unit_cell.apply_periodic_BC("LOAD", history)
+            history = LoadHistory(np.array([0.0, 1.0]), strain_history)
+            unit_cell.apply_periodic_BC("LOAD", history)
 
-    unit_cell.run_analysis(field_outputs=["U"])
-    stress = tensor_to_voigt(unit_cell.average_stress("LOAD"), "STRESS")
-    C[:, i] = stress/strain_magnitude
+            unit_cell.run_analysis(field_outputs=["U"])
+            stress = tensor_to_voigt(unit_cell.average_stress("LOAD"), "STRESS")
+            C[:, i] = stress/strain_magnitude
 
-    # Export the deformed walls to VTK
-    unit_cell.export_to_vtk(os.path.join(here, "vtk_output",
-                                         "case_{}".format(i + 1)),
-                            field_outputs=["U"], clear=True)
+            # Export the deformed walls to VTK
+            if PARAQUS_INSTALLED:
+                unit_cell.export_to_vtk(os.path.join(here, "vtk_output",
+                                                     "case_{}".format(i + 1)),
+                                        field_outputs=["U"], clear=True)
 
-gmsh.finalize()
 
-# ---------------------------------------------------------------
-# Effective stiffness and engineering constants. The honeycomb lies in the
-# x-z plane and is extruded along y, so the response is orthotropic: auxetic
-# in the x-z plane and an ordinary (stiff) honeycomb prism along y.
-S = np.linalg.inv(C)
-Ex, Ez, Ey = 1.0/S[0, 0], 1.0/S[2, 2], 1.0/S[1, 1]
-nu_xz = -S[2, 0]/S[0, 0]     # z-strain per x-strain (in-plane)
-nu_zx = -S[0, 2]/S[2, 2]     # x-strain per z-strain (in-plane)
+        if not PARAQUS_INSTALLED:
+            print("Paraqus is not installed; VTK export was skipped.")
 
-print("\n------------------------------")
-print("Effective constitutive matrix (Voigt):")
-print(np.array2string(C, precision=4, suppress_small=True))
-print("  symmetry   max|C - C^T| = {:.2e}".format(np.max(np.abs(C - C.T))))
-print("\nIn-plane (x-z honeycomb) moduli and Poisson's ratios:")
-print("  E_x  = {:.4e}".format(Ex))
-print("  E_z  = {:.4e}".format(Ez))
-print("  nu_xz = {:+.4f}".format(nu_xz))
-print("  nu_zx = {:+.4f}".format(nu_zx))
-print("Out-of-plane (prism axis y):")
-print("  E_y  = {:.4e}   (stiff, non-auxetic)".format(Ey))
-if max(nu_xz, nu_zx) < 0.0:
-    print("  --> negative in-plane Poisson's ratio: the honeycomb is AUXETIC.")
+        # ---------------------------------------------------------------
+        # Effective stiffness and engineering constants. The honeycomb lies in the
+        # x-z plane and is extruded along y, so the response is orthotropic: auxetic
+        # in the x-z plane and an ordinary (stiff) honeycomb prism along y.
+        S = np.linalg.inv(C)
+        Ex, Ez, Ey = 1.0/S[0, 0], 1.0/S[2, 2], 1.0/S[1, 1]
+        nu_xz = -S[2, 0]/S[0, 0]     # z-strain per x-strain (in-plane)
+        nu_zx = -S[0, 2]/S[2, 2]     # x-strain per z-strain (in-plane)
 
-# Export the effective stiffness
-result_path = os.path.join(here, "results")
-if not os.path.isdir(result_path):
-    os.makedirs(result_path)
-export_to_csv_file(C, os.path.join(result_path, "auxetic_C.csv"))
+        print("\n------------------------------")
+        print("Effective constitutive matrix (Voigt):")
+        print(np.array2string(C, precision=4, suppress_small=True))
+        print("  symmetry   max|C - C^T| = {:.2e}".format(np.max(np.abs(C - C.T))))
+        print("\nIn-plane (x-z honeycomb) moduli and Poisson's ratios:")
+        print("  E_x  = {:.4e}".format(Ex))
+        print("  E_z  = {:.4e}".format(Ez))
+        print("  nu_xz = {:+.4f}".format(nu_xz))
+        print("  nu_zx = {:+.4f}".format(nu_zx))
+        print("Out-of-plane (prism axis y):")
+        print("  E_y  = {:.4e}   (stiff, non-auxetic)".format(Ey))
+        if max(nu_xz, nu_zx) < 0.0:
+            print("  --> negative in-plane Poisson's ratio: the honeycomb is AUXETIC.")
+
+        # Export the effective stiffness
+        result_path = os.path.join(here, "results")
+        if not os.path.isdir(result_path):
+            os.makedirs(result_path)
+        export_to_csv_file(C, os.path.join(result_path, "auxetic_C.csv"))
+    finally:
+        if gmsh.is_initialized():
+            gmsh.finalize()
+
+
+if __name__ == "__main__":
+    main()

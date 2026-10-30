@@ -1,19 +1,13 @@
-"""
-Homogenization of a 2d continuous-fiber-reinforced composite (plane
-strain) with a square fiber arrangement.
+"""Homogenize a two-phase plane-strain composite in the linear regime.
 
-The effective in-plane stiffness is bracketed by the Voigt (upper) and
-Reuss (lower) bounds of a two-phase material, which are computed here for
-comparison. This example also exercises the homogenization for continuum
-(solid) elements, which are not treated as redundant boundary elements
-merely because they have nodes on the RVE boundary.
-
-Run with:  abaqus cae noGUI=main.py
+The cell contains a square arrangement of stiff circular inclusions in a soft
+matrix. The example computes the effective in-plane stiffness and verifies
+the Voigt and Reuss matrix bounds.
 """
 
+import inspect
 import os
 import sys
-import inspect
 
 import numpy as np
 
@@ -24,22 +18,20 @@ import numpy as np
 here = os.path.dirname(os.path.abspath(
     inspect.getframeinfo(inspect.currentframe()).filename))
 abqhom_path = os.path.abspath(os.path.join(here, os.pardir, os.pardir, "src"))
-gmsh_path = "C:/Users/jonat/Documents/gmsh/lib"        # TODO: set gmsh path
-paraqus_path = "C:/Users/jonat/Documents/Paraqus/src"  # optional (VTK export)
-for path in (abqhom_path, gmsh_path, paraqus_path):
-    if path not in sys.path:
-        sys.path.insert(0, path)
+if abqhom_path not in sys.path:
+    sys.path.insert(0, abqhom_path)
 
 import gmsh
 
-from abqhom.utils import (tensor_to_voigt, voigt_to_tensor, reuss, voigt,
-                          export_to_csv_file)
-from abqhom.gmshmodel import GmshRVE
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
+from abqhom.constants import PARAQUS_INSTALLED
+from abqhom.gmshmodel import GmshRVE
+from abqhom.utils import (export_to_csv_file, reuss, tensor_to_voigt, voigt,
+                          voigt_to_tensor)
 
 
 def create_geometry(model_name, dx, dy, fiber_fraction):
-    """Square array of fibers (one central + four corner quarters)."""
+    """Create a square array of circular inclusions."""
     radius = np.sqrt((fiber_fraction*dx*dy)/(2*np.pi))
     if radius >= 0.5*min(dx, dy):
         raise ValueError("Fibers overlap.")
@@ -67,88 +59,105 @@ def create_geometry(model_name, dx, dy, fiber_fraction):
 
 
 def isotropic_plane_strain_stiffness(E, nu):
-    """In-plane (plane-strain) isotropic stiffness in Voigt notation."""
+    """Return the isotropic plane-strain stiffness in Voigt notation."""
     C = np.array([[1 - nu, nu, 0.0],
                   [nu, 1 - nu, 0.0],
                   [0.0, 0.0, 0.5*(1 - 2*nu)]])
     return C*E/((1 + nu)*(1 - 2*nu))
 
 
-# ---------------------------------------------------------------
-# Working directory (created next to this script)
-workdir = os.path.join(here, "abq")
-if not os.path.isdir(workdir):
-    os.makedirs(workdir)
-os.chdir(workdir)
+def main():
+    """Run the example workflow."""
+    try:
+        # ---------------------------------------------------------------
+        # Working directory (created next to this script)
+        workdir = os.path.join(here, "abq")
+        if not os.path.isdir(workdir):
+            os.makedirs(workdir)
+        os.chdir(workdir)
 
-# RVE and material parameters (CFRP: E - nu)
-dx = dy = 10.0
-fiber_fraction = 0.4          # change this (or loop) for other fractions
-parameters = {"MATRIX": [3.5, 0.35],    # epoxy matrix
-              "FIBER":  [230.0, 0.2]}   # carbon fibers
+        # RVE and material parameters of the isotropic phases (E, nu)
+        dx = dy = 10.0
+        fiber_fraction = 0.4          # change this (or loop) for other fractions
+        parameters = {"MATRIX": [3.5, 0.35],    # soft matrix
+                      "FIBER":  [230.0, 0.2]}   # stiff inclusions
 
-# ---------------------------------------------------------------
-# Run the homogenization routine (3 load cases in 2d: xx, yy, xy)
-components = [0, 1, 5]  # Voigt indices: xx, yy, xy(engineering)
-strain_magnitude = 1.0e-3
+        # ---------------------------------------------------------------
+        # Run the homogenization routine (three load cases in 2D: xx, yy, xy)
+        components = [0, 1, 5]  # Voigt indices: xx, yy, xy(engineering)
+        strain_magnitude = 0.03
 
-# Build the model once (geometry, mesh, materials, sections, step). Only the
-# macroscopic strain changes between load cases, so the model is reused and
-# only the periodic boundary conditions are updated in the loop.
-create_geometry("RVE", dx, dy, fiber_fraction)
-unit_cell = GmshRVE("RVE")
-unit_cell.add_periodic_mesh_constraints()
-unit_cell.generate_mesh(element_size=0.4)
+        # Build the model once (geometry, mesh, materials, sections, step). Only the
+        # macroscopic strain changes between load cases, so the model is reused and
+        # only the periodic boundary conditions are updated in the loop.
+        create_geometry("RVE", dx, dy, fiber_fraction)
+        unit_cell = GmshRVE("RVE")
+        unit_cell.add_periodic_mesh_constraints()
+        unit_cell.generate_mesh(element_size=0.4)
 
-unit_cell = AbaqusRVE(unit_cell)
-for name, (E, nu) in parameters.items():
-    material = unit_cell.model.Material(name=name)
-    material.Elastic(table=[[E, nu]])
-    unit_cell.assign_solid_section(name, name)
-unit_cell.model.StaticStep(name="LOAD", previous="Initial")
+        unit_cell = AbaqusRVE(unit_cell)
+        for name, (E, nu) in parameters.items():
+            material = unit_cell.model.Material(name=name)
+            material.Elastic(table=[[E, nu]])
+            unit_cell.assign_solid_section(name, name)
+        unit_cell.model.StaticStep(name="LOAD", previous="Initial")
 
-C = np.zeros((3, 3))
-for col, comp in enumerate(components):
-    print("\n------------------------------")
-    print("Run load case {}.".format(col + 1))
+        C = np.zeros((3, 3))
+        for col, comp in enumerate(components):
+            print("\n------------------------------")
+            print("Run load case {}.".format(col + 1))
 
-    def strain_history(time, component=comp):
-        strain = np.zeros(6)
-        strain[component] = strain_magnitude
-        return time*voigt_to_tensor(strain, "STRAIN")
+            def strain_history(time, component=comp):
+                """Return the ramped macroscopic strain at ``time``."""
+                strain = np.zeros(6)
+                strain[component] = strain_magnitude
+                return time*voigt_to_tensor(strain, "STRAIN")
 
-    history = LoadHistory(np.array([0.0, 1.0]), strain_history)
-    unit_cell.apply_periodic_BC("LOAD", history)
-    unit_cell.run_analysis(field_outputs=["U", "S"])
+            history = LoadHistory(np.array([0.0, 1.0]), strain_history)
+            unit_cell.apply_periodic_BC("LOAD", history)
+            unit_cell.run_analysis(field_outputs=["U", "S"])
 
-    stress = tensor_to_voigt(unit_cell.average_stress("LOAD"), "STRESS")
-    C[:, col] = stress/strain_magnitude
+            stress = tensor_to_voigt(unit_cell.average_stress("LOAD"), "STRESS")
+            C[:, col] = stress/strain_magnitude
 
-    unit_cell.export_to_vtk(os.path.join(here, "vtk_output",
-                                         "case_{}".format(col + 1)),
-                            field_outputs=["U", ("S", "MISES")],
-                            element_sets=["MATRIX", "FIBER"], clear=True)
+            if PARAQUS_INSTALLED:
+                unit_cell.export_to_vtk(
+                    os.path.join(here, "vtk_output", "case_{}".format(col + 1)),
+                    field_outputs=["U", ("S", "MISES")],
+                    element_sets=["MATRIX", "FIBER"], clear=True)
 
-gmsh.finalize()
 
-# ---------------------------------------------------------------
-# Voigt / Reuss bounds of the two-phase material
-C_matrix = isotropic_plane_strain_stiffness(*parameters["MATRIX"])
-C_fiber = isotropic_plane_strain_stiffness(*parameters["FIBER"])
-C_reuss = reuss(fiber_fraction, C_fiber, C_matrix)
-C_voigt = voigt(fiber_fraction, C_fiber, C_matrix)
+        if not PARAQUS_INSTALLED:
+            print("Paraqus is not installed; VTK export was skipped.")
 
-eig = lambda M: np.sort(np.linalg.eigvals(M)).round(3).tolist()
-print("\n------------------------------")
-print("Effective constitutive matrix (Voigt):")
-print(np.array2string(C, precision=4, suppress_small=True))
-print("\nEigenvalues (numerical must lie between the bounds):")
-print("  Voigt upper bound : {}".format(eig(C_voigt)))
-print("  numerical         : {}".format(eig(C)))
-print("  Reuss lower bound : {}".format(eig(C_reuss)))
+        # ---------------------------------------------------------------
+        # Voigt / Reuss bounds of the two-phase material
+        C_matrix = isotropic_plane_strain_stiffness(*parameters["MATRIX"])
+        C_fiber = isotropic_plane_strain_stiffness(*parameters["FIBER"])
+        C_reuss = reuss(fiber_fraction, C_fiber, C_matrix)
+        C_voigt = voigt(fiber_fraction, C_fiber, C_matrix)
 
-# Store the effective stiffness
-result_dir = os.path.join(here, "results")
-if not os.path.isdir(result_dir):
-    os.makedirs(result_dir)
-export_to_csv_file(C, os.path.join(result_dir, "stiffness.csv"))
+        C_symmetric = 0.5*(C + C.T)
+        lower_margin = np.min(np.linalg.eigvalsh(C_symmetric - C_reuss))
+        upper_margin = np.min(np.linalg.eigvalsh(C_voigt - C_symmetric))
+        print("\n------------------------------")
+        print("Effective constitutive matrix (Voigt):")
+        print(np.array2string(C, precision=4, suppress_small=True))
+        print("  symmetry   max|C - C^T| = {:.2e}".format(
+            np.max(np.abs(C - C.T))))
+        print("\nVoigt--Reuss matrix-bound margins (must be non-negative):")
+        print("  min eig(C - C_Reuss) = {:.6e}".format(lower_margin))
+        print("  min eig(C_Voigt - C) = {:.6e}".format(upper_margin))
+
+        # Store the effective stiffness
+        result_dir = os.path.join(here, "results")
+        if not os.path.isdir(result_dir):
+            os.makedirs(result_dir)
+        export_to_csv_file(C, os.path.join(result_dir, "stiffness.csv"))
+    finally:
+        if gmsh.is_initialized():
+            gmsh.finalize()
+
+
+if __name__ == "__main__":
+    main()

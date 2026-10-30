@@ -6,7 +6,6 @@ whole workflow. Gmsh only, no Abaqus kernel.
 
 """
 import os
-import unittest
 
 import numpy as np
 
@@ -16,39 +15,39 @@ from abqhom.constants import (POINT_GROUPS, EDGE_GROUPS, FACE_GROUPS,
                               PERIODIC_PAIRS)
 from abqhom.gmshmodel import GmshRVE
 from abqhom.tests import fixtures
+from abqhom.tests.base import GmshTestCase
 
 
-class _GmshTestCase(unittest.TestCase):
-
-    @classmethod
-    def setUpClass(cls):
-        if not gmsh.is_initialized():
-            gmsh.initialize()
-
-    def tearDown(self):
-        for name in list(gmsh.model.list()):
-            gmsh.model.set_current(name)
-            gmsh.model.remove()
-
-
-class TestDimensions(_GmshTestCase):
+class TestDimensions(GmshTestCase):
 
     def test_model_dimension(self):
+        """Planar and spatial models report dimensions two and three."""
         fixtures.square_lattice("MD2", size=1.0)
-        self.assertEqual(GmshRVE("MD2").model_dimension, 2)
+        dimension_2d = GmshRVE("MD2").model_dimension
+        self.assertEqual(dimension_2d, 2)
+        self.assertIs(type(dimension_2d), int)
         fixtures.simple_cubic("MD3", length=1.0)
-        self.assertEqual(GmshRVE("MD3").model_dimension, 3)
+        dimension_3d = GmshRVE("MD3").model_dimension
+        self.assertEqual(dimension_3d, 3)
+        self.assertIs(type(dimension_3d), int)
 
     def test_mesh_dimension_is_one_for_struts(self):
+        """A strut-only cell reports a one-dimensional mesh."""
         fixtures.simple_cubic("MESHDIM", length=2.0)
         rve = GmshRVE("MESHDIM")
         rve.generate_mesh(element_size=1.0)
         self.assertEqual(rve.mesh_dimension, 1)
 
+    def test_string_representation_contains_model_name(self):
+        """The string representation identifies the underlying model."""
+        fixtures.square_lattice("REPR", size=1.0)
+        self.assertIn("GmshRVE 'REPR'", str(GmshRVE("REPR")))
 
-class TestNodesAndElements(_GmshTestCase):
+
+class TestNodesAndElements(GmshTestCase):
 
     def test_get_nodes_are_unique_and_include_corners(self):
+        """Node extraction is unique and includes every cell corner."""
         fixtures.simple_cubic("NODES", length=2.0)
         rve = GmshRVE("NODES")
         rve.generate_mesh(element_size=1.0)
@@ -66,6 +65,7 @@ class TestNodesAndElements(_GmshTestCase):
             self.assertTrue(np.min(distances) < 1e-9)
 
     def test_get_elements_are_two_node_lines(self):
+        """A first-order strut mesh contains two-node line elements."""
         fixtures.simple_cubic("ELEMS", length=2.0)
         rve = GmshRVE("ELEMS")
         rve.generate_mesh(element_size=2.0)  # one element per strut
@@ -77,6 +77,7 @@ class TestNodesAndElements(_GmshTestCase):
         self.assertEqual(len(element_tags[1]), 12)  # twelve cube edges
 
     def test_second_order_mesh_gives_three_node_lines(self):
+        """A second-order strut mesh contains three-node line elements."""
         fixtures.simple_cubic("ORDER2", length=2.0)
         rve = GmshRVE("ORDER2")
         rve.generate_mesh(element_order=2, element_size=2.0)
@@ -86,11 +87,25 @@ class TestNodesAndElements(_GmshTestCase):
         self.assertIn(8, element_tags)
         self.assertEqual(connectivity[8].shape[1], 3)
 
+    def test_mesh_operations_activate_their_rve_model(self):
+        """Meshing and element access do not act on another current model."""
+        fixtures.simple_cubic("ACTIVE_RVE", length=2.0)
+        rve = GmshRVE("ACTIVE_RVE")
+        fixtures.simple_cubic("OTHER_MODEL", length=2.0)
 
-class TestPeriodicity(_GmshTestCase):
+        rve.generate_mesh(element_size=2.0)
+        self.assertEqual(gmsh.model.get_current(), "ACTIVE_RVE")
+
+        gmsh.model.set_current("OTHER_MODEL")
+        element_tags, _ = rve.get_elements()
+        self.assertEqual(gmsh.model.get_current(), "ACTIVE_RVE")
+        self.assertIn(1, element_tags)
+
+
+class TestPeriodicity(GmshTestCase):
 
     def test_periodic_node_sets_are_offset_by_the_lattice_vector(self):
-        """A master node and its paired slave node differ by the lattice
+        """A primary node and its paired secondary node differ by the lattice
         vector, verified against the actual Gmsh node coordinates."""
         length = 2.0
         fixtures.simple_cubic("PNS", length=length)
@@ -99,36 +114,45 @@ class TestPeriodicity(_GmshTestCase):
         rve.generate_mesh(element_size=1.0)
         rve.build_node_sets()
 
-        master = rve.node_sets["POINT_1"]   # (xmin, ymin, zmin)
-        slave = rve.node_sets["POINT_7"]    # (xmax, ymax, zmax)
-        self.assertEqual(len(master), 1)
-        self.assertEqual(len(slave), 1)
+        primary = rve.node_sets["POINT_1"]    # (xmin, ymin, zmin)
+        secondary = rve.node_sets["POINT_7"]  # (xmax, ymax, zmax)
+        self.assertEqual(len(primary), 1)
+        self.assertEqual(len(secondary), 1)
 
-        master_coord = gmsh.model.mesh.get_node(int(master[0]))[0]
-        slave_coord = gmsh.model.mesh.get_node(int(slave[0]))[0]
-        offset = np.array(slave_coord) - np.array(master_coord)
+        primary_coord = gmsh.model.mesh.get_node(int(primary[0]))[0]
+        secondary_coord = gmsh.model.mesh.get_node(int(secondary[0]))[0]
+        offset = np.array(secondary_coord) - np.array(primary_coord)
         self.assertTrue(np.allclose(offset, [length, length, length]))
 
     def test_periodic_mesh_constraint_is_registered_in_gmsh(self):
-        """add_periodic_mesh_constraints actually sets a Gmsh periodic
-        correspondence on the slave faces of a continuum cube."""
+        """Periodic mesh constraints establish the Gmsh correspondence on
+        the secondary faces of a continuum cube."""
         fixtures.solid_cube("PMC", length=2.0)
         rve = GmshRVE("PMC")
         rve.add_periodic_mesh_constraints()
         rve.generate_mesh(element_size=1.0)
         self.assertTrue(rve.periodic_mesh)
 
-        # FACE_2 (z = zmax) is the slave of FACE_1 (z = zmin)
-        slave_entities = rve.boundary["FACE_2"]
-        self.assertTrue(len(slave_entities) > 0)
-        dim, tag = slave_entities[0]
+        # FACE_2 (z = zmax) is secondary to FACE_1 (z = zmin)
+        secondary_entities = rve.boundary["FACE_2"]
+        self.assertTrue(len(secondary_entities) > 0)
+        dim, tag = secondary_entities[0]
         _, node_tags, _, _ = gmsh.model.mesh.get_periodic_nodes(dim, tag)
         self.assertGreater(len(node_tags), 0)
 
+    def test_periodic_node_matching_preserves_multiplicity(self):
+        """Periodic groups with unequal node counts must not match."""
+        signatures = {"POINT_1": (-1, -1, -1),
+                      "POINT_2": (1, -1, -1)}
+        coordinates = {"POINT_1": ((),), "POINT_2": ((), ())}
+        self.assertFalse(GmshRVE._periodic_node_sets_match(
+            coordinates, signatures))
 
-class TestNodeSets(_GmshTestCase):
+
+class TestNodeSets(GmshTestCase):
 
     def test_boundary_and_inner_nodes_partition_all_nodes(self):
+        """Boundary and inner node sets form a disjoint partition."""
         fixtures.simple_cubic("PART", length=2.0)
         rve = GmshRVE("PART")
         rve.add_periodic_mesh_constraints()
@@ -142,6 +166,7 @@ class TestNodeSets(_GmshTestCase):
         self.assertEqual(boundary & inner, set())
 
     def test_element_sets_follow_physical_groups(self):
+        """Element sets preserve the Gmsh physical-group membership."""
         fixtures.bcc("ESETS", length=2.0)
         rve = GmshRVE("ESETS")
         rve.generate_mesh(element_size=3.0)  # one element per strut
@@ -152,6 +177,7 @@ class TestNodeSets(_GmshTestCase):
         self.assertEqual(len(rve.element_sets["BCC"]), 8)     # eight diagonals
 
     def test_boundary_element_sets_classify_cubic_edges(self):
+        """Spatial boundary struts are classified by their cell edges."""
         fixtures.bcc("BOUNDARY_ESETS", length=2.0)
         rve = GmshRVE("BOUNDARY_ESETS")
         rve.generate_mesh(element_size=1.0)  # two elements per strut
@@ -185,6 +211,7 @@ class TestNodeSets(_GmshTestCase):
                          secondary_elements)
 
     def test_boundary_element_sets_support_two_dimensions(self):
+        """Planar boundary struts are classified by their cell edges."""
         fixtures.square_lattice("BOUNDARY_ESETS_2D", size=2.0)
         rve = GmshRVE("BOUNDARY_ESETS_2D")
         rve.generate_mesh(element_size=1.0)
@@ -206,6 +233,7 @@ class TestNodeSets(_GmshTestCase):
                          secondary_elements)
 
     def test_continuum_elements_are_not_boundary_elements(self):
+        """Volume elements remain inner despite touching the boundary."""
         fixtures.solid_cube("CONTINUUM_ESETS", length=2.0)
         rve = GmshRVE("CONTINUUM_ESETS")
         rve.generate_mesh(element_size=1.0)
@@ -218,20 +246,22 @@ class TestNodeSets(_GmshTestCase):
                          set(rve.element_sets["ALL_ELEMENTS"]))
 
 
-class TestWriteAbaqusInput(_GmshTestCase):
+class TestWriteAbaqusInput(GmshTestCase):
 
     def test_input_file_contains_nodes_and_beam_elements(self):
+        """Abaqus export writes nodes and the default beam element type."""
         fixtures.simple_cubic("WINP", length=2.0)
         rve = GmshRVE("WINP")
         rve.generate_mesh(element_size=2.0)
         path = rve.write_abaqus_input()
         try:
-            content = open(path, "r").read()
+            with open(path, "r") as input_file:
+                content = input_file.read()
         finally:
             if os.path.isfile(path):
                 os.remove(path)
         self.assertIn("*NODE", content)
-        # Gmsh 2-node line maps to the Abaqus B33 beam in 3d
+        # Gmsh 2-node line maps to the Abaqus B33 beam in 3D
         self.assertIn("*ELEMENT, TYPE=B33", content)
 
     def test_custom_types_do_not_mutate_the_shared_type_map(self):
@@ -244,7 +274,8 @@ class TestWriteAbaqusInput(_GmshTestCase):
         rve.generate_mesh(element_size=2.0)
         path = rve.write_abaqus_input(custom_types={1: "B31"})
         try:
-            content = open(path, "r").read()
+            with open(path, "r") as input_file:
+                content = input_file.read()
         finally:
             if os.path.isfile(path):
                 os.remove(path)
@@ -262,8 +293,55 @@ class TestWriteAbaqusInput(_GmshTestCase):
         self.assertRaises(NotImplementedError, rve.write_abaqus_input,
                           {1: "S8R5"})
 
+    def test_warping_element_type_is_rejected(self):
+        """Element types carrying a warping DOF are not supported."""
+        fixtures.simple_cubic("WINP4", length=2.0)
+        rve = GmshRVE("WINP4")
+        rve.generate_mesh(element_size=2.0)
+        self.assertRaises(NotImplementedError, rve.write_abaqus_input,
+                          {1: "B31OS"})
 
-class TestReadFromMesh(_GmshTestCase):
+
+class TestReadFromMesh(GmshTestCase):
+
+    def test_pairs_periodic_edges_of_a_prebuilt_2d_mesh(self):
+        """read_from_mesh supports a ready-made periodic planar mesh and
+        pairs the nodes on opposite edges one to one."""
+        size = 2.0
+        fixtures.discrete_periodic_square("DPS", size=size)
+        rve = GmshRVE.read_from_mesh("DPS")
+
+        self.assertEqual(rve.model_dimension, 2)
+        self.assertTrue(rve.periodic_mesh)
+        ns = rve.node_sets
+        self.assertEqual(len(ns["ALL_NODES"]), 9)
+        self.assertIn("SOLID", ns)
+
+        self.assertEqual(len(ns["EDGE_1"]), 1)
+        self.assertEqual(len(ns["EDGE_3"]), 1)
+        self.assertEqual(len(ns["EDGE_2"]), 1)
+        self.assertEqual(len(ns["EDGE_4"]), 1)
+
+        tags, coords, _ = gmsh.model.mesh.get_nodes()
+        coords = np.array(coords).reshape(-1, 3)
+        coord = {int(tag): coords[i] for i, tag in enumerate(tags)}
+        bottom = coord[int(ns["EDGE_1"][0])]
+        top = coord[int(ns["EDGE_3"][0])]
+        left = coord[int(ns["EDGE_4"][0])]
+        right = coord[int(ns["EDGE_2"][0])]
+        self.assertTrue(np.allclose(top - bottom, [0.0, size, 0.0]))
+        self.assertTrue(np.allclose(right - left, [size, 0.0, 0.0]))
+
+        es = rve.element_sets
+        self.assertEqual(set(es["SOLID"]), set(es["ALL_ELEMENTS"]))
+        self.assertEqual(len(es["BOUNDARY_ELEMENTS"]), 0)
+
+    def test_detects_a_non_periodic_prebuilt_2d_mesh(self):
+        """Mismatched planar boundary nodes are detected as nonperiodic."""
+        fixtures.discrete_periodic_square("DPS2", size=2.0, perturb=0.2)
+        rve = GmshRVE.read_from_mesh("DPS2")
+        self.assertEqual(rve.model_dimension, 2)
+        self.assertFalse(rve.periodic_mesh)
 
     def test_pairs_periodic_faces_of_a_prebuilt_mesh(self):
         """read_from_mesh classifies the nodes of a ready-made periodic mesh
@@ -295,8 +373,8 @@ class TestReadFromMesh(_GmshTestCase):
         tags, coords, _ = gmsh.model.mesh.get_nodes()
         coords = np.array(coords).reshape(-1, 3)
         coord = {int(t): coords[i] for i, t in enumerate(tags)}
-        for master_tag, slave_tag in zip(ns["FACE_1"], ns["FACE_2"]):
-            offset = coord[int(slave_tag)] - coord[int(master_tag)]
+        for primary_tag, secondary_tag in zip(ns["FACE_1"], ns["FACE_2"]):
+            offset = coord[int(secondary_tag)] - coord[int(primary_tag)]
             self.assertTrue(np.allclose(offset, [0.0, 0.0, L]))
 
     def test_detects_a_non_periodic_mesh(self):
@@ -306,7 +384,3 @@ class TestReadFromMesh(_GmshTestCase):
         rve = GmshRVE.read_from_mesh("DPP2")
         self.assertEqual(rve.model_dimension, 3)
         self.assertFalse(rve.periodic_mesh)
-
-
-if __name__ == "__main__":
-    unittest.main()

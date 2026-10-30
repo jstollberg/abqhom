@@ -18,13 +18,13 @@ from abqhom.utils import (voigt_to_tensor, tensor_to_voigt, voigt, reuss,
 class TestVoigtTensor(unittest.TestCase):
 
     def test_roundtrip_3d_strain(self):
-        """voigt -> tensor -> voigt reproduces a 3d strain vector."""
+        """Voigt to tensor to Voigt reproduces a 3D strain vector."""
         v = np.array([0.1, -0.2, 0.3, 0.4, -0.5, 0.6])
         back = tensor_to_voigt(voigt_to_tensor(v, "STRAIN"), "STRAIN")
         self.assertTrue(np.allclose(back, v))
 
     def test_roundtrip_2d_stress(self):
-        """voigt -> tensor -> voigt reproduces a 2d stress vector."""
+        """Voigt to tensor to Voigt reproduces a 2D stress vector."""
         v = np.array([1.0, -2.0, 0.5])
         back = tensor_to_voigt(voigt_to_tensor(v, "STRESS"), "STRESS",
                                check_symmetry=False)
@@ -47,7 +47,7 @@ class TestVoigtTensor(unittest.TestCase):
 class TestBounds(unittest.TestCase):
 
     def setUp(self):
-        # Two isotropic phases in Voigt (3d) notation
+        # Two diagonal positive-definite stiffness matrices
         self.C1 = np.diag([10.0, 10.0, 10.0, 4.0, 4.0, 4.0])
         self.C2 = np.diag([1.0, 1.0, 1.0, 0.4, 0.4, 0.4])
         self.fraction = 0.3
@@ -58,40 +58,45 @@ class TestBounds(unittest.TestCase):
         self.assertTrue(np.allclose(voigt(self.fraction, self.C1, self.C2),
                                     expected))
 
-    def test_reuss_below_voigt(self):
-        """The Reuss estimate is not stiffer than the Voigt estimate."""
+    def test_reuss_matches_harmonic_mixture_and_is_below_voigt(self):
+        """The Reuss estimate is the harmonic mixture and a lower bound."""
         C_voigt = voigt(self.fraction, self.C1, self.C2)
         C_reuss = reuss(self.fraction, self.C1, self.C2)
-        eig_voigt = np.sort(np.linalg.eigvals(C_voigt).real)
-        eig_reuss = np.sort(np.linalg.eigvals(C_reuss).real)
-        self.assertTrue(np.all(eig_reuss <= eig_voigt + 1e-9))
+        expected = np.linalg.inv(
+            self.fraction*np.linalg.inv(self.C1)
+            + (1.0 - self.fraction)*np.linalg.inv(self.C2))
+        self.assertTrue(np.allclose(C_reuss, expected))
+        difference = 0.5*((C_voigt - C_reuss)
+                          + (C_voigt - C_reuss).T)
+        self.assertGreaterEqual(np.min(np.linalg.eigvalsh(difference)),
+                                -1.0e-12)
 
 
 class TestHillMandelResidual(unittest.TestCase):
 
     def test_equal_powers_give_zero(self):
-        """Equal microscopic and macroscopic powers satisfy the condition."""
+        """Equal incremental-work densities satisfy the condition."""
         residual = hill_mandel_residual(2.0, 2.0, 1.0e-12)
         self.assertEqual(residual, 0.0)
 
     def test_larger_power_sets_normalization(self):
-        """The larger absolute power determines the normalization."""
+        """The larger absolute work density determines the normalization."""
         residual = hill_mandel_residual(2.0, 1.0, 0.1)
         self.assertAlmostEqual(residual, 0.5)
 
     def test_tolerance_regularizes_small_powers(self):
-        """The supplied power scale regularizes states near zero power."""
+        """The supplied work-density scale regularizes near-zero states."""
         residual = hill_mandel_residual(1.0e-9, 0.0, 1.0e-6)
         self.assertAlmostEqual(residual, 1.0e-3)
 
     def test_array_inputs_are_evaluated_elementwise(self):
-        """Power histories may be passed as arrays."""
+        """Incremental-work histories may be passed as arrays."""
         residual = hill_mandel_residual(np.array([2.0, 1.0e-9]),
                                         np.array([1.0, 0.0]), 1.0e-6)
         self.assertTrue(np.allclose(residual, np.array([0.5, 1.0e-3])))
 
     def test_nonpositive_tolerance_is_rejected(self):
-        """A nonpositive regularizing scale is not admissible."""
+        """A nonpositive incremental-work scale is not admissible."""
         self.assertRaises(ValueError, hill_mandel_residual, 1.0, 1.0, 0.0)
 
 
@@ -114,12 +119,11 @@ class TestFileIO(unittest.TestCase):
     def test_find_all_files_with_extension(self):
         """find_all_files returns only the files with the given extension."""
         for name in ("a.csv", "b.csv", "c.txt"):
-            open(os.path.join(self.tmp, name), "w").close()
+            with open(os.path.join(self.tmp, name), "w"):
+                pass
+        os.mkdir(os.path.join(self.tmp, "directory.csv"))
         found = find_all_files(self.tmp, extension=".csv")
         self.assertEqual(len(found), 2)
         for path in found:
             self.assertTrue(path.endswith(".csv"))
-
-
-if __name__ == "__main__":
-    unittest.main()
+            self.assertTrue(os.path.isfile(path))

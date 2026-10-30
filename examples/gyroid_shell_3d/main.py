@@ -1,0 +1,159 @@
+"""Homogenize an imported sheet-gyroid shell at finite strain.
+
+The periodic surface mesh is generated separately by ``generate_mesh.py``.
+This example imports the mesh through ``GmshRVE.read_from_mesh``, verifies its
+periodicity, and computes the response along a monotonic loading path.
+"""
+
+import inspect
+import os
+import sys
+
+import numpy as np
+
+# ---------------------------------------------------------------
+# Locate this example and put the shipped abqhom source first on the
+# path. Under 'abaqus cae noGUI=main.py' __file__ is undefined, so the
+# script location is obtained via inspect instead.
+here = os.path.dirname(os.path.abspath(
+    inspect.getframeinfo(inspect.currentframe()).filename))
+abqhom_path = os.path.abspath(os.path.join(here, os.pardir, os.pardir, "src"))
+if abqhom_path not in sys.path:
+    sys.path.insert(0, abqhom_path)
+
+import gmsh
+
+from abaqusConstants import ISOTROPIC, NEO_HOOKE, OFF, ON, VOLUMETRIC_DATA
+
+from abqhom.abqmodel import AbaqusRVE, LoadHistory
+from abqhom.constants import PARAQUS_INSTALLED
+from abqhom.gmshmodel import GmshRVE
+from abqhom.utils import export_to_csv_file
+
+
+def neo_hookean_parameters(E, nu):
+    """Return Abaqus Neo-Hookean parameters for ``E`` and ``nu``."""
+    shear_modulus = E/(2.0*(1.0 + nu))
+    bulk_modulus = E/(3.0*(1.0 - 2.0*nu))
+    return 0.5*shear_modulus, 2.0/bulk_modulus
+
+
+def load_path(time):
+    """Return the macroscopic displacement gradient at ``time``."""
+    displacement_gradient = np.zeros((3, 3))
+    displacement_gradient[0, 0] = 0.2*time
+    return displacement_gradient
+
+
+def get_frame_times(unit_cell, step_name):
+    """Return the output-frame times and close the ODB."""
+    unit_cell.open_odb_file()
+    try:
+        return [frame.frameValue
+                for frame in unit_cell.odb.steps[step_name].frames]
+    finally:
+        unit_cell.close_odb_file()
+
+def main():
+    """Run the example workflow."""
+    try:
+        # ---------------------------------------------------------------
+        # Working directory (created next to this script)
+        workdir = os.path.join(here, "abq")
+        if not os.path.isdir(workdir):
+            os.makedirs(workdir)
+        os.chdir(workdir)
+
+        # Shell thickness and material
+        thickness = 0.05     # shell thickness
+        E = 210.0            # Young's modulus of the shell material
+        nu = 0.3             # Poisson's ratio
+
+        # Load the pre-computed microgen mesh (physical group 'GYROID').
+        mesh_file = os.path.join(here, "gyroid.msh")
+        if not os.path.isfile(mesh_file):
+            raise RuntimeError(
+                "The mesh file '{}' does not exist. Generate it first by running "
+                "generate_mesh.py in an environment that has microgen installed."
+                .format(mesh_file))
+
+        gmsh.initialize()
+        # Merge the mesh into an explicitly named model (Abaqus uppercases the
+        # part name, so the model name must match that case).
+        model_name = "GYROID"
+        gmsh.model.add(model_name)
+        gmsh.merge(mesh_file)
+        unit_cell = GmshRVE.read_from_mesh(model_name)
+        if not unit_cell.periodic_mesh:
+            raise RuntimeError("The imported mesh is not periodic.")
+
+        # ---------------------------------------------------------------
+        # Build the Abaqus model, assign the shell section and define the load step.
+        cell = AbaqusRVE(unit_cell)
+        material = cell.model.Material(name="SHELL")
+        c10, d1 = neo_hookean_parameters(E, nu)
+        material.Hyperelastic(
+            materialType=ISOTROPIC, table=((c10, d1),), testData=OFF,
+            type=NEO_HOOKE,
+            volumetricResponse=VOLUMETRIC_DATA)
+        cell.assign_shell_section("GYROID", "SHELL", thickness)
+
+        step_name = "LOAD"
+        increment = 0.01
+        cell.model.StaticStep(
+            name=step_name, previous="Initial", nlgeom=ON, maxNumInc=200,
+            initialInc=increment, minInc=increment, maxInc=increment)
+
+        history = LoadHistory(np.array([0.0, 1.0]), load_path)
+        cell.apply_periodic_BC(step_name, history)
+        cell.run_analysis(field_outputs=["U", "S"])
+
+        frame_times = get_frame_times(cell, step_name)
+
+        curve = []
+        for index, frame_time in enumerate(frame_times):
+            F11 = 1.0 + load_path(frame_time)[0, 0]
+            stress = cell.average_stress(step_name, frame=index)
+            curve.append([F11, stress[0, 0]])
+        curve = np.asarray(curve)
+
+        print("\n------------------------------")
+        print("Finite-strain response ({} frames):".format(len(curve)))
+        print("  final F11 = {:.4f}".format(curve[-1, 0]))
+        print("  final P11 = {:.6e}".format(curve[-1, 1]))
+
+        result_dir = os.path.join(here, "results")
+        if not os.path.isdir(result_dir):
+            os.makedirs(result_dir)
+        export_to_csv_file(curve, os.path.join(result_dir, "response.csv"))
+
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots(figsize=(6.0, 5.0))
+        ax.plot(curve[:, 0], curve[:, 1], "-", color="#1f6feb", lw=1.4)
+        ax.axhline(0.0, color="0.6", lw=0.6)
+        ax.axvline(1.0, color="0.6", lw=0.6)
+        ax.set_xlabel(r"Macroscopic deformation gradient  $\bar{F}_{11}$")
+        ax.set_ylabel(r"Effective first Piola-Kirchhoff stress  $\bar{P}_{11}$")
+        ax.set_title("Finite-strain response of a sheet-Gyroid shell")
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+        fig.savefig(os.path.join(result_dir, "response.png"), dpi=150)
+        plt.close(fig)
+
+        if PARAQUS_INSTALLED:
+            cell.export_to_vtk(os.path.join(here, "vtk_output"),
+                               field_outputs=["U", ("S", "MISES")], clear=True)
+        else:
+            print("Paraqus is not installed; VTK export was skipped.")
+
+        print("*** Finished ***")
+    finally:
+        if gmsh.is_initialized():
+            gmsh.finalize()
+
+
+if __name__ == "__main__":
+    main()

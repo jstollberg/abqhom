@@ -8,13 +8,18 @@ import numpy as np
 
 
 def voigt_to_tensor(voigt_tensor, quantity):
-    """
-    Transform a tensor from Voigt notation to symbolic tensor notation.
+    r"""
+    Convert symmetric stress or strain data from Voigt to tensor form.
+
+    The three-dimensional ordering is
+    :math:`(11,22,33,23,13,12)` and the two-dimensional ordering is
+    :math:`(11,22,12)`. Strain input uses engineering shear components,
+    while stress input uses tensorial shear components.
 
     Parameters
     ----------
     voigt_tensor : ndarray
-        The tensor in Voigt notation.
+        One Voigt vector or an array of Voigt vectors.
     quantity : str
         The quantity that is described by the tensor. Currently
         supported are 'STRESS' and 'STRAIN'.
@@ -22,7 +27,7 @@ def voigt_to_tensor(voigt_tensor, quantity):
     Returns
     -------
     tensor : ndarray
-        The tensor in symbolic tensor notation.
+        One symmetric second-order tensor or an array of such tensors.
 
     """
     quantity = quantity.upper()
@@ -62,13 +67,18 @@ def voigt_to_tensor(voigt_tensor, quantity):
 
 
 def tensor_to_voigt(tensor, quantity, check_symmetry=True):
-    """
-    Transform a sequence of tensors to Voigt notation.
+    r"""
+    Convert symmetric stress or strain data from tensor to Voigt form.
+
+    The three-dimensional ordering is
+    :math:`(11,22,33,23,13,12)` and the two-dimensional ordering is
+    :math:`(11,22,12)`. Engineering shear components are returned for
+    strain, while stress retains tensorial shear components.
 
     Parameters
     ----------
     tensor : ndarray
-        The tensors in symbolic tensor notation.
+        One second-order tensor or an array of such tensors.
     quantity : str
         The quantity that is described by the tensor. Currently
         supported are 'STRESS' and 'STRAIN'.
@@ -78,8 +88,8 @@ def tensor_to_voigt(tensor, quantity, check_symmetry=True):
 
     Returns
     -------
-    tensor : ndarray
-        The tensors in Voigt notation.
+    voigt_tensor : ndarray
+        One Voigt vector or an array of Voigt vectors.
 
     """
     quantity = quantity.upper()
@@ -124,18 +134,30 @@ def tensor_to_voigt(tensor, quantity, check_symmetry=True):
 
 def hill_mandel_residual(macroscopic_power, microscopic_power,
                          power_tolerance):
-    """
-    Compute the normalized Hill--Mandel power residual.
+    r"""
+    Compute the normalized discrete Hill--Mandel residual.
+
+    For the macroscopic and microscopic incremental-work densities
+    :math:`\Delta w_\mathrm{macro}` and
+    :math:`\Delta w_\mathrm{micro}`, respectively, the residual is
+
+    .. math::
+        \epsilon_\mathrm{HM} =
+        \frac{|\Delta w_\mathrm{macro}-\Delta w_\mathrm{micro}|}
+        {\max(|\Delta w_\mathrm{macro}|,
+              |\Delta w_\mathrm{micro}|,\Delta w_\mathrm{tol})}.
 
     Parameters
     ----------
-    macroscopic_power : float or ndarray
-        Macroscopic power density.
-    microscopic_power : float or ndarray
-        Volume-averaged microscopic power density.
+    macroscopic_power : float or ArrayLike
+        Macroscopic incremental-work density
+        :math:`\Delta w_\mathrm{macro}`.
+    microscopic_power : float or ArrayLike
+        Microscopic incremental-work density
+        :math:`\Delta w_\mathrm{micro}`.
     power_tolerance : float
-        Positive regularizing power-density scale. It must have the same
-        physical units as the supplied power densities.
+        Positive regularizing incremental-work-density scale
+        :math:`\Delta w_\mathrm{tol}`.
 
     Returns
     -------
@@ -160,22 +182,27 @@ def hill_mandel_residual(macroscopic_power, microscopic_power,
 
 
 def reuss(volume_fraction, C1, C2):
-    """
-    Compute the homogenized stiffness tensor following the Reuss theory.
+    r"""
+    Return the Reuss estimate of the effective stiffness matrix.
+
+    For the volume fraction :math:`c` of phase 1,
+    :math:`\bar{\mathbb{C}}_{\mathrm{R}}^{\mathrm{V}} =
+    (c(\mathbb{C}^{\mathrm{V}}_1)^{-1}
+    +(1-c)(\mathbb{C}^{\mathrm{V}}_2)^{-1})^{-1}`.
 
     Parameters
     ----------
     volume_fraction : float
-        Volume fraction of material 1.
+        Volume fraction of phase 1.
     C1 : ndarray
-        Constitutive tensor of material 1 in Voigt notation.
+        Stiffness matrix of phase 1 in Voigt notation.
     C2 : ndarray
-        Constitutive tensor of material 2 in Voigt notation.
+        Stiffness matrix of phase 2 in Voigt notation.
 
     Returns
     -------
     C : ndarray
-        The homogenized constitutive tensor.
+        Reuss estimate of the effective stiffness matrix.
 
     """
     C_inv = (volume_fraction*np.linalg.inv(C1) +
@@ -185,22 +212,26 @@ def reuss(volume_fraction, C1, C2):
 
 
 def voigt(volume_fraction, C1, C2):
-    """
-    Compute the homogenized stiffness tensor following the Voigt theory.
+    r"""
+    Return the Voigt estimate of the effective stiffness matrix.
+
+    For the volume fraction :math:`c` of phase 1,
+    :math:`\bar{\mathbb{C}}_{\mathrm{V}}^{\mathrm{V}} =
+    c\mathbb{C}^{\mathrm{V}}_1+(1-c)\mathbb{C}^{\mathrm{V}}_2`.
 
     Parameters
     ----------
     volume_fraction : float
-        Volume fraction of material 1.
+        Volume fraction of phase 1.
     C1 : ndarray
-        Constitutive tensor of material 1 in Voigt notation.
+        Stiffness matrix of phase 1 in Voigt notation.
     C2 : ndarray
-        Constitutive tensor of material 2 in Voigt notation.
+        Stiffness matrix of phase 2 in Voigt notation.
 
     Returns
     -------
     C : ndarray
-        The homogenized constitutive tensor.
+        Voigt estimate of the effective stiffness matrix.
 
     """
     C = (volume_fraction*C1) + (1 - volume_fraction)*C2
@@ -209,40 +240,41 @@ def voigt(volume_fraction, C1, C2):
 
 def export_to_csv_file(C, path):
     """
-    Dump an array (usually a stiffness tensor) into a csv file.
+    Write an array to a CSV file.
 
     Parameters
     ----------
     C : ArrayLike
         The array to export.
-    path : str
+    path : str or os.PathLike
         The file path.
 
     Returns
     -------
-    None.
+    None
 
     """
-    path, extension = os.path.splitext(path)
+    path, _ = os.path.splitext(path)
     path += ".csv"
     np.savetxt(path, C, delimiter=",")
 
 
 def read_csv_file(path, dtype=None):
     """
-    Read a csv file into an array.
+    Read a CSV file into an array.
 
     Parameters
     ----------
-    path : str
+    path : str or os.PathLike
         Path to the file.
-    dtype : numpy.dtype, optional
-        Data type of the array. The default is None.
+    dtype : data-type, optional
+        Any data-type specification accepted by ``numpy.loadtxt``. The
+        default is None.
 
     Returns
     -------
     array : ndarray
-        The array containing the values from the csv file.
+        The array containing the values from the CSV file.
 
     """
     array = np.loadtxt(path, delimiter=",", dtype=dtype)
@@ -251,11 +283,11 @@ def read_csv_file(path, dtype=None):
 
 def find_all_files(path, extension=None):
     """
-    Find all files in a specific location.
+    List regular files in a directory, optionally filtered by extension.
 
     Parameters
     ----------
-    path : str
+    path : str or os.PathLike
         The location to browse.
     extension : str, optional
         The file type to look for. The default is None.
@@ -266,10 +298,8 @@ def find_all_files(path, extension=None):
         List of the files found in the provided location.
 
     """
-    if extension is None:
-        files = [os.path.join(path, file) for file in os.listdir(path)]
-        return files
-
-    files = [os.path.join(path, file) for file in os.listdir(path)
-             if file.endswith(extension)]
+    files = [os.path.join(path, name) for name in sorted(os.listdir(path))]
+    files = [file for file in files if os.path.isfile(file)]
+    if extension is not None:
+        files = [file for file in files if file.endswith(extension)]
     return files

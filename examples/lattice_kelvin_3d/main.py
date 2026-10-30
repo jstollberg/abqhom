@@ -1,20 +1,15 @@
-"""
-Linear homogenization of a 3d Kelvin (tetrakaidecahedron) beam-lattice
-unit cell.
+"""Homogenize a Kelvin beam lattice at finite strain.
 
-Like the honeycomb example, this demonstrates a general lattice cell
-whose struts do not connect to the corners of the bounding box: the
-Kelvin cell's vertices lie on the faces of the cubic bounding box. The
-workflow is identical to the classic "cubic" cells -- the boundary, its
-periodic connections and the rigid-body anchor are found automatically.
-
-Run with:  abaqus cae noGUI=main.py
+The vertices of the truncated octahedron lie on the faces of the cuboidal
+cell rather than at its corners. The example demonstrates automatic boundary
+classification and periodic pairing for this topology and computes a
+monotonic finite-strain response.
 """
 
-import os
-import sys
 import inspect
 from itertools import permutations, product
+import os
+import sys
 
 import numpy as np
 
@@ -25,24 +20,25 @@ import numpy as np
 here = os.path.dirname(os.path.abspath(
     inspect.getframeinfo(inspect.currentframe()).filename))
 abqhom_path = os.path.abspath(os.path.join(here, os.pardir, os.pardir, "src"))
-gmsh_path = "C:/Users/jonat/Documents/gmsh/lib"        # TODO: set gmsh path
-paraqus_path = "C:/Users/jonat/Documents/Paraqus/src"  # optional (VTK export)
-for path in (abqhom_path, gmsh_path, paraqus_path):
-    if path not in sys.path:
-        sys.path.insert(0, path)
+if abqhom_path not in sys.path:
+    sys.path.insert(0, abqhom_path)
 
 import gmsh
 
-from abqhom.utils import voigt_to_tensor, tensor_to_voigt, export_to_csv_file
-from abqhom.gmshmodel import GmshRVE
+from abaqusConstants import ISOTROPIC, NEO_HOOKE, OFF, ON, VOLUMETRIC_DATA
+
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
+from abqhom.constants import PARAQUS_INSTALLED
+from abqhom.gmshmodel import GmshRVE
+from abqhom.utils import export_to_csv_file
 
 
 def create_kelvin(model_name, edge=4.0):
-    """Create a Kelvin (truncated octahedron) beam lattice in the cube
-    [-edge/2, edge/2]^3. The 24 vertices are the permutations of
-    (0, +-1, +-2)*edge/4; each has a +-2 coordinate, hence lies on a cube
-    face. Struts connect vertices at distance sqrt(2)*edge/4.
+    """Create a Kelvin beam lattice in a cuboidal periodic cell.
+
+    The 24 vertices are the signed permutations of
+    ``(0, 1, 2)*edge/4``. Struts connect vertices separated by
+    ``sqrt(2)*edge/4``.
     """
     if not gmsh.is_initialized():
         gmsh.initialize()
@@ -73,84 +69,122 @@ def create_kelvin(model_name, edge=4.0):
     gmsh.model.set_physical_name(1, grp, "STRUTS")
 
 
-# ---------------------------------------------------------------
-# Working directory (created next to this script)
-workdir = os.path.join(here, "abq")
-if not os.path.isdir(workdir):
-    os.makedirs(workdir)
-os.chdir(workdir)
+def neo_hookean_parameters(E, nu):
+    """Return Abaqus Neo-Hookean parameters for ``E`` and ``nu``."""
+    shear_modulus = E/(2.0*(1.0 + nu))
+    bulk_modulus = E/(3.0*(1.0 - 2.0*nu))
+    return 0.5*shear_modulus, 2.0/bulk_modulus
 
-# Material parameters (of the solid strut material)
-E = 1.0     # Young's modulus
-nu = 0.3    # Poisson's ratio
 
-# Lattice parameters
-edge = 4.0          # cubic unit-cell edge length
-radius = 0.05       # strut cross-section radius
-element_size = 0.6  # beam element length
+def load_path(time):
+    """Return the macroscopic displacement gradient at ``time``."""
+    displacement_gradient = np.zeros((3, 3))
+    displacement_gradient[0, 0] = 0.2*time
+    return displacement_gradient
 
-# ---------------------------------------------------------------
-# Run the homogenization routine (6 load cases in 3d)
-components = [0, 1, 2, 3, 4, 5]  # Voigt: xx, yy, zz, yz, xz, xy
-strain_magnitude = 1.0e-3
 
-# Build the model once (geometry, mesh, material, section, step). Only the
-# macroscopic strain changes between load cases, so the model is reused and
-# only the periodic boundary conditions are updated in the loop. The anchor
-# is picked automatically -- no corner point required.
-create_kelvin("RVE", edge=edge)
-unit_cell = GmshRVE("RVE")
-unit_cell.add_periodic_mesh_constraints()
-unit_cell.generate_mesh(element_size=element_size)
+def get_frame_times(unit_cell, step_name):
+    """Return the output-frame times and close the ODB."""
+    unit_cell.open_odb_file()
+    try:
+        return [frame.frameValue
+                for frame in unit_cell.odb.steps[step_name].frames]
+    finally:
+        unit_cell.close_odb_file()
 
-unit_cell = AbaqusRVE(unit_cell)
-material = unit_cell.model.Material(name="LINEAR_ELASTICITY")
-material.Elastic(table=[[E, nu]])
-unit_cell.assign_beam_section("STRUTS", "LINEAR_ELASTICITY", radius)
-unit_cell.model.StaticStep(name="LOAD", previous="Initial")
 
-C = np.empty((6, 6))
-for col, comp in enumerate(components):
-    print("\n------------------------------")
-    print("Run load case {}.".format(col + 1))
+def main():
+    """Run the example workflow."""
+    try:
+        # ---------------------------------------------------------------
+        # Working directory (created next to this script)
+        workdir = os.path.join(here, "abq")
+        if not os.path.isdir(workdir):
+            os.makedirs(workdir)
+        os.chdir(workdir)
 
-    def strain_history(time, component=comp):
-        strain = np.zeros(6)
-        strain[component] = strain_magnitude
-        return time*voigt_to_tensor(strain, "STRAIN")
+        # Material parameters (of the solid strut material)
+        E = 1.0     # Young's modulus
+        nu = 0.3    # Poisson's ratio
 
-    history = LoadHistory(np.array([0.0, 1.0]), strain_history)
-    unit_cell.apply_periodic_BC("LOAD", history)
+        # Lattice parameters
+        edge = 4.0          # cubic unit-cell edge length
+        radius = 0.05       # strut cross-section radius
+        element_size = 0.6  # beam element length
 
-    # Run the analysis and compute the average stress
-    unit_cell.run_analysis(field_outputs=["U"])
-    stress = unit_cell.average_stress("LOAD")
-    stress = tensor_to_voigt(stress, "STRESS")
-    print("Stress = " + str(stress.round(8).tolist()))
+        # ---------------------------------------------------------------
+        # Build the model. The anchor is selected automatically; no corner point is
+        # required for this face-vertex lattice.
+        create_kelvin("RVE", edge=edge)
+        unit_cell = GmshRVE("RVE")
+        unit_cell.add_periodic_mesh_constraints()
+        unit_cell.generate_mesh(element_size=element_size)
 
-    C[:, col] = stress/strain_magnitude
+        unit_cell = AbaqusRVE(unit_cell, custom_types={1: "B31"})
+        c10, d1 = neo_hookean_parameters(E, nu)
+        material = unit_cell.model.Material(name="NEO_HOOKE")
+        material.Hyperelastic(
+            materialType=ISOTROPIC, table=((c10, d1),), testData=OFF,
+            type=NEO_HOOKE,
+            volumetricResponse=VOLUMETRIC_DATA)
+        unit_cell.assign_beam_section("STRUTS", "NEO_HOOKE", radius)
 
-    # Export the deformed struts to VTK (strut radius taken from section)
-    unit_cell.export_to_vtk(os.path.join(here, "vtk_output",
-                                         "case_{}".format(col + 1)),
-                            field_outputs=["U"], clear=True)
+        step_name = "LOAD"
+        increment = 0.01
+        unit_cell.model.StaticStep(
+            name=step_name, previous="Initial", nlgeom=ON, maxNumInc=200,
+            initialInc=increment, minInc=increment, maxInc=increment)
 
-gmsh.finalize()
+        history = LoadHistory(np.array([0.0, 1.0]), load_path)
+        unit_cell.apply_periodic_BC(step_name, history)
+        unit_cell.run_analysis(field_outputs=["U", "S"])
 
-print("\n------------------------------")
-print("Effective constitutive matrix (Voigt):")
-print(np.array2string(C, precision=6, suppress_small=True))
-print("\nChecks for the Kelvin cell (should have cubic symmetry):")
-print("  symmetry  max|C - C^T|      = {:.2e}".format(np.max(np.abs(C - C.T))))
-print("  C11=C22=C33 spread          = {:.2e}".format(
-    np.ptp([C[0, 0], C[1, 1], C[2, 2]])))
-print("  C12=C13=C23 spread          = {:.2e}".format(
-    np.ptp([C[0, 1], C[0, 2], C[1, 2]])))
-print("  C44=C55=C66 spread          = {:.2e}".format(
-    np.ptp([C[3, 3], C[4, 4], C[5, 5]])))
+        frame_times = get_frame_times(unit_cell, step_name)
 
-# Export the effective stiffness
-result_path = os.path.join(here, "results")
-if not os.path.isdir(result_path):
-    os.makedirs(result_path)
-export_to_csv_file(C, os.path.join(result_path, "kelvin_C.csv"))
+        curve = []
+        for index, frame_time in enumerate(frame_times):
+            F11 = 1.0 + load_path(frame_time)[0, 0]
+            stress = unit_cell.average_stress(step_name, frame=index)
+            curve.append([F11, stress[0, 0]])
+        curve = np.asarray(curve)
+
+        print("\n------------------------------")
+        print("Finite-strain response ({} frames):".format(len(curve)))
+        print("  final F11 = {:.4f}".format(curve[-1, 0]))
+        print("  final P11 = {:.6e}".format(curve[-1, 1]))
+
+        result_dir = os.path.join(here, "results")
+        if not os.path.isdir(result_dir):
+            os.makedirs(result_dir)
+        export_to_csv_file(curve, os.path.join(result_dir, "response.csv"))
+
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots(figsize=(6.0, 5.0))
+        ax.plot(curve[:, 0], curve[:, 1], "-", color="#1f6feb", lw=1.4)
+        ax.axhline(0.0, color="0.6", lw=0.6)
+        ax.axvline(1.0, color="0.6", lw=0.6)
+        ax.set_xlabel(r"Macroscopic deformation gradient  $\bar{F}_{11}$")
+        ax.set_ylabel(r"Effective first Piola-Kirchhoff stress  $\bar{P}_{11}$")
+        ax.set_title("Finite-strain response of a Kelvin lattice")
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+        fig.savefig(os.path.join(result_dir, "response.png"), dpi=150)
+        plt.close(fig)
+
+        if PARAQUS_INSTALLED:
+            unit_cell.export_to_vtk(os.path.join(here, "vtk_output"),
+                                    field_outputs=["U", ("S", "MISES")], clear=True)
+        else:
+            print("Paraqus is not installed; VTK export was skipped.")
+
+        print("*** Finished ***")
+    finally:
+        if gmsh.is_initialized():
+            gmsh.finalize()
+
+
+if __name__ == "__main__":
+    main()

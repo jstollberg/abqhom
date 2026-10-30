@@ -1,28 +1,14 @@
-"""
-Homogenization of a simple-cubic beam-lattice unit cell.
+"""Homogenize a simple-cubic beam lattice in the linear regime.
 
-The unit cell consists of the twelve struts along the edges of the cubic
-bounding box. Because the edge struts are shared by four neighboring
-cells, this is the simplest example that exercises the automatic removal
-of redundant secondary element copies.
-
-Analytical check
-----------------
-Under uniaxial strain only the four struts parallel to the loading
-direction carry an axial force N = E*A*eps. Each edge is shared by four
-cells, so only one periodic copy is retained and
-
-    C11 = E*A / L**2 = E*pi*r**2 / L**2 ,
-
-while the transverse coupling C12 vanishes (no Poisson effect for the
-axial struts).
-
-Run with:  abaqus cae noGUI=main.py
+The twelve edge struts are shared by four neighboring cells, making this the
+simplest example of the automatic boundary-element reduction. The numerical
+stiffness is compared with ``C11 = E*pi*r**2/L**2``, while the transverse
+coupling terms are expected to vanish.
 """
 
+import inspect
 import os
 import sys
-import inspect
 
 import numpy as np
 
@@ -33,18 +19,16 @@ import numpy as np
 here = os.path.dirname(os.path.abspath(
     inspect.getframeinfo(inspect.currentframe()).filename))
 abqhom_path = os.path.abspath(os.path.join(here, os.pardir, os.pardir, "src"))
-gmsh_path = "C:/Users/jonat/Documents/gmsh/lib"        # TODO: set gmsh path
-paraqus_path = "C:/Users/jonat/Documents/Paraqus/src"  # optional (VTK export)
-for path in (abqhom_path, gmsh_path, paraqus_path):
-    if path not in sys.path:
-        sys.path.insert(0, path)
+if abqhom_path not in sys.path:
+    sys.path.insert(0, abqhom_path)
 
 import gmsh
 
-from abqhom.utils import (tensor_to_voigt, voigt_to_tensor,
-                          export_to_csv_file)
-from abqhom.gmshmodel import GmshRVE
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
+from abqhom.constants import PARAQUS_INSTALLED
+from abqhom.gmshmodel import GmshRVE
+from abqhom.utils import (export_to_csv_file, tensor_to_voigt,
+                          voigt_to_tensor)
 
 
 def create_geometry(model_name, length):
@@ -78,76 +62,90 @@ def create_geometry(model_name, length):
     gmsh.model.set_physical_name(1, group, "STRUTS")
 
 
-# ---------------------------------------------------------------
-# Working directory (created next to this script)
-workdir = os.path.join(here, "abq")
-if not os.path.isdir(workdir):
-    os.makedirs(workdir)
-os.chdir(workdir)
+def main():
+    """Run the example workflow."""
+    try:
+        # ---------------------------------------------------------------
+        # Working directory (created next to this script)
+        workdir = os.path.join(here, "abq")
+        if not os.path.isdir(workdir):
+            os.makedirs(workdir)
+        os.chdir(workdir)
 
-# Material and geometry
-E = 210.0        # Young's modulus of the strut material
-nu = 0.3         # Poisson's ratio
-length = 10.0    # edge length of the cubic unit cell
-radius = 0.5     # strut radius
-element_size = 1.0
+        # Material and geometry
+        E = 210.0        # Young's modulus of the strut material
+        nu = 0.3         # Poisson's ratio
+        length = 10.0    # edge length of the cubic unit cell
+        radius = 0.5     # strut radius
+        element_size = 1.0
 
-# ---------------------------------------------------------------
-# Build the model once (geometry, mesh, material, section, step). Only the
-# macroscopic strain changes between load cases, so the model is reused and
-# only the periodic boundary conditions are updated in the loop.
-model_name = "RVE"
-create_geometry(model_name, length)
-unit_cell = GmshRVE(model_name)
-unit_cell.add_periodic_mesh_constraints()
-unit_cell.generate_mesh(element_size=element_size)
+        # ---------------------------------------------------------------
+        # Build the model once (geometry, mesh, material, section, step). Only the
+        # macroscopic strain changes between load cases, so the model is reused and
+        # only the periodic boundary conditions are updated in the loop.
+        model_name = "RVE"
+        create_geometry(model_name, length)
+        unit_cell = GmshRVE(model_name)
+        unit_cell.add_periodic_mesh_constraints()
+        unit_cell.generate_mesh(element_size=element_size)
 
-unit_cell = AbaqusRVE(unit_cell)
-material = unit_cell.model.Material(name="STRUT")
-material.Elastic(table=[[E, nu]])
-unit_cell.assign_beam_section("STRUTS", "STRUT", radius)
-unit_cell.model.StaticStep(name="LOAD", previous="Initial")
+        unit_cell = AbaqusRVE(unit_cell)
+        material = unit_cell.model.Material(name="STRUT")
+        material.Elastic(table=[[E, nu]])
+        unit_cell.assign_beam_section("STRUTS", "STRUT", radius)
+        unit_cell.model.StaticStep(name="LOAD", previous="Initial")
 
-# Run the homogenization routine (6 load cases in 3d)
-strain_magnitude = 1.0e-3
-C = np.zeros((6, 6))
-for i in range(6):
-    print("\n------------------------------")
-    print("Run load case {}.".format(i + 1))
+        # Run the homogenization routine (six load cases in 3D)
+        strain_magnitude = 0.03
+        C = np.zeros((6, 6))
+        for i in range(6):
+            print("\n------------------------------")
+            print("Run load case {}.".format(i + 1))
 
-    def strain_history(time, component=i):
-        strain = np.zeros(6)
-        strain[component] = strain_magnitude
-        return time*voigt_to_tensor(strain, "STRAIN")
+            def strain_history(time, component=i):
+                """Return the ramped macroscopic strain at ``time``."""
+                strain = np.zeros(6)
+                strain[component] = strain_magnitude
+                return time*voigt_to_tensor(strain, "STRAIN")
 
-    history = LoadHistory(np.array([0.0, 1.0]), strain_history)
-    unit_cell.apply_periodic_BC("LOAD", history)
-    unit_cell.run_analysis(field_outputs=["U"])
+            history = LoadHistory(np.array([0.0, 1.0]), strain_history)
+            unit_cell.apply_periodic_BC("LOAD", history)
+            unit_cell.run_analysis(field_outputs=["U"])
 
-    stress = tensor_to_voigt(unit_cell.average_stress("LOAD"), "STRESS")
-    C[:, i] = stress/strain_magnitude
+            stress = tensor_to_voigt(unit_cell.average_stress("LOAD"), "STRESS")
+            C[:, i] = stress/strain_magnitude
 
-    unit_cell.export_to_vtk(os.path.join(here, "vtk_output",
-                                         "case_{}".format(i + 1)),
-                            field_outputs=["U"], clear=True)
+            if PARAQUS_INSTALLED:
+                unit_cell.export_to_vtk(os.path.join(here, "vtk_output",
+                                                     "case_{}".format(i + 1)),
+                                        field_outputs=["U"], clear=True)
 
-gmsh.finalize()
 
-# ---------------------------------------------------------------
-C11_analytical = E*np.pi*radius**2/length**2
-print("\n------------------------------")
-print("Effective constitutive matrix (Voigt):")
-print(np.array2string(C, precision=4, suppress_small=True))
-print("\nComparison with the analytical simple-cubic result:")
-print("  C11 (FE)         = {:.6e}".format(C[0, 0]))
-print("  C11 (analytical) = {:.6e}".format(C11_analytical))
-print("  relative error   = {:.2e}".format(
-    abs(C[0, 0] - C11_analytical)/C11_analytical))
-print("  max |C12,C13,C23| (should vanish) = {:.2e}".format(
-    max(abs(C[0, 1]), abs(C[0, 2]), abs(C[1, 2]))))
+        if not PARAQUS_INSTALLED:
+            print("Paraqus is not installed; VTK export was skipped.")
 
-# Store the effective stiffness
-result_dir = os.path.join(here, "results")
-if not os.path.isdir(result_dir):
-    os.makedirs(result_dir)
-export_to_csv_file(C, os.path.join(result_dir, "stiffness.csv"))
+        # ---------------------------------------------------------------
+        C11_analytical = E*np.pi*radius**2/length**2
+        print("\n------------------------------")
+        print("Effective constitutive matrix (Voigt):")
+        print(np.array2string(C, precision=4, suppress_small=True))
+        print("\nComparison with the analytical simple-cubic result:")
+        print("  C11 (FE)         = {:.6e}".format(C[0, 0]))
+        print("  C11 (analytical) = {:.6e}".format(C11_analytical))
+        print("  relative error   = {:.2e}".format(
+            abs(C[0, 0] - C11_analytical)/C11_analytical))
+        print("  max |C12,C13,C23| (should vanish) = {:.2e}".format(
+            max(abs(C[0, 1]), abs(C[0, 2]), abs(C[1, 2]))))
+
+        # Store the effective stiffness
+        result_dir = os.path.join(here, "results")
+        if not os.path.isdir(result_dir):
+            os.makedirs(result_dir)
+        export_to_csv_file(C, os.path.join(result_dir, "stiffness.csv"))
+    finally:
+        if gmsh.is_initialized():
+            gmsh.finalize()
+
+
+if __name__ == "__main__":
+    main()

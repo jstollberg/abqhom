@@ -1,23 +1,15 @@
-"""
-Homogenization of a mixed continuum/beam RVE: two 1d beam fibers embedded
-in a 3d continuum matrix (coupled through an Abaqus embedded-region
-constraint). This demonstrates that continuum (solid) and beam elements
-can be combined in the same RVE; the effective stiffness is assembled
-from the element nodal forces of both.
+"""Homogenize a continuum matrix reinforced by embedded beam fibers.
 
-The fibers run the full height of the cell, so their end nodes lie on the
-periodic boundary and are shared, through the periodic tiling, into
-continuous fibers along z. The embedded-region constraint eliminates those
-nodes' translational DOFs, and apply_periodic_BC excludes them from the
-translational periodic equations -- their translational periodicity is
-inherited from the periodic matrix host.
-
-Run with:  abaqus cae noGUI=main.py
+Two beam fibers span the cell in the z-direction and are coupled to the
+continuum matrix by an embedded-region constraint. Their boundary nodes
+inherit translational periodicity from the matrix, while their rotational
+degrees of freedom remain part of the beam formulation. The example computes
+the effective stiffness of the mixed-dimensional RVE.
 """
 
+import inspect
 import os
 import sys
-import inspect
 
 import numpy as np
 
@@ -28,22 +20,21 @@ import numpy as np
 here = os.path.dirname(os.path.abspath(
     inspect.getframeinfo(inspect.currentframe()).filename))
 abqhom_path = os.path.abspath(os.path.join(here, os.pardir, os.pardir, "src"))
-gmsh_path = "C:/Users/jonat/Documents/gmsh/lib"        # TODO: set gmsh path
-paraqus_path = "C:/Users/jonat/Documents/Paraqus/src"  # optional (VTK export)
-for path in (abqhom_path, gmsh_path, paraqus_path):
-    if path not in sys.path:
-        sys.path.insert(0, path)
+if abqhom_path not in sys.path:
+    sys.path.insert(0, abqhom_path)
 
 import gmsh
 
-from abqhom.utils import (tensor_to_voigt, voigt_to_tensor,
-                          export_to_csv_file)
-from abqhom.gmshmodel import GmshRVE
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
+from abqhom.constants import PARAQUS_INSTALLED
+from abqhom.gmshmodel import GmshRVE
+from abqhom.utils import (export_to_csv_file, tensor_to_voigt,
+                          voigt_to_tensor)
 
 
 def create_geometry(model_name, edge_length=1.0, nodes_matrix=10,
                     nodes_fibers=3):
+    """Create a hexahedral matrix containing two independent beam fibers."""
 
     # Initialize Gmsh and add a new model
     if not gmsh.is_initialized():
@@ -120,79 +111,93 @@ def create_geometry(model_name, edge_length=1.0, nodes_matrix=10,
     gmsh.model.set_physical_name(1, fibers, "FIBER")
 
 
-# ---------------------------------------------------------------
-# Working directory (created next to this script)
-workdir = os.path.join(here, "abq")
-if not os.path.isdir(workdir):
-    os.makedirs(workdir)
-os.chdir(workdir)
+def main():
+    """Run the example workflow."""
+    try:
+        # ---------------------------------------------------------------
+        # Working directory (created next to this script)
+        workdir = os.path.join(here, "abq")
+        if not os.path.isdir(workdir):
+            os.makedirs(workdir)
+        os.chdir(workdir)
 
-vtk_path = os.path.join(here, "vtk_output")
+        vtk_path = os.path.join(here, "vtk_output")
 
-# Material parameters: Young's modulus - Poisson's ratio
-parameters = {"MATRIX": [50.0, 0.35],
-              "FIBER":  [210, 0.2]}
+        # Material parameters: Young's modulus - Poisson's ratio
+        parameters = {"MATRIX": [50.0, 0.35],
+                      "FIBER":  [210, 0.2]}
 
 
-# ---------------------------------------------------------------
-# Build the model once (geometry, mesh, materials, sections, embedded
-# region, step). Only the macroscopic strain changes between load cases,
-# so the model is reused and only the periodic BCs are updated in the loop.
-create_geometry("RVE", nodes_matrix=9, nodes_fibers=5)
-unit_cell = GmshRVE("RVE")
-unit_cell.add_periodic_mesh_constraints()
-unit_cell.generate_mesh()
+        # ---------------------------------------------------------------
+        # Build the model once (geometry, mesh, materials, sections, embedded
+        # region, step). Only the macroscopic strain changes between load cases,
+        # so the model is reused and only the periodic BCs are updated in the loop.
+        create_geometry("RVE", nodes_matrix=9, nodes_fibers=5)
+        unit_cell = GmshRVE("RVE")
+        unit_cell.add_periodic_mesh_constraints()
+        unit_cell.generate_mesh()
 
-unit_cell = AbaqusRVE(unit_cell)
-for name, (E, nu) in parameters.items():
-    material = unit_cell.model.Material(name=name)
-    material.Elastic(table=[[E, nu]])
-unit_cell.assign_solid_section("MATRIX", "MATRIX")
-unit_cell.assign_beam_section("FIBER", "FIBER", 0.1)
+        unit_cell = AbaqusRVE(unit_cell)
+        for name, (E, nu) in parameters.items():
+            material = unit_cell.model.Material(name=name)
+            material.Elastic(table=[[E, nu]])
+        unit_cell.assign_solid_section("MATRIX", "MATRIX")
+        unit_cell.assign_beam_section("FIBER", "FIBER", 0.1)
 
-# Embed the beam fibers into the continuum matrix. This constraint is kept
-# across load cases -- re-applying the periodic BC does not remove it.
-matrix_elements = unit_cell.instance.sets["ELSET_MATRIX"]
-fiber_elements = unit_cell.instance.sets["ELSET_FIBER"]
-unit_cell.model.EmbeddedRegion("COUPLING", fiber_elements, matrix_elements)
-unit_cell.model.StaticStep(name="LOAD", previous="Initial")
+        # Embed the beam fibers into the continuum matrix. This constraint is kept
+        # across load cases -- re-applying the periodic BC does not remove it.
+        matrix_elements = unit_cell.instance.sets["ELSET_MATRIX"]
+        fiber_elements = unit_cell.instance.sets["ELSET_FIBER"]
+        unit_cell.model.EmbeddedRegion("COUPLING", fiber_elements, matrix_elements)
+        unit_cell.model.StaticStep(name="LOAD", previous="Initial")
 
-# Run homogenization routine (larger strain for the shear cases)
-C = np.empty((6, 6))
-for i in range(6):
-    print("\n------------------------------")
-    print("Run case {}.".format(i + 1))
+        # Run the six linear homogenization load cases.
+        C = np.empty((6, 6))
+        strain_magnitude = 0.03
+        for i in range(6):
+            print("\n------------------------------")
+            print("Run case {}.".format(i + 1))
 
-    strain_magnitude = 0.1 if i < 3 else 0.2
+            def strain_history(time, component=i, magnitude=strain_magnitude):
+                """Return the ramped macroscopic strain at ``time``."""
+                strain = np.zeros(6)
+                strain[component] = magnitude
+                strain = voigt_to_tensor(strain, "STRAIN")
+                return time*strain
 
-    def strain_history(time, component=i, magnitude=strain_magnitude):
-        strain = np.zeros(6)
-        strain[component] = magnitude
-        strain = voigt_to_tensor(strain, "STRAIN")
-        return time*strain
+            history = LoadHistory(np.array([0.0, 1.0]), strain_history)
+            print("Strain = " + str(tensor_to_voigt(history(1.0), "STRAIN")
+                                    .round(3).tolist()))
 
-    history = LoadHistory(np.array([0.0, 1.0]), strain_history)
-    print("Strain = " + str(tensor_to_voigt(history(1.0), "STRAIN")
-                            .round(3).tolist()))
+            unit_cell.apply_periodic_BC("LOAD", history)
+            unit_cell.run_analysis(field_outputs=["U", "S"])
 
-    unit_cell.apply_periodic_BC("LOAD", history)
-    unit_cell.run_analysis(field_outputs=["U", "S"])
+            stress = tensor_to_voigt(unit_cell.average_stress("LOAD"), "STRESS")
+            C[:, i] = stress/strain_magnitude
 
-    stress = tensor_to_voigt(unit_cell.average_stress("LOAD"), "STRESS")
-    C[:, i] = stress/strain_magnitude
+            if PARAQUS_INSTALLED:
+                unit_cell.export_to_vtk(
+                    os.path.join(vtk_path, "case_{}".format(i + 1)),
+                    field_outputs=["U", ("S", "MISES")],
+                    element_sets=["MATRIX", "FIBER"], clear=True)
 
-    unit_cell.export_to_vtk(os.path.join(vtk_path, "case_{}".format(i + 1)),
-                            field_outputs=["U", ("S", "MISES")],
-                            element_sets=["MATRIX", "FIBER"], clear=True)
 
-gmsh.finalize()
+        if not PARAQUS_INSTALLED:
+            print("Paraqus is not installed; VTK export was skipped.")
 
-print("\n------------------------------")
-print("Effective constitutive matrix (Voigt):")
-print(np.array2string(C, precision=4, suppress_small=True))
+        print("\n------------------------------")
+        print("Effective constitutive matrix (Voigt):")
+        print(np.array2string(C, precision=4, suppress_small=True))
 
-# Store the effective stiffness
-result_dir = os.path.join(here, "results")
-if not os.path.isdir(result_dir):
-    os.makedirs(result_dir)
-export_to_csv_file(C, os.path.join(result_dir, "stiffness.csv"))
+        # Store the effective stiffness
+        result_dir = os.path.join(here, "results")
+        if not os.path.isdir(result_dir):
+            os.makedirs(result_dir)
+        export_to_csv_file(C, os.path.join(result_dir, "stiffness.csv"))
+    finally:
+        if gmsh.is_initialized():
+            gmsh.finalize()
+
+
+if __name__ == "__main__":
+    main()

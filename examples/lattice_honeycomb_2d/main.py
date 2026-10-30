@@ -1,22 +1,14 @@
-"""
-Linear homogenization of a 2d regular honeycomb beam-lattice unit cell.
+"""Homogenize a regular 2D beam honeycomb in the linear regime.
 
-This example demonstrates that abqhom now handles general lattice unit
-cells whose struts do NOT connect to the corners of the bounding box.
-The regular honeycomb is a classic case: its cell walls cross the
-bounding-box edges at non-corner, periodically matching points.
-
-Note that the workflow is *identical* to the one for classic "cubic"
-cells -- no corner points and no manual boundary or rigid-body-anchor
-definitions are required. The boundary, its periodic connections and the
-node used to suppress rigid-body motion are all detected automatically.
-
-Run with:  abaqus cae noGUI=main.py
+The struts intersect the cell boundary away from its corners. The example
+demonstrates automatic boundary classification, periodic pairing, and
+rigid-body anchoring for this general lattice topology. The resulting
+effective stiffness is checked for in-plane isotropy.
 """
 
+import inspect
 import os
 import sys
-import inspect
 
 import numpy as np
 
@@ -27,21 +19,19 @@ import numpy as np
 here = os.path.dirname(os.path.abspath(
     inspect.getframeinfo(inspect.currentframe()).filename))
 abqhom_path = os.path.abspath(os.path.join(here, os.pardir, os.pardir, "src"))
-gmsh_path = "C:/Users/jonat/Documents/gmsh/lib"        # TODO: set gmsh path
-paraqus_path = "C:/Users/jonat/Documents/Paraqus/src"  # optional (VTK export)
-for path in (abqhom_path, gmsh_path, paraqus_path):
-    if path not in sys.path:
-        sys.path.insert(0, path)
+if abqhom_path not in sys.path:
+    sys.path.insert(0, abqhom_path)
 
 import gmsh
 
-from abqhom.utils import voigt_to_tensor, tensor_to_voigt, export_to_csv_file
-from abqhom.gmshmodel import GmshRVE
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
+from abqhom.constants import PARAQUS_INSTALLED
+from abqhom.gmshmodel import GmshRVE
+from abqhom.utils import export_to_csv_file, tensor_to_voigt, voigt_to_tensor
 
 
 def _clip_segment(p, q, box, tol=1e-9):
-    """Liang-Barsky clip of the segment p->q to box=(xmin,xmax,ymin,ymax)."""
+    """Clip a segment to a box with the Liang--Barsky method."""
     xmin, xmax, ymin, ymax = box
     x0, y0 = p
     x1, y1 = q
@@ -68,10 +58,11 @@ def _clip_segment(p, q, box, tol=1e-9):
 
 
 def create_honeycomb(model_name, a=1.0, offset=(0.31, 0.17)):
-    """Create a regular honeycomb beam lattice in a rectangular periodic
-    unit cell (3a x sqrt(3)a) by clipping the infinite honeycomb network
-    to the box. Clipping is translation-covariant, so opposite boundaries
-    match and the cell is periodic without any node on a box corner.
+    """Create a regular honeycomb beam lattice in a periodic cell.
+
+    The infinite lattice is clipped to a rectangular period of dimensions
+    ``3*a`` by ``sqrt(3)*a``. Opposite boundaries match without requiring a
+    lattice node at a cell corner.
     """
     if not gmsh.is_initialized():
         gmsh.initialize()
@@ -104,11 +95,13 @@ def create_honeycomb(model_name, a=1.0, offset=(0.31, 0.17)):
 
     # Deduplicate points and lines
     def key(pt):
+        """Return a coordinate key suitable for geometric deduplication."""
         return (round(pt[0], 7), round(pt[1], 7))
 
     point_tags = {}
 
     def get_point(pt):
+        """Return the Gmsh tag of a deduplicated geometric point."""
         k = key(pt)
         if k not in point_tags:
             point_tags[k] = g.add_point(k[0], k[1], 0.0)
@@ -131,82 +124,96 @@ def create_honeycomb(model_name, a=1.0, offset=(0.31, 0.17)):
     gmsh.model.set_physical_name(1, grp, "STRUTS")
 
 
-# ---------------------------------------------------------------
-# Working directory (created next to this script)
-workdir = os.path.join(here, "abq")
-if not os.path.isdir(workdir):
-    os.makedirs(workdir)
-os.chdir(workdir)
+def main():
+    """Run the example workflow."""
+    try:
+        # ---------------------------------------------------------------
+        # Working directory (created next to this script)
+        workdir = os.path.join(here, "abq")
+        if not os.path.isdir(workdir):
+            os.makedirs(workdir)
+        os.chdir(workdir)
 
-# Material parameters (of the solid strut material)
-E = 1.0     # Young's modulus
-nu = 0.3    # Poisson's ratio
+        # Material parameters (of the solid strut material)
+        E = 1.0     # Young's modulus
+        nu = 0.3    # Poisson's ratio
 
-# Lattice parameters
-a = 1.0             # cell-wall length
-radius = 0.05       # strut cross-section radius
-element_size = 0.2  # beam element length
+        # Lattice parameters
+        a = 1.0             # cell-wall length
+        radius = 0.05       # strut cross-section radius
+        element_size = 0.2  # beam element length
 
-# ---------------------------------------------------------------
-# Run the homogenization routine (3 load cases in 2d: xx, yy, xy)
-components = [0, 1, 5]  # Voigt indices: xx, yy, xy(engineering)
-strain_magnitude = 1.0e-3
+        # ---------------------------------------------------------------
+        # Run the homogenization routine (three load cases in 2D: xx, yy, xy)
+        components = [0, 1, 5]  # Voigt indices: xx, yy, xy(engineering)
+        strain_magnitude = 0.03
 
-# Build the model once (geometry, mesh, material, section, step). Only the
-# macroscopic strain changes between load cases, so the model is reused and
-# only the periodic boundary conditions are updated in the loop. The anchor
-# is picked automatically -- no corner point required.
-create_honeycomb("RVE", a=a)
-unit_cell = GmshRVE("RVE")
-unit_cell.add_periodic_mesh_constraints()
-unit_cell.generate_mesh(element_size=element_size)
+        # Build the model once (geometry, mesh, material, section, step). Only the
+        # macroscopic strain changes between load cases, so the model is reused and
+        # only the periodic boundary conditions are updated in the loop. The anchor
+        # is picked automatically -- no corner point required.
+        create_honeycomb("RVE", a=a)
+        unit_cell = GmshRVE("RVE")
+        unit_cell.add_periodic_mesh_constraints()
+        unit_cell.generate_mesh(element_size=element_size)
 
-unit_cell = AbaqusRVE(unit_cell)
-material = unit_cell.model.Material(name="LINEAR_ELASTICITY")
-material.Elastic(table=[[E, nu]])
-unit_cell.assign_beam_section("STRUTS", "LINEAR_ELASTICITY", radius)
-unit_cell.model.StaticStep(name="LOAD", previous="Initial")
+        unit_cell = AbaqusRVE(unit_cell)
+        material = unit_cell.model.Material(name="LINEAR_ELASTICITY")
+        material.Elastic(table=[[E, nu]])
+        unit_cell.assign_beam_section("STRUTS", "LINEAR_ELASTICITY", radius)
+        unit_cell.model.StaticStep(name="LOAD", previous="Initial")
 
-C = np.empty((3, 3))
-for col, comp in enumerate(components):
-    print("\n------------------------------")
-    print("Run load case {}.".format(col + 1))
+        C = np.empty((3, 3))
+        for col, comp in enumerate(components):
+            print("\n------------------------------")
+            print("Run load case {}.".format(col + 1))
 
-    def strain_history(time, component=comp):
-        strain = np.zeros(6)
-        strain[component] = strain_magnitude
-        return time*voigt_to_tensor(strain, "STRAIN")
+            def strain_history(time, component=comp):
+                """Return the ramped macroscopic strain at ``time``."""
+                strain = np.zeros(6)
+                strain[component] = strain_magnitude
+                return time*voigt_to_tensor(strain, "STRAIN")
 
-    history = LoadHistory(np.array([0.0, 1.0]), strain_history)
-    unit_cell.apply_periodic_BC("LOAD", history)
+            history = LoadHistory(np.array([0.0, 1.0]), strain_history)
+            unit_cell.apply_periodic_BC("LOAD", history)
 
-    # Run the analysis and compute the average stress
-    unit_cell.run_analysis(field_outputs=["U"])
-    stress = unit_cell.average_stress("LOAD")
-    stress = tensor_to_voigt(stress, "STRESS")
-    print("Stress = " + str(stress.round(8).tolist()))
+            # Run the analysis and compute the average stress
+            unit_cell.run_analysis(field_outputs=["U"])
+            stress = unit_cell.average_stress("LOAD")
+            stress = tensor_to_voigt(stress, "STRESS")
+            print("Stress = " + str(stress.round(8).tolist()))
 
-    C[:, col] = stress/strain_magnitude
+            C[:, col] = stress/strain_magnitude
 
-    # Export the deformed struts to VTK (the strut radius is taken
-    # automatically from the assigned beam section)
-    unit_cell.export_to_vtk(os.path.join(here, "vtk_output",
-                                         "case_{}".format(col + 1)),
-                            field_outputs=["U"], clear=True)
+            # Export the deformed struts to VTK (the strut radius is taken
+            # automatically from the assigned beam section)
+            if PARAQUS_INSTALLED:
+                unit_cell.export_to_vtk(os.path.join(here, "vtk_output",
+                                                     "case_{}".format(col + 1)),
+                                        field_outputs=["U"], clear=True)
 
-gmsh.finalize()
 
-print("\n------------------------------")
-print("Effective constitutive matrix (Voigt):")
-print(C)
-print("\nChecks for the regular honeycomb (should be in-plane isotropic):")
-print("  symmetry   max|C - C^T| = {:.2e}".format(np.max(np.abs(C - C.T))))
-print("  C11 - C22               = {:.2e}".format(C[0, 0] - C[1, 1]))
-print("  (C11 - C12) - 2 C33     = {:.2e}".format(
-    (C[0, 0] - C[0, 1]) - 2.0*C[2, 2]))
+        if not PARAQUS_INSTALLED:
+            print("Paraqus is not installed; VTK export was skipped.")
 
-# Export the effective stiffness
-result_path = os.path.join(here, "results")
-if not os.path.isdir(result_path):
-    os.makedirs(result_path)
-export_to_csv_file(C, os.path.join(result_path, "honeycomb_C.csv"))
+        print("\n------------------------------")
+        print("Effective constitutive matrix (Voigt):")
+        print(C)
+        print("\nChecks for the regular honeycomb (should be in-plane isotropic):")
+        print("  symmetry   max|C - C^T| = {:.2e}".format(np.max(np.abs(C - C.T))))
+        print("  C11 - C22               = {:.2e}".format(C[0, 0] - C[1, 1]))
+        print("  (C11 - C12) - 2 C33     = {:.2e}".format(
+            (C[0, 0] - C[0, 1]) - 2.0*C[2, 2]))
+
+        # Export the effective stiffness
+        result_path = os.path.join(here, "results")
+        if not os.path.isdir(result_path):
+            os.makedirs(result_path)
+        export_to_csv_file(C, os.path.join(result_path, "honeycomb_C.csv"))
+    finally:
+        if gmsh.is_initialized():
+            gmsh.finalize()
+
+
+if __name__ == "__main__":
+    main()

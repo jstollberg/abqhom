@@ -5,16 +5,13 @@ and check the effective stiffness). Meshes are kept tiny for the
 Learning Edition node limit.
 
 """
-import unittest
-
 import numpy as np
-
-import gmsh
 
 from abqhom.utils import voigt_to_tensor, tensor_to_voigt
 from abqhom.gmshmodel import GmshRVE
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
 from abqhom.tests import fixtures
+from abqhom.tests.base import AbaqusTestCase
 
 STRAIN = 1.0e-3
 
@@ -44,21 +41,18 @@ def _stiffness_column(build, assign_sections, comp, element_size,
     else:
         unit_cell.apply_periodic_BC("LOAD", history)
     unit_cell.run_analysis(field_outputs=["U"])
-    stress = tensor_to_voigt(unit_cell.average_stress("LOAD"), "STRESS",
-                             check_symmetry=False)
-
-    gmsh.model.set_current(name)
-    gmsh.model.remove()
+    stress = tensor_to_voigt(unit_cell.average_stress("LOAD"), "STRESS")
     return stress/STRAIN
 
 
 def _elastic(unit_cell, name, E, nu):
+    """Create an isotropic linear-elastic Abaqus material."""
     material = unit_cell.model.Material(name=name)
     material.Elastic(table=[[E, nu]])
     return material
 
 
-class TestBeamLattices(unittest.TestCase):
+class TestBeamLattices(AbaqusTestCase):
 
     def test_simple_cubic_axial_modulus(self):
         """C11 of a simple-cubic beam lattice matches E*pi*r**2/L**2 and
@@ -78,7 +72,7 @@ class TestBeamLattices(unittest.TestCase):
 
     def test_boundary_strut_ownership(self):
         """After redundant periodic copies are removed, the retained edge
-        struts of a 2d square cell give C11 = E*A (not 2*E*A)."""
+        struts of a 2D square cell give C11 = E*A (not 2*E*A)."""
         E, nu, r = 1.0, 0.3, 0.05
         area = np.pi*r*r
 
@@ -91,7 +85,7 @@ class TestBeamLattices(unittest.TestCase):
         self.assertAlmostEqual(column[0], E*area, delta=1.0e-4*E*area)
 
     def test_2d_virtual_power_matches_macroscopic_power(self):
-        """The incremental element-force power supports the shorter 2d
+        """The incremental element-force power supports the shorter 2D
         translation vector and the single out-of-plane beam rotation."""
         E, nu, r = 1.0, 0.3, 0.05
         fixtures.square_lattice("VP2", size=1.0)
@@ -116,17 +110,41 @@ class TestBeamLattices(unittest.TestCase):
         stress = unit.average_stress("LOAD")
         macroscopic_power = float(np.sum(
             stress*strain_history(1.0)[:2, :2]))
-        microscopic_power = unit.average_virtual_power("LOAD")
-
-        gmsh.model.set_current("VP2")
-        gmsh.model.remove()
+        microscopic_power = unit.average_power_increment("LOAD")
 
         self.assertAlmostEqual(microscopic_power, macroscopic_power,
                                delta=1.0e-6*abs(macroscopic_power))
 
-    def test_bcc_cubic_symmetry(self):
-        """The BCC lattice has cubic symmetry (C11 = C22) and the effective
-        stiffness is minor-symmetric (C12 = C21)."""
+    def test_3d_rotational_power_matches_macroscopic_power(self):
+        """Beam moments and finite rotation increments enter 3D power."""
+        E, nu, r = 10.0, 0.3, 0.05
+        fixtures.simple_cubic("VP3", length=1.0)
+        rve = GmshRVE("VP3")
+        rve.add_periodic_mesh_constraints()
+        rve.generate_mesh(element_size=0.5)
+
+        unit = AbaqusRVE(rve)
+        _elastic(unit, "M", E, nu)
+        unit.assign_beam_section("STRUTS", "M", r)
+        unit.model.StaticStep(name="LOAD", previous="Initial")
+
+        def strain_history(time):
+            strain = np.zeros(6)
+            strain[5] = time*STRAIN
+            return voigt_to_tensor(strain, "STRAIN")
+
+        history = LoadHistory(np.array([0.0, 1.0]), strain_history)
+        unit.apply_periodic_BC("LOAD", history)
+        unit.run_analysis()
+
+        stress = unit.average_stress("LOAD")
+        macroscopic_power = float(np.sum(stress*strain_history(1.0)))
+        microscopic_power = unit.average_power_increment("LOAD")
+        self.assertAlmostEqual(microscopic_power, macroscopic_power,
+                               delta=1.0e-6*abs(macroscopic_power))
+
+    def test_bcc_axis_permutation_and_major_symmetry(self):
+        """The BCC response satisfies C11=C22 and major symmetry C12=C21."""
         E, nu, r, L = 210.0, 0.3, 0.05, 1.0
 
         def assign(unit_cell):
@@ -168,9 +186,10 @@ class TestBeamLattices(unittest.TestCase):
                                                        strain_history))
             unit.run_analysis(field_outputs=["U"])
             columns.append(tensor_to_voigt(unit.average_stress("LOAD"),
-                                           "STRESS", check_symmetry=False)
+                                           "STRESS")
                            / STRAIN)
 
+        self.assertEqual(unit.job_name, "JOB_REUSE_2")
         analytical = E*np.pi*r**2/L**2
         self.assertAlmostEqual(columns[0][0], analytical,
                                delta=1.0e-3*analytical)
@@ -178,7 +197,7 @@ class TestBeamLattices(unittest.TestCase):
                                delta=1.0e-6*columns[0][0])
 
 
-class TestShells(unittest.TestCase):
+class TestShells(AbaqusTestCase):
 
     def test_parallel_plates_membrane_modulus(self):
         """Two parallel shell plates form a periodic stack of membranes.
@@ -201,7 +220,7 @@ class TestShells(unittest.TestCase):
         self.assertLess(abs(column[2]), 1.0e-4*C11)
 
 
-class TestContinuum(unittest.TestCase):
+class TestContinuum(AbaqusTestCase):
 
     def test_homogeneous_cube_recovers_material(self):
         """A homogeneous continuum RVE homogenizes to the material itself."""
@@ -248,16 +267,61 @@ class TestContinuum(unittest.TestCase):
         self.assertAlmostEqual(cyz[3], C44, delta=1.0e-3*C44)
 
 
-class TestEmbeddedFibers(unittest.TestCase):
+class TestMixedDimensionalCell(AbaqusTestCase):
+
+    def test_reduction_and_incremental_power_equivalence(self):
+        """A reduced continuum--shell--beam cell satisfies Hill--Mandel."""
+        E, nu = 100.0, 0.3
+        fixtures.mixed_dimensional_cube("MIXED", size=1.0,
+                                        nodes_per_edge=3)
+        rve = GmshRVE("MIXED")
+        rve.add_periodic_mesh_constraints()
+        rve.generate_mesh()
+        rve.build_element_sets()
+
+        expected_elements = (len(rve.element_sets["ALL_ELEMENTS"])
+                             - len(rve.element_sets["SECONDARY_ELEMENTS"]))
+        self.assertGreater(len(rve.element_sets["SECONDARY_ELEMENTS"]), 0)
+
+        unit = AbaqusRVE(
+            rve, custom_types={1: "B31", 3: "S4", 5: "C3D8"})
+        self.assertEqual(len(unit.part.elements), expected_elements)
+        for name in ("CONTINUUM", "SHELLS", "BEAMS"):
+            self.assertGreater(
+                len(unit.part.sets["ELSET_" + name].elements), 0)
+
+        _elastic(unit, "M", E, nu)
+        unit.assign_solid_section("CONTINUUM", "M")
+        unit.assign_shell_section("SHELLS", "M", 0.02)
+        unit.assign_beam_section("BEAMS", "M", 0.04)
+        unit.model.StaticStep(name="LOAD", previous="Initial")
+
+        def strain_history(time):
+            """Apply a small normal macroscopic displacement gradient."""
+            gradient = np.zeros((3, 3))
+            gradient[0, 0] = time*STRAIN
+            return gradient
+
+        history = LoadHistory(np.array([0.0, 1.0]), strain_history)
+        unit.apply_periodic_BC("LOAD", history)
+        unit.run_analysis()
+
+        stress = unit.average_stress("LOAD")
+        macroscopic_power = float(np.sum(stress*strain_history(1.0)))
+        microscopic_power = unit.average_power_increment("LOAD")
+        scale = max(abs(macroscopic_power), abs(microscopic_power), 1.0e-14)
+
+        self.assertTrue(np.all(np.isfinite(stress)))
+        self.assertGreater(stress[0, 0], 0.0)
+        self.assertLess(abs(microscopic_power - macroscopic_power)/scale,
+                        1.0e-6)
+
+
+class TestEmbeddedFibers(AbaqusTestCase):
 
     def test_boundary_fiber_excluded_from_translation_bc(self):
-        """A beam fiber embedded in a continuum matrix whose end nodes lie
-        ON the periodic boundary. The embedded-region constraint eliminates
-        those nodes' translational DOFs, so apply_periodic_BC must drop them
-        from the translational equations (Abaqus cannot form an equation on
-        an eliminated DOF). The analysis must run and return a finite
-        effective stress that is stiffer than the bare matrix along the
-        fibre (z) axis."""
+        """A boundary-ending embedded beam is omitted from translational
+        periodic equations and increases the finite axial stiffness."""
         E_m, nu_m, E_f, nu_f = 50.0, 0.3, 210.0, 0.2
 
         fixtures.matrix_with_boundary_fiber("EMB", size=1.0)
@@ -285,13 +349,7 @@ class TestEmbeddedFibers(unittest.TestCase):
         unit.run_analysis(field_outputs=["U"])
         stress = tensor_to_voigt(unit.average_stress("LOAD"), "STRESS")
 
-        gmsh.model.set_current("EMB")
-        gmsh.model.remove()
-
         self.assertTrue(np.all(np.isfinite(stress)))
-        # z-response present and stiffer than the bare matrix modulus
-        self.assertGreater(stress[2]/STRAIN, E_m)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        constrained_matrix_modulus = (
+            E_m*(1.0 - nu_m)/((1.0 + nu_m)*(1.0 - 2.0*nu_m)))
+        self.assertGreater(stress[2]/STRAIN, constrained_matrix_modulus)

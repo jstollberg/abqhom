@@ -1,19 +1,14 @@
-"""
-Homogenization of a 3d two-phase composite with a spherical inclusion.
+"""Homogenize a two-phase spherical-inclusion cell at finite strain.
 
-The effective stiffness is bracketed by the Voigt (upper) and Reuss
-(lower) bounds, computed here for comparison. Because the automatic
-boundary detection fails for this OpenCASCADE geometry (the sphere cut
-breaks the point-in-entity test), the RVE boundary is provided manually
-through the optional 'boundary' argument of GmshRVE -- an example of how
-to fall back to a user-defined boundary.
-
-Run with:  abaqus cae noGUI=main.py
+Automatic boundary sampling is unsuitable for the trimmed OpenCASCADE
+geometry. The example therefore classifies the cuboidal boundary entities
+geometrically and supplies them explicitly to ``GmshRVE`` before computing a
+monotonic finite-strain response.
 """
 
+import inspect
 import os
 import sys
-import inspect
 
 import numpy as np
 
@@ -24,22 +19,75 @@ import numpy as np
 here = os.path.dirname(os.path.abspath(
     inspect.getframeinfo(inspect.currentframe()).filename))
 abqhom_path = os.path.abspath(os.path.join(here, os.pardir, os.pardir, "src"))
-gmsh_path = "C:/Users/jonat/Documents/gmsh/lib"        # TODO: set gmsh path
-paraqus_path = "C:/Users/jonat/Documents/Paraqus/src"  # optional (VTK export)
-for path in (abqhom_path, gmsh_path, paraqus_path):
-    if path not in sys.path:
-        sys.path.insert(0, path)
+if abqhom_path not in sys.path:
+    sys.path.insert(0, abqhom_path)
 
 import gmsh
 
-from abqhom.utils import (tensor_to_voigt, voigt_to_tensor, reuss, voigt,
-                          export_to_csv_file)
-from abqhom.gmshmodel import GmshRVE, Boundary
+from abaqusConstants import ISOTROPIC, NEO_HOOKE, OFF, ON, VOLUMETRIC_DATA
+
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
+from abqhom.constants import PARAQUS_INSTALLED
+from abqhom.gmshmodel import Boundary, GmshRVE
+from abqhom.utils import export_to_csv_file
+
+
+def _cuboidal_boundary(dx, dy, dz):
+    """Classify the cuboid entities without relying on their Gmsh tags."""
+    x_min, x_max = -0.5*dx, 0.5*dx
+    y_min, y_max = -0.5*dy, 0.5*dy
+    z_min, z_max = -0.5*dz, 0.5*dz
+    group_identifiers = {
+        "POINT_1": (x_min, y_min, z_min),
+        "POINT_2": (x_max, y_min, z_min),
+        "POINT_3": (x_max, y_max, z_min),
+        "POINT_4": (x_min, y_max, z_min),
+        "POINT_5": (x_min, y_min, z_max),
+        "POINT_6": (x_max, y_min, z_max),
+        "POINT_7": (x_max, y_max, z_max),
+        "POINT_8": (x_min, y_max, z_max),
+        "EDGE_1":  (None, y_min, z_min),
+        "EDGE_2":  (x_max, None, z_min),
+        "EDGE_3":  (None, y_max, z_min),
+        "EDGE_4":  (x_min, None, z_min),
+        "EDGE_5":  (None, y_min, z_max),
+        "EDGE_6":  (x_max, None, z_max),
+        "EDGE_7":  (None, y_max, z_max),
+        "EDGE_8":  (x_min, None, z_max),
+        "EDGE_9":  (x_min, y_min, None),
+        "EDGE_10": (x_max, y_min, None),
+        "EDGE_11": (x_max, y_max, None),
+        "EDGE_12": (x_min, y_max, None),
+        "FACE_1":  (None, None, z_min),
+        "FACE_2":  (None, None, z_max),
+        "FACE_3":  (None, y_min, None),
+        "FACE_4":  (None, y_max, None),
+        "FACE_5":  (x_min, None, None),
+        "FACE_6":  (x_max, None, None),
+    }
+
+    tolerance = gmsh.option.get_number("Geometry.Tolerance")
+    boundary = {}
+    for group_name, identifiers in group_identifiers.items():
+        dimension = identifiers.count(None)
+        boundary[group_name] = []
+        for dimtag in gmsh.model.get_entities(dimension):
+            bounding_box = gmsh.model.get_bounding_box(*dimtag)
+            lower = bounding_box[:3]
+            upper = bounding_box[3:]
+            matches = all(
+                value is None or np.allclose(
+                    (lower[index], upper[index]), value,
+                    atol=tolerance, rtol=0.0)
+                for index, value in enumerate(identifiers))
+            if matches:
+                boundary[group_name].append(dimtag)
+    return boundary
 
 
 def create_geometry(model_name, dx=1.0, dy=1.0, dz=1.0,
                     inclusion_fraction=0.2):
+    """Create a cuboidal matrix with a centered spherical inclusion."""
     # Compute the radius of the inclusion
     radius = ((0.75*inclusion_fraction*dx*dy*dz)/np.pi)**(1.0/3.0)
     if 2*radius >= min(dx, dy, dz):
@@ -56,143 +104,143 @@ def create_geometry(model_name, dx=1.0, dy=1.0, dz=1.0,
     x = y = z = 0.0
 
     # Create the model
-    gmsh.model.occ.add_box(x - dx/2.0, y - dy/2.0, z - dz/2.0, dx, dy, dz)
-    gmsh.model.occ.add_sphere(x, y, z, radius)
-    gmsh.model.occ.cut([(3, 1)], [(3, 2)])
-    gmsh.model.occ.add_surface_loop([7])
-    gmsh.model.occ.add_volume([1])
+    box = gmsh.model.occ.add_box(
+        x - dx/2.0, y - dy/2.0, z - dz/2.0, dx, dy, dz)
+    inclusion = gmsh.model.occ.add_sphere(x, y, z, radius)
+    matrix, _ = gmsh.model.occ.cut(
+        [(3, box)], [(3, inclusion)], removeTool=False)
     gmsh.model.occ.synchronize()
 
-    # Create map containing information on mesh periodicity and physical groups
-    # This is needed since automated generation is not possible for this
-    # example
-    boundary = {"POINT_1": [(0, 12)],
-                "POINT_2": [(0, 15)],
-                "POINT_3": [(0, 18)],
-                "POINT_4": [(0, 14)],
-                "POINT_5": [(0, 11)],
-                "POINT_6": [(0, 16)],
-                "POINT_7": [(0, 17)],
-                "POINT_8": [(0, 13)],
-                "EDGE_1":  [(1, 20)],
-                "EDGE_2":  [(1, 27)],
-                "EDGE_3":  [(1, 25)],
-                "EDGE_4":  [(1, 19)],
-                "EDGE_5":  [(1, 22)],
-                "EDGE_6":  [(1, 24)],
-                "EDGE_7":  [(1, 23)],
-                "EDGE_8":  [(1, 17)],
-                "EDGE_9":  [(1, 16)],
-                "EDGE_10": [(1, 21)],
-                "EDGE_11": [(1, 26)],
-                "EDGE_12": [(1, 18)],
-                "FACE_1":  [(2, 12)],
-                "FACE_2":  [(2, 10)],
-                "FACE_3":  [(2, 9)],
-                "FACE_4":  [(2, 11)],
-                "FACE_5":  [(2, 8)],
-                "FACE_6":  [(2, 13)]
-                }
+    # Automatic boundary generation fails for the trimmed spherical surface.
+    # Classify the outer cuboid geometrically instead of using entity tags.
+    boundary = _cuboidal_boundary(dx, dy, dz)
 
     # Add physical groups
-    matrix = gmsh.model.add_physical_group(3, [1])
-    gmsh.model.set_physical_name(3, matrix, "MATRIX")
-    matrix = gmsh.model.add_physical_group(3, [2])
-    gmsh.model.set_physical_name(3, matrix, "INCLUSION")
+    group = gmsh.model.add_physical_group(3, [tag for _, tag in matrix])
+    gmsh.model.set_physical_name(3, group, "MATRIX")
+    group = gmsh.model.add_physical_group(3, [inclusion])
+    gmsh.model.set_physical_name(3, group, "INCLUSION")
 
     return boundary
 
 
-def isotropic_stiffness_tensor(E, nu):
-    C = np.array([[1 - nu, nu, nu, 0.0, 0.0, 0.0],
-                  [nu, 1 - nu, nu, 0.0, 0.0, 0.0],
-                  [nu, nu, 1 - nu, 0.0, 0.0, 0.0],
-                  [0.0, 0.0, 0.0, 0.5*(1 - 2*nu), 0.0, 0.0],
-                  [0.0, 0.0, 0.0, 0.0, 0.5*(1 - 2*nu), 0.0],
-                  [0.0, 0.0, 0.0, 0.0, 0.0, 0.5*(1 - 2*nu)]])
-    C *= E/((1 + nu)*(1 - 2*nu))
-
-    return C
+def neo_hookean_parameters(E, nu):
+    """Return Abaqus Neo-Hookean parameters for ``E`` and ``nu``."""
+    shear_modulus = E/(2.0*(1.0 + nu))
+    bulk_modulus = E/(3.0*(1.0 - 2.0*nu))
+    return 0.5*shear_modulus, 2.0/bulk_modulus
 
 
-# ---------------------------------------------------------------
-# Working directory (created next to this script)
-workdir = os.path.join(here, "abq")
-if not os.path.isdir(workdir):
-    os.makedirs(workdir)
-os.chdir(workdir)
+def load_path(time):
+    """Return the macroscopic displacement gradient at ``time``."""
+    displacement_gradient = np.zeros((3, 3))
+    displacement_gradient[0, 0] = 0.2*time
+    return displacement_gradient
 
-# RVE and material parameters (E - nu)
-dx = dy = dz = 10.0
-inclusion_fraction = 0.3       # volume fraction of the inclusion
-parameters = {"MATRIX":    [3.5, 0.35],    # epoxy matrix
-              "INCLUSION": [230.0, 0.2]}   # carbon inclusion
 
-# ---------------------------------------------------------------
-# Build the model once (geometry with manual boundary, mesh, materials,
-# sections, step). Only the macroscopic strain changes between load cases,
-# so the model is reused and only the periodic BCs are updated in the loop.
-boundary = create_geometry("RVE", dx=dx, dy=dy, dz=dz,
-                           inclusion_fraction=inclusion_fraction)
-unit_cell = GmshRVE("RVE", Boundary("RVE", boundary))
-unit_cell.add_periodic_mesh_constraints()
-unit_cell.generate_mesh(element_size=2.0)
+def get_frame_times(unit_cell, step_name):
+    """Return the output-frame times and close the ODB."""
+    unit_cell.open_odb_file()
+    try:
+        return [frame.frameValue
+                for frame in unit_cell.odb.steps[step_name].frames]
+    finally:
+        unit_cell.close_odb_file()
 
-unit_cell = AbaqusRVE(unit_cell)
-for name, (E, nu) in parameters.items():
-    material = unit_cell.model.Material(name=name)
-    material.Elastic(table=[[E, nu]])
-    unit_cell.assign_solid_section(name, name)
-unit_cell.model.StaticStep(name="LOAD", previous="Initial")
 
-# Run homogenization routine (larger strain for the shear cases)
-C = np.empty((6, 6))
-for i in range(6):
-    print("\n------------------------------")
-    print("Run case {}.".format(i + 1))
+def main():
+    """Run the example workflow."""
+    try:
+        # ---------------------------------------------------------------
+        # Working directory (created next to this script)
+        workdir = os.path.join(here, "abq")
+        if not os.path.isdir(workdir):
+            os.makedirs(workdir)
+        os.chdir(workdir)
 
-    strain_magnitude = 0.1 if i < 3 else 0.2
+        # RVE and material parameters (E, nu)
+        dx = dy = dz = 10.0
+        inclusion_fraction = 0.3       # volume fraction of the inclusion
+        parameters = {"MATRIX":    [3.5, 0.35],    # soft matrix
+                      "INCLUSION": [230.0, 0.2]}   # stiff inclusion
 
-    def strain_history(time, component=i, magnitude=strain_magnitude):
-        strain = np.zeros(6)
-        strain[component] = magnitude
-        strain = voigt_to_tensor(strain, "STRAIN")
-        return time*strain
+        # ---------------------------------------------------------------
+        # Build the geometry with a manually supplied boundary and a periodic mesh.
+        boundary = create_geometry("RVE", dx=dx, dy=dy, dz=dz,
+                                   inclusion_fraction=inclusion_fraction)
+        unit_cell = GmshRVE("RVE", Boundary("RVE", boundary))
+        unit_cell.add_periodic_mesh_constraints()
+        unit_cell.generate_mesh(element_size=2.0)
 
-    history = LoadHistory(np.array([0.0, 1.0]), strain_history)
-    print("Strain = " + str(tensor_to_voigt(history(1.0), "STRAIN")
-                            .round(3).tolist()))
+        unit_cell = AbaqusRVE(unit_cell)
+        for name, (E, nu) in parameters.items():
+            c10, d1 = neo_hookean_parameters(E, nu)
+            material = unit_cell.model.Material(name=name)
+            material.Hyperelastic(
+                materialType=ISOTROPIC, table=((c10, d1),), testData=OFF,
+                type=NEO_HOOKE,
+                volumetricResponse=VOLUMETRIC_DATA)
+            unit_cell.assign_solid_section(name, name)
 
-    unit_cell.apply_periodic_BC("LOAD", history)
-    unit_cell.run_analysis(field_outputs=["U", "S"])
+        step_name = "LOAD"
+        increment = 0.01
+        unit_cell.model.StaticStep(
+            name=step_name, previous="Initial", nlgeom=ON, maxNumInc=200,
+            initialInc=increment, minInc=increment, maxInc=increment)
 
-    stress = tensor_to_voigt(unit_cell.average_stress("LOAD"), "STRESS")
-    C[:, i] = stress/strain_magnitude
+        history = LoadHistory(np.array([0.0, 1.0]), load_path)
+        unit_cell.apply_periodic_BC(step_name, history)
+        unit_cell.run_analysis(field_outputs=["U", "S"])
 
-    unit_cell.export_to_vtk(os.path.join(here, "vtk_output",
-                                         "case_{}".format(i + 1)),
-                            field_outputs=["U", ("S", "MISES")],
-                            element_sets=["MATRIX", "INCLUSION"], clear=True)
+        # Evaluate the effective first Piola--Kirchhoff stress frame by frame.
+        frame_times = get_frame_times(unit_cell, step_name)
 
-gmsh.finalize()
+        curve = []
+        for index, frame_time in enumerate(frame_times):
+            F11 = 1.0 + load_path(frame_time)[0, 0]
+            stress = unit_cell.average_stress(step_name, frame=index)
+            curve.append([F11, stress[0, 0]])
+        curve = np.asarray(curve)
 
-# Voigt / Reuss bounds of the two-phase material
-C_matrix = isotropic_stiffness_tensor(*parameters["MATRIX"])
-C_inclusion = isotropic_stiffness_tensor(*parameters["INCLUSION"])
-C_reuss = reuss(inclusion_fraction, C_inclusion, C_matrix)
-C_voigt = voigt(inclusion_fraction, C_inclusion, C_matrix)
+        print("\n------------------------------")
+        print("Finite-strain response ({} frames):".format(len(curve)))
+        print("  final F11 = {:.4f}".format(curve[-1, 0]))
+        print("  final P11 = {:.6e}".format(curve[-1, 1]))
 
-eig = lambda M: np.sort(np.linalg.eigvals(M)).real.round(3).tolist()
-print("\n------------------------------")
-print("Effective constitutive matrix (Voigt):")
-print(np.array2string(C, precision=4, suppress_small=True))
-print("\nEigenvalues (numerical must lie between the bounds):")
-print("  Voigt upper bound : {}".format(eig(C_voigt)))
-print("  numerical         : {}".format(eig(C)))
-print("  Reuss lower bound : {}".format(eig(C_reuss)))
+        result_dir = os.path.join(here, "results")
+        if not os.path.isdir(result_dir):
+            os.makedirs(result_dir)
+        export_to_csv_file(curve, os.path.join(result_dir, "response.csv"))
 
-# Store the effective stiffness
-result_dir = os.path.join(here, "results")
-if not os.path.isdir(result_dir):
-    os.makedirs(result_dir)
-export_to_csv_file(C, os.path.join(result_dir, "stiffness.csv"))
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots(figsize=(6.0, 5.0))
+        ax.plot(curve[:, 0], curve[:, 1], "-", color="#1f6feb", lw=1.4)
+        ax.axhline(0.0, color="0.6", lw=0.6)
+        ax.axvline(1.0, color="0.6", lw=0.6)
+        ax.set_xlabel(r"Macroscopic deformation gradient  $\bar{F}_{11}$")
+        ax.set_ylabel(r"Effective first Piola-Kirchhoff stress  $\bar{P}_{11}$")
+        ax.set_title("Finite-strain response of a spherical-inclusion cell")
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+        fig.savefig(os.path.join(result_dir, "response.png"), dpi=150)
+        plt.close(fig)
+
+        if PARAQUS_INSTALLED:
+            unit_cell.export_to_vtk(
+                os.path.join(here, "vtk_output"),
+                field_outputs=["U", ("S", "MISES")],
+                element_sets=["MATRIX", "INCLUSION"], clear=True)
+        else:
+            print("Paraqus is not installed; VTK export was skipped.")
+
+        print("*** Finished ***")
+    finally:
+        if gmsh.is_initialized():
+            gmsh.finalize()
+
+
+if __name__ == "__main__":
+    main()

@@ -20,26 +20,27 @@ from abqhom.constants import (POINT_GROUPS, EDGE_GROUPS, FACE_GROUPS,
                               PERIODIC_PAIRS, ABAQUS_ELEMENT_TYPES_2D,
                               ABAQUS_ELEMENT_TYPES_3D, BOUNDARY_CONNECTIVITY,
                               ABAQUS_CONNECTIVITY_ORDER,
-                              SLAVE_GROUPS_OFFSET_AXES, ELEMENTS_NOT_SUPPORTED)
+                              SECONDARY_GROUPS_OFFSET_AXES,
+                              ELEMENTS_NOT_SUPPORTED,
+                              ELEMENTS_WARPING_DOFS)
 
 
 class GmshRVE(object):
     """
-    An RVE representation to prepare a Gmsh model for the Abaqus export.
+    Gmsh representation of a periodic structural RVE.
 
-    The RVE must be rectangular or box-shaped. The boundary and its periodic
-    connections are detected automatically from the geometry.
+    The reference cell must be rectangular in 2D or cuboidal in 3D and aligned
+    with the global coordinate axes. Boundary entities and their periodic
+    primary--secondary relations are detected automatically unless a
+    :class:`Boundary` is supplied. Physical groups define the continuum,
+    truss, beam, and shell constituents exported to Abaqus.
 
     Parameters
     ----------
     model_name : str
         The name of the underlying Gmsh model.
     boundary : Boundary, optional
-        A map defining the entities being part of the RVE boundary
-        groups. The key is the group name and the value is a list of
-        Gmsh dimtags of the entities being part of the group. If
-        boundary_map is None, abqhom will generate a mapping
-        automatically. The default is None.
+        Boundary-entity map. If None, it is generated automatically.
 
     Attributes
     ----------
@@ -50,7 +51,8 @@ class GmshRVE(object):
     periodic_boundary : bool
         A flag to mark whether the model is periodic.
     periodic_mesh : bool
-        A flag to mark whether the model has periodic mesh constraints.
+        A flag indicating whether periodic mesh constraints were prescribed
+        or opposite boundary node sets were detected as matching.
     node_sets : dict[str, ndarray]
         A map from set names to set nodes for user-defined physical
         groups and further default node sets.
@@ -60,34 +62,7 @@ class GmshRVE(object):
     model_dimension : int
         The geometric dimensionality of the model.
     mesh_dimension : int
-        The dimensionality of the mesh of the model
-
-    Example
-    -------
-    >>> import gmsh
-    >>> from abqhom.gmshmodel import GmshRVE
-    >>>
-    >>> # Build a square-shaped strut-based lattice unit cell in Gmsh
-    >>> gmsh.initialize()
-    >>> gmsh.model.add("SQUARE_LATTICE")
-    >>> p1 = gmsh.model.geo.add_point(0.0, 0.0, 0.0)
-    >>> p2 = gmsh.model.geo.add_point(1.0, 0.0, 0.0)
-    >>> p3 = gmsh.model.geo.add_point(1.0, 1.0, 0.0)
-    >>> p4 = gmsh.model.geo.add_point(0.0, 1.0, 0.0)
-    >>> l1 = gmsh.model.geo.add_line(p1, p2)
-    >>> l2 = gmsh.model.geo.add_line(p2, p3)
-    >>> l3 = gmsh.model.geo.add_line(p3, p4)
-    >>> l4 = gmsh.model.geo.add_line(p4, p1)
-    >>> gmsh.model.geo.synchronize()
-    >>> all_struts_group = gmsh.model.add_physical_group(1, [l1, l2,
-                                                             l3, l4])
-    >>> gmsh.model.set_physical_name(1, all_struts_group, "ALL_STRUTS")
-    >>>
-    >>> # Create a GmshRVE object and play around with it
-    >>> unit_cell = GmshRVE("SQUARE_LATTICE")
-    >>> unit_cell.add_periodic_mesh_constraints()
-    >>> unit_cell.generate_mesh()
-    >>> input_file_path = unit_cell.write_abaqus_input()
+        The dimensionality of the mesh of the model.
 
     """
 
@@ -114,7 +89,7 @@ class GmshRVE(object):
             raise RuntimeError(
                 "The model must contain entities of at least dimension 1.")
 
-        # Check if the model is at least a 2d model
+        # Check if the model is at least a 2D model
         if self.model_dimension < 2:
             raise RuntimeError("The model must be of at least dimension 2.")
 
@@ -124,7 +99,7 @@ class GmshRVE(object):
             raise RuntimeError(
                 "No boundary entities were detected on the RVE. If the "
                 "automatic detection fails, provide the boundary manually "
-                " through the optional 'boundary' argument.")
+                "through the optional 'boundary' argument.")
 
         # Add physical boundary groups to the model
         self._add_boundary_groups()
@@ -174,12 +149,13 @@ class GmshRVE(object):
     @property
     def periodic_mesh(self):
         """
-        A flag to mark whether the model has periodic mesh constraints.
+        Whether the mesh is configured or detected as periodically matching.
 
         Returns
         -------
         bool
-            True if the mesh has periodic constraints, False otherwise.
+            True if periodic mesh constraints were prescribed or opposite
+            boundary nodes were paired one to one, False otherwise.
 
         """
 
@@ -240,7 +216,7 @@ class GmshRVE(object):
         delta_x, delta_y, delta_z = bounding_box[1] - bounding_box[0]
         dim = 3 - np.isclose([delta_x, delta_y, delta_z], 0.0, atol=tol).sum()
 
-        return dim
+        return int(dim)
 
     @property
     def mesh_dimension(self):
@@ -250,7 +226,7 @@ class GmshRVE(object):
         Returns
         -------
         dim : int
-            The mesh dimension. If not mesh was created -1 is returned.
+            The mesh dimension. If no mesh exists, -1 is returned.
 
         """
 
@@ -263,7 +239,7 @@ class GmshRVE(object):
         return dim
 
     def __str__(self):
-        descr = "GmshRVE '{self.model_name}'\n"
+        descr = "GmshRVE '{}'\n".format(self.model_name)
         descr += "\tmodel dimension : {}\n".format(self.model_dimension)
         descr += "\tmesh dimension  : {}\n".format(self.mesh_dimension)
         descr += "\tnode sets       : {}\n".format(len(self.node_sets))
@@ -279,7 +255,7 @@ class GmshRVE(object):
 
         Returns
         -------
-        None.
+        None
 
         """
 
@@ -291,7 +267,7 @@ class GmshRVE(object):
 
         Returns
         -------
-        None.
+        None
 
         """
 
@@ -300,7 +276,7 @@ class GmshRVE(object):
 
     def get_bounding_box_from_points(self):
         """
-        Compute the bounding box of the geometric CAD model from points.
+        Return the RVE bounding box from CAD points or mesh nodes.
 
         Returns
         -------
@@ -325,16 +301,16 @@ class GmshRVE(object):
 
     def get_nodes(self):
         """
-        Get all relevant node from the mesh information.
+        Return all mesh nodes belonging to constituent physical groups.
 
-        Relevant nodes are the nodes located on physical groups.
+        Automatically generated boundary physical groups are excluded.
 
         Returns
         -------
         node_tags : ndarray
-            The relevant node tags.
+            Node tags.
         node_coords : ndarray
-            The relevant node coordinates.
+            Node coordinates.
 
         """
 
@@ -358,7 +334,11 @@ class GmshRVE(object):
                 node_tags.append(entity_node_tags)
                 node_coords.append(entity_node_coords)
 
-        # # Combine nodes and coordinates from different sources
+        # Combine nodes and coordinates from different sources
+        if len(node_tags) == 0:
+            raise RuntimeError(
+                "No constituent physical groups containing mesh nodes were "
+                "found.")
         node_tags = np.concatenate(node_tags)
         node_coords = np.concatenate(node_coords)
         node_coords = np.array(node_coords).reshape(-1, 3)
@@ -374,9 +354,9 @@ class GmshRVE(object):
 
     def get_elements(self):
         """
-        Get all relevant elements from the mesh information.
+        Return all mesh elements belonging to constituent physical groups.
 
-        Relevant elements are the elements located on physical groups.
+        Automatically generated boundary physical groups are excluded.
 
         Returns
         -------
@@ -388,6 +368,8 @@ class GmshRVE(object):
             types and values are the connectivity lists.
 
         """
+
+        self.activate()
 
         element_tags = {}
         element_connectivity = {}
@@ -412,6 +394,11 @@ class GmshRVE(object):
                     element_tags[el_type].append(entity_el_tags[i])
                     element_connectivity[el_type].append(entity_conn[i])
 
+        if len(element_tags) == 0:
+            raise RuntimeError(
+                "No constituent physical groups containing mesh elements "
+                "were found.")
+
         # Rearrange connectivity list
         for el_type in element_tags.keys():
             element_tags[el_type] = np.concatenate(element_tags[el_type])
@@ -434,14 +421,7 @@ class GmshRVE(object):
         return element_tags, element_connectivity
 
     def _add_boundary_groups(self):
-        """
-        Add physical groups for boundary entities to the Gmsh model.
-
-        Returns
-        -------
-        None.
-
-        """
+        """Add physical groups for boundary entities to the Gmsh model."""
 
         self.activate()
 
@@ -449,7 +429,7 @@ class GmshRVE(object):
         boundary_groups = POINT_GROUPS + EDGE_GROUPS + FACE_GROUPS
         for dimtag in gmsh.model.get_physical_groups():
             name = gmsh.model.get_physical_name(*dimtag)
-            if name.upper() in [POINT_GROUPS + EDGE_GROUPS + FACE_GROUPS]:
+            if name.upper() in boundary_groups:
                 raise RuntimeError(
                     "Physical group {} conflicts with the automatically "
                     "generated physical boundary groups. Do not use any of "
@@ -469,14 +449,14 @@ class GmshRVE(object):
 
         Parameters
         ----------
-        element_order : int
+        element_order : int, optional
             The order of the generated elements. Possible values are 1
             and 2. The default is 1.
         algorithm_2d : int, optional
-            The 2d meshing algorithm to use. The available algorithms
+            The 2D meshing algorithm to use. The available algorithms
             are listed in the Gmsh documentation. The default is 6.
         algorithm_3d : int, optional
-            The 3d meshing algorithm to use. The available algorithms
+            The 3D meshing algorithm to use. The available algorithms
             are listed in the Gmsh documentation. The default is 1.
         element_size : float, optional
             The characteristic element length. If this is None Gmsh will
@@ -484,9 +464,11 @@ class GmshRVE(object):
 
         Returns
         -------
-        None.
+        None
 
         """
+
+        self.activate()
 
         # Set element order
         if element_order not in {1, 2}:
@@ -510,32 +492,19 @@ class GmshRVE(object):
 
     def add_periodic_mesh_constraints(self):
         """
-        Add periodic mesh constraints to the Gmsh model.
+        Impose matching meshes on corresponding periodic boundary entities.
+
+        Secondary entities are mapped to their primary partners by the
+        appropriate primitive-cell translation.
 
         Returns
         -------
-        None.
+        None
 
         """
 
         def translation(axes, distance):
-            """
-            Define the affine matrix for translations along axes.
-
-            Parameters
-            ----------
-            axes : Iterable[int]
-                The translation axes, i.e. 0 for the x-axis, 1 for the
-                y-axis and 2 for the z-axis.
-            edge_lengths : Sequence[float]
-                The distance to go per axis.
-
-            Returns
-            -------
-            transformation : ndarray
-                The affine transformation matrix.
-
-            """
+            """Return the affine matrix for translation along given axes."""
 
             transformation = np.array([1.0, 0.0, 0.0, 0.0,
                                        0.0, 1.0, 0.0, 0.0,
@@ -554,67 +523,55 @@ class GmshRVE(object):
             self.get_bounding_box_from_points()).reshape(2, -1)
         bounding_box = bounding_box[1] - bounding_box[0]
 
-        # Define periodic mesh contraints
-        for slave, master in PERIODIC_PAIRS.items():
-            master_entities = self.boundary[master]
-            slave_entities = self.boundary[slave]
-            if len(master_entities) == 0 or len(slave_entities) == 0:
+        # Define periodic mesh constraints
+        for secondary, primary in PERIODIC_PAIRS.items():
+            primary_entities = self.boundary[primary]
+            secondary_entities = self.boundary[secondary]
+            if len(primary_entities) == 0 or len(secondary_entities) == 0:
                 continue
 
             for dim in (1, 2):
-                tags_master = [j for i, j in master_entities if i == dim]
-                tags_slave = [j for i, j in slave_entities if i == dim]
+                primary_tags = [j for i, j in primary_entities if i == dim]
+                secondary_tags = [j for i, j in secondary_entities
+                                  if i == dim]
                 gmsh.model.mesh.set_periodic(
-                    dim, tags_slave, tags_master,
-                    translation(SLAVE_GROUPS_OFFSET_AXES[slave], bounding_box))
+                    dim, secondary_tags, primary_tags,
+                    translation(SECONDARY_GROUPS_OFFSET_AXES[secondary],
+                                bounding_box))
 
         self._periodic_mesh = True
 
     def build_node_sets(self):
         """
-        Build node sets based on the physical groups from Gmsh.
+        Build constituent and disjoint boundary node sets.
 
-        The node sets are needed for the correct application of boundary
-        conditions.
+        Nodes on intersections of boundary entities are assigned to the
+        lowest-dimensional group. Periodic primary and secondary sets are
+        ordered so that nodes with the same list index form a pair.
 
         Returns
         -------
-        None.
+        None
 
         """
 
-        def get_periodic_nodes(slave):
-            """
-            Get periodically connected nodes based on a slave group.
+        def get_periodic_nodes(secondary):
+            """Return ordered node pairs for a secondary boundary group."""
 
-            Parameters
-            ----------
-            slave : str
-                The name of the slave group.
-
-            Returns
-            -------
-            master_tags : ndarray
-                The tags of the master nodes in the correct order.
-            slave_tags : ndarray
-                The tags of the slave nodes in the correct order.
-
-            """
-
-            # Get the corresponding master group
-            master = PERIODIC_PAIRS.get(slave)
-            if master is None:
-                master = slave
+            # Get the corresponding primary group
+            primary = PERIODIC_PAIRS.get(secondary)
+            if primary is None:
+                primary = secondary
 
             # Compute the sorting order for finding matching nodes based
             # on the coordinates
             group_to_coords = self.boundary.get_group_coordinate_identifiers()
-            order = np.where(np.isnan(group_to_coords[master]))[0][::-1]
+            order = np.where(np.isnan(group_to_coords[primary]))[0][::-1]
             order = order if len(order) > 0 else [0]
 
             # Find all coordinates on the respective groups
             node_tags = {}
-            for group in [master, slave]:
+            for group in [primary, secondary]:
                 nodes = [gmsh.model.mesh.get_nodes(dim, tag, True, False)
                          for (dim, tag) in self.boundary[group]]
                 group_node_tags = [tag for n in nodes for tag in n[0]]
@@ -631,26 +588,12 @@ class GmshRVE(object):
                 _, indices = np.unique(group_node_tags, return_index=True)
                 node_tags[group] = group_node_tags[np.sort(indices)]
 
-            master_tags = node_tags[master]
-            slave_tags = node_tags[slave]
-            return master_tags, slave_tags
+            primary_tags = node_tags[primary]
+            secondary_tags = node_tags[secondary]
+            return primary_tags, secondary_tags
 
         def remove_child_nodes(parent, children):
-            """
-            Remove child nodes from a node set.
-
-            Parameters
-            ----------
-            parent : str
-                The name of the parent node set of which the child nodes
-                shall be removed.
-            children : Iterable[str]
-                The names of the child node set.
-
-            Returns
-            -------
-            None.
-            """
+            """Remove nodes of all child boundary groups from a parent set."""
 
             for child in children:
                 self.node_sets[parent] = np.setdiff1d(self.node_sets[parent],
@@ -666,10 +609,10 @@ class GmshRVE(object):
             raise RuntimeError("There are no nodes in the model.")
 
         # Fill up the node set for each boundary group
-        for slave, master in PERIODIC_PAIRS.items():
-            paired_nodes = get_periodic_nodes(slave)
-            self.node_sets[master] = paired_nodes[0]
-            self.node_sets[slave] = paired_nodes[1]
+        for secondary, primary in PERIODIC_PAIRS.items():
+            paired_nodes = get_periodic_nodes(secondary)
+            self.node_sets[primary] = paired_nodes[0]
+            self.node_sets[secondary] = paired_nodes[1]
 
         # Remove nodes being part of the boundary of a group
         for group in self.boundary.keys():
@@ -684,7 +627,7 @@ class GmshRVE(object):
         for set_name, set_items in special_sets:
             self._new_set_from_union(self.node_sets, set_name, *set_items)
 
-        # Add sets for inner nodes and all nodes nodes
+        # Add sets for inner nodes and all nodes
         all_nodes, _ = self.get_nodes()
         self.node_sets["ALL_NODES"] = np.unique(all_nodes).astype(np.uint64)
         self.node_sets["INNER_NODES"] = np.setdiff1d(
@@ -701,19 +644,7 @@ class GmshRVE(object):
                 self.node_sets[name] = np.array(nodes, dtype=np.uint64)
 
     def _get_boundary_signatures(self):
-        """
-        Get the coordinate signatures of the RVE boundary groups.
-
-        Returns
-        -------
-        group_signature : dict[str, tuple[int]]
-            The coordinate signature of each boundary group.
-        signature_to_group : dict[tuple[int], str]
-            The boundary group corresponding to each coordinate signature.
-        active_axes : ndarray
-            Flags marking the spatial axes of the RVE.
-
-        """
+        """Return coordinate signatures of the RVE boundary groups."""
 
         bounding_box = np.array(
             self.get_bounding_box_from_points()).reshape(2, -1)
@@ -745,26 +676,7 @@ class GmshRVE(object):
 
     def _get_boundary_element_sets(self, element_tags,
                                    element_connectivity, tol=None):
-        """
-        Classify elements located entirely on an RVE boundary group.
-
-        Parameters
-        ----------
-        element_tags : dict[int, ndarray]
-            The element tags per Gmsh element type.
-        element_connectivity : dict[int, ndarray]
-            The element connectivity per Gmsh element type.
-        tol : float, optional
-            Absolute tolerance for locating elements on the RVE boundary.
-            If this is None, use a small fraction of the box size. The
-            default is None.
-
-        Returns
-        -------
-        element_sets : dict[str, ndarray]
-            The elements located on each RVE boundary group.
-
-        """
+        """Classify elements whose complete nodal support is on a boundary."""
 
         bounding_box = np.array(
             self.get_bounding_box_from_points()).reshape(2, -1)
@@ -809,15 +721,16 @@ class GmshRVE(object):
 
     def build_element_sets(self):
         """
-        Build element sets based on the physical groups from Gmsh.
+        Build constituent, boundary, and reduction element sets.
 
-        The element sets are needed to assign e.g. material to the
-        elements. Elements located entirely on an RVE boundary group are
-        additionally collected in the corresponding boundary element set.
+        In addition to the physical groups, the method creates
+        ``BOUNDARY_ELEMENTS`` and ``INNER_ELEMENTS``. Elements whose complete
+        nodal support belongs to a secondary periodic entity are collected in
+        ``SECONDARY_ELEMENTS`` for the ownership-consistent reduction.
 
         Returns
         -------
-        None.
+        None
 
         """
 
@@ -872,13 +785,13 @@ class GmshRVE(object):
     @classmethod
     def read_from_mesh(cls, model_name):
         """
-        Build a GmshRVE from a model that already contains a mesh.
+        Build an RVE from an existing two- or three-dimensional mesh.
 
-        This is useful for meshes that cannot be produced from CAD
-        geometry, e.g. an implicit TPMS surface (such as a gyroid) meshed
-        with an external routine. The mesh is checked for periodicity
-        automatically.
-
+        The nodal bounding box must be rectangular in 2D or cuboidal in 3D
+        and aligned with the global axes. Boundary nodes are classified by
+        their coordinates, and opposite groups are periodic when their free
+        coordinates and multiplicities match one to one. Named physical
+        groups must identify the constituent elements of the RVE.
 
         Parameters
         ----------
@@ -899,35 +812,93 @@ class GmshRVE(object):
         empty = {g: [] for g in (POINT_GROUPS + EDGE_GROUPS + FACE_GROUPS)}
         cell._boundary = Boundary(model_name, initial_data=empty,
                                   check_periodic=False)
-        if cell.model_dimension != 3:
+        if cell.model_dimension not in {2, 3}:
             raise NotImplementedError(
-                "read_from_mesh currently supports three-dimensional "
-                "box-shaped meshes only.")
+                "read_from_mesh supports rectangular two-dimensional and "
+                "box-shaped three-dimensional meshes only.")
         cell._build_node_sets_from_mesh()
         cell.build_element_sets()
         return cell
 
+    @staticmethod
+    def _boundary_node_members(coords, bounds_min, bounds_max, tol,
+                               signature_to_group, active_axes):
+        """Classify nodal indices by their bounding-box signature."""
+
+        flags = np.zeros((len(coords), 3), dtype=int)
+        for axis in np.where(active_axes)[0]:
+            flags[np.abs(coords[:, axis] - bounds_min[axis]) < tol,
+                  axis] = -1
+            flags[np.abs(coords[:, axis] - bounds_max[axis]) < tol,
+                  axis] = 1
+
+        members = {}
+        for index, signature in enumerate(map(tuple, flags)):
+            if signature == (0, 0, 0):
+                continue
+            group = signature_to_group.get(signature)
+            if group is not None:
+                members.setdefault(group, []).append(index)
+        return members
+
+    def _order_boundary_node_sets(self, tags, coords, members,
+                                  group_signature, active_axes):
+        """Order paired boundary nodes and return their free coordinates."""
+
+        group_coordinates = {}
+        for group, indices in members.items():
+            indices = np.array(indices, dtype=int)
+            free_axes = [axis for axis in range(3)
+                         if (active_axes[axis]
+                             and group_signature[group][axis] == 0)]
+            if len(free_axes) > 0:
+                keys = [np.round(coords[indices, axis], 8)
+                        for axis in free_axes]
+                indices = indices[np.lexsort(keys)]
+
+            self.node_sets[group] = tags[indices]
+            group_coordinates[group] = tuple(
+                tuple(round(float(coords[index, axis]), 8)
+                      for axis in free_axes)
+                for index in indices)
+        return group_coordinates
+
+    @staticmethod
+    def _periodic_node_sets_match(group_coordinates, group_signature):
+        """Return whether all relevant periodic node sets match one to one."""
+
+        for secondary, primary in PERIODIC_PAIRS.items():
+            if secondary not in group_signature:
+                continue
+            if (group_coordinates.get(primary, ())
+                    != group_coordinates.get(secondary, ())):
+                return False
+        return True
+
+    def _add_prebuilt_mesh_node_sets(self, tags):
+        """Add aggregate and constituent node sets for a pre-built mesh."""
+
+        special = [("POINT_NODES", POINT_GROUPS),
+                   ("EDGE_NODES", EDGE_GROUPS),
+                   ("FACE_NODES", FACE_GROUPS),
+                   ("BOUNDARY_NODES",
+                    POINT_GROUPS + EDGE_GROUPS + FACE_GROUPS)]
+        for set_name, groups in special:
+            self._new_set_from_union(self.node_sets, set_name, *groups)
+        self.node_sets["ALL_NODES"] = np.unique(tags).astype(np.uint64)
+        self.node_sets["INNER_NODES"] = np.setdiff1d(
+            self.node_sets["ALL_NODES"], self.node_sets["BOUNDARY_NODES"])
+
+        boundary_groups = POINT_GROUPS + EDGE_GROUPS + FACE_GROUPS
+        for dim, tag in gmsh.model.get_physical_groups():
+            name = gmsh.model.get_physical_name(dim, tag)
+            if len(name) == 0 or name in boundary_groups:
+                continue
+            nodes, _ = gmsh.model.mesh.get_nodes_for_physical_group(dim, tag)
+            self.node_sets[name] = np.array(nodes, dtype=np.uint64)
+
     def _build_node_sets_from_mesh(self, tol=None):
-        """
-        Build the boundary node sets by classifying the mesh nodes onto
-        the bounding-box faces, edges and corners by coordinate, and set
-        ``periodic_mesh`` according to whether the mesh is periodic.
-
-        This is used for pre-built meshes (see read_from_mesh) for which
-        the CAD-based boundary detection is not available.
-
-        Parameters
-        ----------
-        tol : float, optional
-            Absolute tolerance for locating nodes on the bounding box.
-            If this is None, use a small fraction of the box size. The
-            default is None.
-
-        Returns
-        -------
-        None.
-
-        """
+        """Classify and pair boundary nodes of a pre-built mesh."""
 
         self.activate()
         tags, coords, _ = gmsh.model.mesh.get_nodes()
@@ -939,94 +910,19 @@ class GmshRVE(object):
         if tol is None:
             tol = 1e-6*float(np.max(hi - lo))
 
-        # Flag nodes on the boundary of the RVE
-        flags = np.zeros((len(coords), 3), dtype=int)
-        for axis in range(3):
-            flags[np.abs(coords[:, axis] - lo[axis]) < tol, axis] = -1
-            flags[np.abs(coords[:, axis] - hi[axis]) < tol, axis] = 1
-
-        # Analogously, flag the boundary group identifiers
         (group_signature,
          signature_to_group,
-         _) = self._get_boundary_signatures()
-
-        # Assign every boundary node to its group
-        members = {}
-        for i in range(len(coords)):
-            signature = (flags[i, 0], flags[i, 1], flags[i, 2])
-            if signature == (0, 0, 0):
-                continue
-            group = signature_to_group.get(signature)
-            if group is not None:
-                members.setdefault(group, []).append(i)
-
-        # Order each group by its free axes (so periodic partners share the
-        # same index) and record its set of free coordinates
-        group_free = {}
-        for group, inds in members.items():
-            inds = np.array(inds, dtype=int)
-            free_axes = [axis for axis in range(3)
-                         if group_signature[group][axis] == 0]
-            if len(free_axes) > 0:
-                keys = [np.round(coords[inds, a], 8) for a in free_axes]
-                inds = inds[np.lexsort(keys)]
-            self.node_sets[group] = tags[inds]
-            free = set()
-            for i in inds:
-                free.add(tuple([round(float(coords[i, axis]), 8)
-                                for axis in free_axes]))
-            group_free[group] = free
-
-        # The mesh is periodic when every partner pair shares the same set
-        # of free coordinates
-        periodic = True
-        for slave, master in PERIODIC_PAIRS.items():
-            if group_free.get(master, set()) != group_free.get(slave, set()):
-                periodic = False
-                break
-        self._periodic_mesh = periodic
-
-        # Collections and inner/all-node sets.
-        special = [("POINT_NODES", POINT_GROUPS),
-                   ("EDGE_NODES", EDGE_GROUPS),
-                   ("FACE_NODES", FACE_GROUPS),
-                   ("BOUNDARY_NODES", POINT_GROUPS + EDGE_GROUPS + FACE_GROUPS)]
-        for set_name, groups in special:
-            self._new_set_from_union(self.node_sets, set_name, *groups)
-        self.node_sets["ALL_NODES"] = np.unique(tags).astype(np.uint64)
-        self.node_sets["INNER_NODES"] = np.setdiff1d(
-            self.node_sets["ALL_NODES"], self.node_sets["BOUNDARY_NODES"])
-
-        # Node sets for the material physical groups
-        for dim, tag in gmsh.model.get_physical_groups():
-            name = gmsh.model.get_physical_name(dim, tag)
-            if len(name) == 0 or name in (POINT_GROUPS + EDGE_GROUPS
-                                          + FACE_GROUPS):
-                continue
-            nodes, _ = gmsh.model.mesh.get_nodes_for_physical_group(dim, tag)
-            self.node_sets[name] = np.array(nodes, dtype=np.uint64)
+         active_axes) = self._get_boundary_signatures()
+        members = self._boundary_node_members(
+            coords, lo, hi, tol, signature_to_group, active_axes)
+        group_coordinates = self._order_boundary_node_sets(
+            tags, coords, members, group_signature, active_axes)
+        self._periodic_mesh = self._periodic_node_sets_match(
+            group_coordinates, group_signature)
+        self._add_prebuilt_mesh_node_sets(tags)
 
     def _new_set_from_union(self, set_dictionary, set_name, *set_items):
-        """
-        Add node or element sets as the union of existing sets.
-
-        **The order of the items in the new set will be arbitrary.**
-
-        Parameters
-        ----------
-        set_dictionary : dict[str, ndarray]
-            The dictionary to add the new set to and containing the sets
-            to consider when creating the new set.
-        set_name : str
-            The name of the new set.
-        set_items : str
-            The names of the sets that will be united to the new set.
-
-        Returns
-        -------
-        None.
-
-        """
+        """Add the unordered union of existing node or element sets."""
 
         union = set()
         for i in set_items:
@@ -1034,68 +930,13 @@ class GmshRVE(object):
 
         set_dictionary[set_name] = np.array(list(union), dtype=np.uint64)
 
-    def _new_set_from_intersection(self, set_dictionary, set_name, *set_items):
-        """
-        Add node or element sets as the intersection of existing sets.
-
-        **The order of the items in the new set will be arbitrary.**
-
-        Parameters
-        ----------
-        set_dictionary : dict[str, ndarray]
-            The dictionary to add the new set to and containing the sets
-            to consider when creating the new set.
-        set_name : str
-            The name of the new set.
-        set_items : str
-            The names of the sets that will be intersected to the new
-            set.
-
-        Returns
-        -------
-        None.
-
-        """
-
-        intersection = set()
-        for i in set_items:
-            intersection.update(set_dictionary.get(i), [])
-
-        for i in set_items:
-            item = set(set_dictionary.get(i), [])
-            intersection = intersection & item
-
-        set_dictionary[set_name] = np.array(list(intersection),
-                                            dtype=np.uint64)
-
     def _new_set_from_cut(self, set_dictionary, set_name, item, tool):
-        """
-        Add node or element sets as the cut of existing sets.
-
-        **The order of the items in the new set will be arbitrary.**
-
-        Parameters
-        ----------
-        set_dictionary : dict[str, ndarray]
-            The dictionary to add the new set to and containing the sets
-            to consider when creating the new set.
-        set_name : str
-            The name of the new set.
-        item : str
-            The name of the set that will act as the item.
-        tool : str
-            The name of the set that will act as the tool.
-
-        Returns
-        -------
-        None.
-
-        """
+        """Add the unordered difference of two existing sets."""
 
         cut = set(set_dictionary[item]) - set(set_dictionary[tool])
         set_dictionary[set_name] = np.array(list(cut), dtype=np.uint64)
 
-    def write_abaqus_input(self, custom_types={}):
+    def write_abaqus_input(self, custom_types=None):
         """
         Export the Gmsh mesh to Abaqus.
 
@@ -1105,10 +946,9 @@ class GmshRVE(object):
 
         Parameters
         ----------
-        custom_types : dict[int, str], optional
-            Map from Gmsh element types to Abaqus element types. If this
-            is an empty dict a default map will be used. The default is
-            {}.
+        custom_types : mapping of int to str, optional
+            Map from Gmsh element types to Abaqus element types. If None,
+            the default map is used.
 
         Returns
         -------
@@ -1120,6 +960,7 @@ class GmshRVE(object):
         self.activate()
 
         # Load default element type map
+        custom_types = {} if custom_types is None else dict(custom_types)
         assert self.model_dimension in {2, 3}
         el_type_map = dict(ABAQUS_ELEMENT_TYPES_3D)
         if self.model_dimension == 2:
@@ -1134,6 +975,12 @@ class GmshRVE(object):
         used_types = set()
         for el_type in element_tags.keys():
             used_types.add(el_type_map[el_type])
+        warping = used_types & ELEMENTS_WARPING_DOFS
+        if len(warping) > 0:
+            raise NotImplementedError(
+                "Element type(s) {} carry warping degrees of freedom, which "
+                "are not supported by abqhom.".format(sorted(warping)))
+
         unsupported = used_types & ELEMENTS_NOT_SUPPORTED
         if len(unsupported) > 0:
             raise NotImplementedError(
@@ -1170,32 +1017,31 @@ class GmshRVE(object):
 
 class Boundary(UserDict, object):
     """
-    The boundary information of a rectangular or box-shaped Gmsh RVE.
+    Boundary-entity map of an axis-aligned rectangular or cuboidal RVE.
 
-    Boundary inherits from collections.UserDict such that its instances
-    offer the same functionalities as regular dictionaries.
+    The class provides a dictionary-like mapping from the boundary-group
+    identifiers in :mod:`abqhom.constants` to Gmsh dimension tags. For a
+    periodic boundary, primary and secondary entities that correspond under
+    a cell translation occupy the same position in their respective lists.
 
     Parameters
     ----------
     model_name : str
         The name of the underlying Gmsh model.
-    initial_data : dict[str, list[tuple[int, int]]], optional
-        The boundary with the boundary group names as keys and the
-        corresponding Gmsh dimtags as values. If this is empty, abqhom
-        will generate the boundary automatically. The default is {}.
+    initial_data : mapping of str to sequence of (int, int), optional
+        Boundary-group names and corresponding Gmsh dimension tags. If None,
+        the mapping is generated from the model geometry.
     sampling_density : int, optional
         The number of sampling points per spatial direction that will be
         generated to check for periodicity and validity of the model.
         The default is 10.
     check_periodic : bool, optional
-        If True, abqhom will check if the boundary is periodic and
-        reconstruct periodic connections between the Gmsh dimtags.
+        If True, check the geometry for periodicity and establish the
+        primary--secondary entity correspondence.
     periodic_default : bool, optional
-        If True, assume a periodic boundary formulation in case no
-        automatic periodicity check is performed. Only set this to True
-        if periodically connected dimtags have the same index in the
-        initial_data you really know what you are doing. The default is
-        False.
+        Periodicity flag used when no automatic check is performed. If True,
+        ``initial_data`` must already place corresponding primary and
+        secondary dimension tags at the same list index.
 
     Attributes
     ----------
@@ -1207,40 +1053,13 @@ class Boundary(UserDict, object):
         The number of sampling points per spatial direction that will be
         generated to check for periodicity and validity of the model.
     data : dict[str, list[tuple[int, int]]]
-        The underlying dictionary mapping the group identifier key to
-        the Gmsh dimtags being part of that group. In case of periodic
-        boundaries the connected dimtags have the same index in the
-        lists.
-
-    Example
-    -------
-    >>> import gmsh
-    >>> from abqhom.gmshmodel import Boundary
-    >>>
-    >>> # Build a square-shaped strut-based lattice unit cell in Gmsh
-    >>> gmsh.initialize()
-    >>> gmsh.model.add("SQUARE_LATTICE")
-    >>> p1 = gmsh.model.geo.add_point(0.0, 0.0, 0.0)
-    >>> p2 = gmsh.model.geo.add_point(1.0, 0.0, 0.0)
-    >>> p3 = gmsh.model.geo.add_point(1.0, 1.0, 0.0)
-    >>> p4 = gmsh.model.geo.add_point(0.0, 1.0, 0.0)
-    >>> l1 = gmsh.model.geo.add_line(p1, p2)
-    >>> l2 = gmsh.model.geo.add_line(p2, p3)
-    >>> l3 = gmsh.model.geo.add_line(p3, p4)
-    >>> l4 = gmsh.model.geo.add_line(p4, p1)
-    >>> gmsh.model.geo.synchronize()
-    >>> all_struts_group = gmsh.model.add_physical_group(1, [l1, l2,
-    >>>                                                      l3, l4])
-    >>> gmsh.model.set_physical_name(1, all_struts_group, "ALL_STRUTS")
-    >>>
-    >>> # Create the boundary information
-    >>> model_boundary = Boundary("SQUARE_LATTICE")
-    >>> bounding_box = model_boundary.get_bounding_box_from_points()
-
+        Underlying boundary-group mapping.
     """
 
-    def __init__(self, model_name, initial_data={}, sampling_density=10,
+    def __init__(self, model_name, initial_data=None, sampling_density=10,
                  check_periodic=True, periodic_default=False):
+
+        initial_data = {} if initial_data is None else dict(initial_data)
 
         if not gmsh.is_initialized():
             gmsh.initialize()
@@ -1250,7 +1069,7 @@ class Boundary(UserDict, object):
 
         super(Boundary, self).__init__(initial_data)
         self._model_name = model_name
-        self._sampling_density = sampling_density
+        self.sampling_density = sampling_density
         self._periodic = periodic_default
 
         (x_min, y_min, z_min,
@@ -1264,21 +1083,22 @@ class Boundary(UserDict, object):
         if not initial_data:
             try:
                 self._build_boundary(model_dim)
-            except Exception:
+            except Exception as error:
                 raise RuntimeError(
                     "Automatic boundary generation not possible. Please "
-                    "provide the boundary manually.")
+                    "provide the boundary manually. Original error: {}"
+                    .format(error))
 
         # Rearrange boundary map in case of a periodic geometry
         if check_periodic:
             try:
                 self._check_for_periodicity(model_dim)
-            except Exception:
+            except Exception as error:
                 raise RuntimeError(
                     "Automatic periodicity check not possible. Please set "
                     "check_periodic = False and provide information on "
                     "periodicity through construction of initial_data and "
-                    "periodic_default.")
+                    "periodic_default. Original error: {}".format(error))
 
         # Add missing groups as empty groups
         for key in POINT_GROUPS + EDGE_GROUPS + FACE_GROUPS:
@@ -1343,7 +1163,7 @@ class Boundary(UserDict, object):
 
         Returns
         -------
-        None.
+        None
 
         """
 
@@ -1369,7 +1189,7 @@ class Boundary(UserDict, object):
 
     def get_bounding_box_from_points(self):
         """
-        Compute the bounding box of the geometric CAD model from points.
+        Return the model bounding box from CAD points or mesh nodes.
 
         Returns
         -------
@@ -1388,10 +1208,8 @@ class Boundary(UserDict, object):
 
         """
 
-        # This method is mainly needed since the bounding box Gmsh
-        # computes by using gmsh.model.get_bounding_box() delivers
-        # highly inaccurate results, especially when using the OCC
-        # kernel for geometry design
+        # Point coordinates avoid the tolerance expansion applied by
+        # gmsh.model.get_bounding_box(), particularly for OCC geometries.
 
         gmsh.model.set_current(self.model_name)
 
@@ -1406,7 +1224,7 @@ class Boundary(UserDict, object):
                 return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
             node_coords = np.array(node_coords).reshape(-1, 3)
             mn, mx = node_coords.min(axis=0), node_coords.max(axis=0)
-            return mn[0], mn[1], mn[2], mx[0], mx[1], mx[2]
+            return tuple(float(value) for value in list(mn) + list(mx))
 
         # Compare coordinates of points to find minimum and maximum
         min_coords = gmsh.model.get_value(points[0][0], points[0][1], [])
@@ -1421,30 +1239,14 @@ class Boundary(UserDict, object):
         x_min, y_min, z_min = min_coords
         x_max, y_max, z_max = max_coords
 
-        return x_min, y_min, z_min, x_max, y_max, z_max
+        return tuple(float(value) for value in
+                     (x_min, y_min, z_min, x_max, y_max, z_max))
 
     def _build_boundary(self, model_dim):
-        """
-        Build the boundary map of the model.
-
-        Parameters
-        ----------
-        dim : int
-            The geometric dimension of the model.
-
-        Returns
-        -------
-        None.
-
-        """
+        """Build the boundary-entity map from the model geometry."""
 
         # Activate the model
         gmsh.model.set_current(self.model_name)
-
-        bounding_box = np.array(self.get_bounding_box_from_points())
-        bounding_box = bounding_box.reshape(2, -1)
-        delta_x, delta_y, delta_z = bounding_box[1] - bounding_box[0]
-        dim = 3 - np.isclose([delta_x, delta_y, delta_z], 0.0, atol=1e-6).sum()
 
         # Get the model bounding box
         tol = gmsh.option.get_number("Geometry.Tolerance")
@@ -1508,14 +1310,14 @@ class Boundary(UserDict, object):
 
     def get_group_coordinate_identifiers(self):
         """
-        Get the position of any point being part of a boundary group.
+        Return the fixed coordinates that identify each boundary group.
 
         Returns
         -------
         group_to_coords : OrderedDict[str, ndarray]
             The group identifier map. Keys are the group names and
-            values are the identifier coordinates. Free coordinates on
-            e.g. a line or a surface are marked with np.nan.
+            values are the identifier coordinates. Coordinates that are free
+            along an edge or face are marked with ``numpy.nan``.
 
         """
 
@@ -1557,26 +1359,7 @@ class Boundary(UserDict, object):
         return group_to_coords
 
     def _generate_sample_points_on_entity(self, dim, tag, n, tol):
-        """
-        Create n sample points per direction on a Gmsh entity.
-
-        Parameters
-        ----------
-        dim : int
-            The geometric dimension of the entitiy.
-        tag : int
-            The Gmsh identifier tag of the entitiy.
-        n : int
-            The number of sample points per direction.
-        tol : float
-            The offset tolarance from the entitiy boundary.
-
-        Returns
-        -------
-        coords : ndarray
-            The spatial coordinates of the sample points.
-
-        """
+        """Sample an entity in each of its parametric directions."""
 
         (bounds_min,
          bounds_max) = gmsh.model.get_parametrization_bounds(dim, tag)
@@ -1605,44 +1388,13 @@ class Boundary(UserDict, object):
         return coords
 
     def _check_for_periodicity(self, model_dim):
-        """
-        Check if the boundary is suitable for periodic mesh constraint.
+        """Check and pair translationally periodic boundary entities."""
 
-        If the boundary is periodic, the group entities in the data
-        dictionary will be reordered such that periodically connected
-        entities can be accessed using the same index.
-
-        Parameters
-        ----------
-        model_dim : int
-            The geometric dimension of the model.
-
-        Returns
-        -------
-        None.
-
-        """
-
-        def sort_sample_coordinates(coords, master):
-            """
-            Sort coordinates to order them in each spatial direction.
-
-            Parameters
-            ----------
-            coords : ndarray
-                The coordinates of points on a slave group.
-            master : str
-                The name of the corresponding master group.
-
-            Returns
-            -------
-            coords : ndarray
-                The reordered coordinates.
-
-            """
+        def sort_sample_coordinates(coords, primary):
+            """Sort sampled coordinates along free entity directions."""
 
             group_to_coords = self.get_group_coordinate_identifiers()
-            order = np.where(np.isnan(group_to_coords[master]))[0][::-1]
+            order = np.where(np.isnan(group_to_coords[primary]))[0][::-1]
             order = order if len(order) > 0 else [0]
             rounded_coords = np.round(coords, decimals=10)
             coords = coords[np.lexsort([rounded_coords[:, i] for i in order])]
@@ -1659,54 +1411,59 @@ class Boundary(UserDict, object):
         self._periodic = True
         tol = gmsh.option.get_number("Geometry.Tolerance")
         group_to_coords = self.get_group_coordinate_identifiers()
-        for slave, master in PERIODIC_PAIRS.items():
-            slave_indices = []
-            master_entities = self[master]
-            slave_entities = self[slave]
+        for secondary, primary in PERIODIC_PAIRS.items():
+            secondary_indices = []
+            primary_entities = self[primary]
+            secondary_entities = self[secondary]
 
-            # Skip irrelevant slave groups
-            if slave not in boundary_groups[model_dim]:
+            # Skip irrelevant secondary groups
+            if secondary not in boundary_groups[model_dim]:
                 continue
 
-            for master_dimtag in master_entities:
-                # Generate sample points on the master entity
-                coords_master = self._generate_sample_points_on_entity(
-                    master_dimtag[0], master_dimtag[1], self.sampling_density,
+            for primary_dimtag in primary_entities:
+                # Generate sample points on the primary entity
+                primary_coords = self._generate_sample_points_on_entity(
+                    primary_dimtag[0], primary_dimtag[1],
+                    self.sampling_density,
                     tol)
-                coords_master = sort_sample_coordinates(coords_master, master)
+                primary_coords = sort_sample_coordinates(primary_coords,
+                                                         primary)
 
-                # Check periodicity for all potential slave entities
-                for slave_index, slave_dimtag in enumerate(slave_entities):
-                    if master_dimtag[0] != slave_dimtag[0]:
+                # Check periodicity for all potential secondary entities
+                for secondary_index, secondary_dimtag in enumerate(
+                        secondary_entities):
+                    if primary_dimtag[0] != secondary_dimtag[0]:
                         continue
 
-                    # Generate sample points on the potential slave
+                    # Generate sample points on the potential secondary
                     # entity
-                    coords_slave = self._generate_sample_points_on_entity(
-                        slave_dimtag[0], slave_dimtag[1],
+                    secondary_coords = self._generate_sample_points_on_entity(
+                        secondary_dimtag[0], secondary_dimtag[1],
                         self.sampling_density, tol)
-                    coords_slave = sort_sample_coordinates(coords_slave,
-                                                           master)
+                    secondary_coords = sort_sample_coordinates(
+                        secondary_coords, primary)
 
                     # If the number of points generated is not the same
                     # the entities cannot be periodically connected
-                    if len(coords_master) != len(coords_slave):
+                    if len(primary_coords) != len(secondary_coords):
                         continue
 
-                    # Check if the master and slave are periodically
-                    # connected
-                    delta_true = np.abs(coords_slave - coords_master)
+                    # Check if the primary and secondary entities are
+                    # periodically connected
+                    delta_true = np.abs(secondary_coords - primary_coords)
                     delta_expected = np.nan_to_num(np.abs(
-                        group_to_coords[slave] - group_to_coords[master]))
+                        group_to_coords[secondary]
+                        - group_to_coords[primary]))
 
                     if np.allclose(delta_true, delta_expected, atol=tol):
-                        slave_indices.append(slave_index)
+                        secondary_indices.append(secondary_index)
                         break
 
-            # Update the order of the slave entities and check
+            # Update the order of the secondary entities and check
             # periodicity
-            self[slave] = [slave_entities[i] for i in slave_indices]
-            if len(self[slave]) != len(master_entities):
+            self[secondary] = [secondary_entities[i]
+                               for i in secondary_indices]
+            if len(self[secondary]) != len(primary_entities):
                 self._periodic = False
                 self.data = original_boundary_map
                 return

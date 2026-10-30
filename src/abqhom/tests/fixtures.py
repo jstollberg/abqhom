@@ -10,6 +10,7 @@ import gmsh
 
 
 def _new_model(name):
+    """Create an empty Gmsh model, replacing one with the same name."""
     if not gmsh.is_initialized():
         gmsh.initialize()
     if name in gmsh.model.list():
@@ -66,6 +67,47 @@ def discrete_periodic_plates(name="PLATES", size=1.0, perturb=0.0):
     return name
 
 
+def discrete_periodic_square(name="SQUARE", size=1.0, perturb=0.0):
+    """A pre-built 3x3 triangular mesh of a square in the x-y plane.
+
+    With ``perturb=0`` the nodes on opposite edges are matched. A non-zero
+    perturb shifts the midpoint of the right edge in y and makes the mesh
+    non-periodic without changing its bounding box.
+    """
+    if not gmsh.is_initialized():
+        gmsh.initialize()
+    if name in gmsh.model.list():
+        gmsh.model.set_current(name)
+        gmsh.model.remove()
+    gmsh.model.add(name)
+
+    grid = [0.0, 0.5*size, size]
+    nodes = [(x, y, 0.0) for x in grid for y in grid]
+    if perturb != 0.0:
+        nodes[7] = (size, 0.5*size + perturb, 0.0)
+
+    tris = []
+    for ix in range(2):
+        for iy in range(2):
+            a = ix*3 + iy
+            b = (ix + 1)*3 + iy
+            c = (ix + 1)*3 + (iy + 1)
+            d = ix*3 + (iy + 1)
+            tris.append((a, b, c))
+            tris.append((a, c, d))
+
+    surface = gmsh.model.add_discrete_entity(2)
+    coords = [value for node in nodes for value in node]
+    gmsh.model.mesh.add_nodes(2, surface, list(range(1, len(nodes) + 1)),
+                              coords)
+    connectivity = [node + 1 for tri in tris for node in tri]
+    gmsh.model.mesh.add_elements_by_type(
+        surface, 2, list(range(1, len(tris) + 1)), connectivity)
+    group = gmsh.model.add_physical_group(2, [surface])
+    gmsh.model.set_physical_name(2, group, "SOLID")
+    return name
+
+
 def simple_cubic(name="SIMPLE_CUBIC", length=1.0):
     """Twelve edge struts of a cube; one physical group 'STRUTS'."""
     g = _new_model(name)
@@ -113,7 +155,7 @@ def bcc(name="BCC", length=1.0):
 
 
 def square_lattice(name="SQUARE", size=1.0):
-    """The four edge struts of a square (2d); one group 'STRUTS'."""
+    """The four edge struts of a square (2D); one group 'STRUTS'."""
     g = _new_model(name)
     h = 0.5*size
     p = [g.add_point(-h, -h, 0.0), g.add_point(h, -h, 0.0),
@@ -145,7 +187,7 @@ def solid_cube(name="SOLID", length=1.0):
 def parallel_plates_3d(name="PLATES", size=1.0, spacing=1.0):
     """Two flat shell plates at z = +/- spacing/2 spanning a size x size
     square; one surface group 'SHELLS'. A periodic stack of membranes with
-    a 3d bounding box, so the surface elements map to shells."""
+    a 3D bounding box, so the surface elements map to shells."""
     g = _new_model(name)
     a = 0.5*size
     hz = 0.5*spacing
@@ -163,12 +205,54 @@ def parallel_plates_3d(name="PLATES", size=1.0, spacing=1.0):
     return name
 
 
+def mixed_dimensional_cube(name="MIXED", size=1.0, nodes_per_edge=3):
+    """A conforming cube with continuum, shell, and beam constituents."""
+    g = _new_model(name)
+    h = 0.5*size
+    coordinates = [(-h, -h, -h), (-h, -h, h),
+                   (h, -h, h), (h, -h, -h),
+                   (-h, h, -h), (-h, h, h),
+                   (h, h, h), (h, h, -h)]
+    points = [g.add_point(*coordinate) for coordinate in coordinates]
+    line_connectivity = [(0, 1), (1, 2), (2, 3), (3, 0),
+                         (4, 5), (5, 6), (6, 7), (7, 4),
+                         (0, 4), (1, 5), (2, 6), (3, 7)]
+    lines = [g.add_line(points[first], points[second])
+             for first, second in line_connectivity]
+    surface_connectivity = [(0, 1, 2, 3), (4, 5, 6, 7),
+                            (0, 9, 4, 8), (1, 10, 5, 9),
+                            (2, 11, 6, 10), (3, 8, 7, 11)]
+    surfaces = []
+    for connectivity in surface_connectivity:
+        loop = g.add_curve_loop([lines[index] for index in connectivity],
+                                reorient=True)
+        surfaces.append(g.add_plane_surface([loop]))
+    volume = g.add_volume([g.add_surface_loop(surfaces)])
+
+    for line in lines:
+        g.mesh.set_transfinite_curve(line, nodes_per_edge)
+    for surface in surfaces:
+        g.mesh.set_transfinite_surface(surface)
+        g.mesh.set_recombine(2, surface)
+    g.mesh.set_transfinite_volume(volume)
+    g.synchronize()
+
+    group = gmsh.model.add_physical_group(3, [volume])
+    gmsh.model.set_physical_name(3, group, "CONTINUUM")
+    group = gmsh.model.add_physical_group(2, surfaces)
+    gmsh.model.set_physical_name(2, group, "SHELLS")
+    group = gmsh.model.add_physical_group(1, lines)
+    gmsh.model.set_physical_name(1, group, "BEAMS")
+    return name
+
+
 def matrix_with_boundary_fiber(name="MATRIXFIBER", size=1.0, n=5):
     """A continuum cube (transfinite hex, group 'MATRIX') with a single beam
     fiber running the full height, so its end nodes lie ON the z-faces
     (group 'FIBER'). Meant to be tied to the matrix with an embedded-region
     constraint: its boundary nodes exercise the exclusion of embedded
-    (translation-eliminated) nodes from the translational periodic equations."""
+    (translation-eliminated) nodes from the translational periodic
+    equations."""
     g = _new_model(name)
     h = 0.5*size
     c = [(-h, -h, -h), (-h, -h, h), (h, -h, h), (h, -h, -h),
@@ -203,7 +287,7 @@ def matrix_with_boundary_fiber(name="MATRIXFIBER", size=1.0, n=5):
 
 
 def plus_lattice_2d(name="PLUS", size=1.0):
-    """A 2d cell whose struts cross the boundary at the edge midpoints,
+    """A 2D cell whose struts cross the boundary at the edge midpoints,
     i.e. not at the corners; one group 'STRUTS'."""
     g = _new_model(name)
     h = 0.5*size
