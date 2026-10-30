@@ -4,6 +4,7 @@ __pycache__/
 
 # Output directories written by the examples
 abq/
+abq_weighted/
 results/
 vtk_output/
 
