@@ -1,16 +1,9 @@
-"""Cyclic small-strain plasticity of a matrix-filled sandwich cell.
+"""Compute the cyclic response of the elastoplastic sandwich cell.
 
-The cell combines a soft elastic continuum matrix with perfectly plastic
-shell faces and an independently meshed, embedded beam core. The complete
-periodic representation contains both shell faces normal to ``X_2``. The
-ownership-consistent Abaqus model removes the secondary face before solving
-the boundary-value problem.
-
-Run the complete analysis with
-
-    abq2024le cae noGUI=main.py
-
-A regular Python interpreter creates and checks only the Gmsh mesh.
+The mixed-dimensional cell combines a soft continuum matrix, two shell
+skins, and an embedded BCC beam core. Two fully reversed axial strain cycles
+exercise the perfectly plastic structural constituents and produce an effective
+hysteresis response.
 """
 
 import inspect
@@ -19,98 +12,98 @@ import sys
 
 import numpy as np
 
-
+# ---------------------------------------------------------------
+# Locate this example and put the shipped abqhom source first on the
+# path. Under 'abaqus cae noGUI=main.py' __file__ is undefined, so the
+# script location is obtained via inspect instead.
 here = os.path.dirname(os.path.abspath(
     inspect.getframeinfo(inspect.currentframe()).filename))
-abqhom_path = os.path.abspath(os.path.join(here, os.pardir,
-                                           os.pardir, os.pardir, "src"))
-gmsh_path = "C:/Users/jonat/Documents/gmsh/lib"
-for path in (abqhom_path, gmsh_path):
-    if path not in sys.path:
-        sys.path.insert(0, path)
+abqhom_path = os.path.abspath(os.path.join(
+    here, os.pardir, os.pardir, os.pardir, "src"))
+if abqhom_path not in sys.path:
+    sys.path.insert(0, abqhom_path)
 
 import gmsh
+from abaqusConstants import OFF
 
+from abqhom.abqmodel import AbaqusRVE, LoadHistory
+from abqhom.constants import PARAQUS_INSTALLED
 from abqhom.gmshmodel import GmshRVE
-from sandwich import create_geometry, nodes_in_physical_group
+from abqhom.utils import hill_mandel_residual
+from sandwich import create_geometry
 
 
-def cyclic_strain_path(time, reversal_times, reversal_strains):
-    """Return the prescribed, fully reversed in-plane strain history."""
-    strain = np.zeros((3, 3))
-    strain[0, 0] = np.interp(time, reversal_times, reversal_strains)
-    return strain
-
-
-def assign_materials_and_sections(unit_cell, parameters):
-    """Assign the elastic matrix and perfectly plastic structural phases."""
-    matrix = unit_cell.model.Material(name="MATRIX")
+def assign_sections(cell, parameters):
+    """Assign the elastic matrix and perfectly plastic constituents."""
+    matrix = cell.model.Material(name="MATRIX")
     matrix.Elastic(table=((parameters["matrix_E"],
                            parameters["matrix_nu"]),))
 
-    shell = unit_cell.model.Material(name="SHELL")
+    shell = cell.model.Material(name="SHELL")
     shell.Elastic(table=((parameters["shell_E"],
                           parameters["shell_nu"]),))
     shell.Plastic(table=((parameters["shell_yield"], 0.0),))
 
-    beam = unit_cell.model.Material(name="BEAM")
+    beam = cell.model.Material(name="BEAM")
     beam.Elastic(table=((parameters["beam_E"],
                          parameters["beam_nu"]),))
     beam.Plastic(table=((parameters["beam_yield"], 0.0),))
 
-    unit_cell.assign_solid_section("CONTINUUM_MATRIX", "MATRIX")
-    unit_cell.assign_shell_section(
+    cell.assign_solid_section("CONTINUUM_MATRIX", "MATRIX")
+    cell.assign_shell_section(
         "SHELL_FACES", "SHELL", parameters["shell_thickness"],
         num_integration_points=5, pre_integrate=False)
-    unit_cell.assign_beam_section(
+    cell.assign_beam_section(
         "BEAM_STRUTS", "BEAM", parameters["beam_radius"],
         pre_integrate=False)
 
 
-def evaluate_response(unit_cell, step_name, load_path,
-                      power_tolerance=1.0e-8):
-    """Evaluate effective stress and Hill--Mandel residual per frame."""
-    unit_cell.open_odb_file()
+def evaluate_response(cell, step_name, load_path, power_tolerance):
+    """Evaluate effective stresses and discrete Hill--Mandel residuals."""
+    response = []
+    cell.open_odb_file()
     try:
-        frame_times = [frame.frameValue for frame in
-                       unit_cell.odb.steps[step_name].frames]
-        records = []
-        previous_strain = None
-        for frame, time in enumerate(frame_times):
-            strain = load_path(time)
-            stress = unit_cell.average_stress(step_name, frame=frame)
+        step = cell.odb.steps[step_name]
+        previous_gradient = None
+        for frame_index, frame in enumerate(step.frames):
+            gradient = load_path(frame.frameValue)
+            stress = cell.average_stress(step_name, frame=frame_index)
             scale = max(np.linalg.norm(stress), 1.0e-30)
-            asymmetry = np.linalg.norm(stress - stress.T)/scale
+            asymmetry = np.linalg.norm(stress - stress.T) / scale
 
-            residual = np.nan
-            if previous_strain is not None:
-                increment = strain - previous_strain
-                macroscopic_work = float(np.sum(stress*increment))
-                microscopic_work = unit_cell.average_virtual_power(
-                    step_name, frame=frame)
-                denominator = max(abs(macroscopic_work),
-                                  abs(microscopic_work), power_tolerance)
-                residual = abs(macroscopic_work - microscopic_work)/denominator
+            hill_mandel = np.nan
+            if previous_gradient is not None:
+                # Insert the increment between successive converged frames
+                # as the common macroscopic and microscopic test direction.
+                increment = gradient - previous_gradient
+                macroscopic_work = float(np.sum(stress * increment))
+                microscopic_work = cell.average_power_increment(
+                    step_name, frame=frame_index)
+                hill_mandel = hill_mandel_residual(
+                    macroscopic_work, microscopic_work, power_tolerance)
 
-            records.append(np.concatenate((
-                [time, strain[0, 0]], stress.reshape(-1),
-                [asymmetry, residual])))
-            previous_strain = strain
-        return np.asarray(records)
+            response.append(np.concatenate((
+                [frame.frameValue, gradient[0, 0]], stress.reshape(-1),
+                [asymmetry, hill_mandel])))
+            previous_gradient = gradient
     finally:
-        unit_cell.close_odb_file()
+        cell.close_odb_file()
+
+    return np.asarray(response)
 
 
-def evaluate_phase_plasticity(unit_cell, step_name, phase_sets):
-    """Return the maximum equivalent plastic strain in each phase."""
-    unit_cell.open_odb_file()
+def evaluate_peeq_history(cell, step_name):
+    """Return maximum shell and beam PEEQ values for every frame."""
+    records = []
+    cell.open_odb_file()
     try:
-        step = unit_cell.odb.steps[step_name]
-        instance = unit_cell.odb.rootAssembly.instances[unit_cell.model_name]
-        regions = [instance.elementSets["ELSET_" + name]
-                   for name in phase_sets]
+        step = cell.odb.steps[step_name]
+        instance = cell.odb.rootAssembly.instances[cell.model_name]
+        regions = (
+            instance.elementSets["ELSET_SHELL_FACES"],
+            instance.elementSets["ELSET_BEAM_STRUTS"],
+        )
 
-        records = []
         for frame in step.frames:
             peeq = frame.fieldOutputs["PEEQ"]
             maxima = []
@@ -119,178 +112,203 @@ def evaluate_phase_plasticity(unit_cell, step_name, phase_sets):
                 maxima.append(max(float(value.data) for value in values))
             records.append([frame.frameValue] + maxima)
     finally:
-        unit_cell.close_odb_file()
+        cell.close_odb_file()
 
     return np.asarray(records)
 
 
-def write_csv(path, data, header):
-    """Write numerical results without requiring a plotting dependency."""
-    np.savetxt(path, data, delimiter=",", header=header, comments="")
+def export_results(result_directory, response, peeq_history):
+    """Export the response histories and their verification measures."""
+    if not os.path.isdir(result_directory):
+        os.makedirs(result_directory)
+
+    response_header = (
+        "pseudo_time,epsilon_11,sigma_11,sigma_12,sigma_13,"
+        "sigma_21,sigma_22,sigma_23,sigma_31,sigma_32,sigma_33,"
+        "stress_asymmetry,hill_mandel_residual")
+    np.savetxt(
+        os.path.join(result_directory, "cyclic_response.csv"),
+        response, delimiter=",", header=response_header, comments="")
+    np.savetxt(
+        os.path.join(result_directory, "peeq_history.csv"),
+        peeq_history, delimiter=",",
+        header="pseudo_time,max_peeq_shell,max_peeq_beam", comments="")
+
+    stress_norm = np.linalg.norm(response[:, 2:11], axis=1)
+    maximum_stress = np.max(stress_norm)
+    if maximum_stress <= 0.0:
+        raise RuntimeError("The effective stress is zero in every frame.")
+    loaded_frames = stress_norm > 1.0e-6 * maximum_stress
+    maximum_asymmetry = np.max(response[loaded_frames, -2])
+    maximum_hill_mandel = np.nanmax(response[:, -1])
+    maximum_shell_peeq = np.max(peeq_history[:, 1])
+    maximum_beam_peeq = np.max(peeq_history[:, 2])
+
+    # Columns: stress asymmetry, Hill--Mandel residual, maximum shell PEEQ,
+    # and maximum beam PEEQ.
+    metrics = np.asarray([[
+        maximum_asymmetry, maximum_hill_mandel,
+        maximum_shell_peeq, maximum_beam_peeq,
+    ]])
+    np.savetxt(
+        os.path.join(result_directory, "verification_metrics.csv"),
+        metrics, delimiter=",",
+        header=("maximum_stress_asymmetry,maximum_hill_mandel_residual,"
+                "maximum_shell_peeq,maximum_beam_peeq"),
+        comments="")
+
+    return {
+        "asymmetry": maximum_asymmetry,
+        "hill_mandel": maximum_hill_mandel,
+        "shell_peeq": maximum_shell_peeq,
+        "beam_peeq": maximum_beam_peeq,
+    }
 
 
-# ---------------------------------------------------------------------------
-# Geometry and mesh. The coarse mesh stays below the 1000-node limit of
-# Abaqus 2024 Learning Edition, including a margin for reference points.
-model_name = "EXAMPLE_3"
-edge_length = 1.0
-matrix_element_size = edge_length/8.0
-elements_per_strut = 16
-learning_edition_node_limit = 1000
+def run_case(gmsh_cell, reversal_times, reversal_strains, parameters,
+             output_directories):
+    """Build, solve, and post-process the cyclic load path."""
+    analysis_directory, result_directory, vtk_directory = output_directories
+    if not os.path.isdir(analysis_directory):
+        os.makedirs(analysis_directory)
+    os.chdir(analysis_directory)
 
-create_geometry(model_name, edge_length, elements_per_strut)
+    cell = AbaqusRVE(gmsh_cell, custom_types={1: "B31"})
+    assign_sections(cell, parameters)
 
-gmsh_unit_cell = GmshRVE(model_name)
-gmsh_unit_cell.add_periodic_mesh_constraints()
-gmsh_unit_cell.generate_mesh(
-    element_order=1, algorithm_2d=6, algorithm_3d=1,
-    element_size=matrix_element_size)
-gmsh_unit_cell.build_node_sets()
-gmsh_unit_cell.build_element_sets()
+    def load_path(pseudo_time):
+        """Evaluate the macroscopic displacement gradient."""
+        gradient = np.zeros((3, 3))
+        gradient[0, 0] = np.interp(
+            pseudo_time, reversal_times, reversal_strains)
+        return gradient
 
-matrix_nodes = nodes_in_physical_group(3, "CONTINUUM_MATRIX")
-shell_nodes = nodes_in_physical_group(2, "SHELL_FACES")
-beam_nodes = nodes_in_physical_group(1, "BEAM_STRUTS")
-all_nodes = set(int(node)
-                for node in gmsh_unit_cell.node_sets["ALL_NODES"])
+    load_history = LoadHistory(reversal_times, load_path)
+    time_period = float(reversal_times[-1])
+    time_increment = parameters["time_increment"]
+    number_of_increments = int(round(time_period / time_increment))
+    if not np.isclose(number_of_increments * time_increment, time_period):
+        raise ValueError(
+            "The fixed increment size must divide the step time exactly.")
 
-if not shell_nodes <= matrix_nodes:
-    raise RuntimeError(
-        "The shell faces are not conforming with the continuum matrix.")
-shared_beam_nodes = beam_nodes & matrix_nodes
-if shared_beam_nodes != beam_nodes & shell_nodes:
-    raise RuntimeError(
-        "Beam nodes shared with the matrix are not the shell corner nodes.")
-if len(shared_beam_nodes) != 8:
-    raise RuntimeError(
-        "The beam core must share exactly its eight corner nodes with the "
-        "continuum and shell meshes.")
-if len(all_nodes) >= learning_edition_node_limit:
-    raise RuntimeError(
-        "The mesh contains {} nodes; the Abaqus Learning Edition model must "
-        "remain below {}.".format(len(all_nodes),
-                                  learning_edition_node_limit))
+    step_name = "LOAD"
+    cell.model.StaticStep(
+        name=step_name, previous="Initial", nlgeom=OFF,
+        timePeriod=time_period, maxNumInc=number_of_increments,
+        initialInc=time_increment, minInc=time_increment,
+        maxInc=time_increment)
 
-mesh_file = os.path.join(here, "example_3.msh")
-gmsh.write(mesh_file)
+    # Establish periodicity before registering the embedded region. The beam
+    # endpoints already share the host nodes at the eight cell corners.
+    cell.apply_periodic_BC(step_name, load_history)
+    cell.model.EmbeddedRegion(
+        "EMBEDDED_BEAM_CORE",
+        cell.instance.sets["ELSET_BEAM_STRUTS"],
+        cell.instance.sets["ELSET_CONTINUUM_MATRIX"])
+    cell.run_analysis(field_outputs=["PEEQ"], numCpus=1)
 
-print(gmsh_unit_cell)
-print("Continuum nodes: {}".format(len(matrix_nodes)))
-print("Shell nodes: {}".format(len(shell_nodes)))
-print("Beam nodes: {} ({} shared corner nodes)".format(
-    len(beam_nodes), len(shared_beam_nodes)))
-print("Total nodes: {} / {}".format(
-    len(all_nodes), learning_edition_node_limit))
-for name in ("CONTINUUM_MATRIX", "SHELL_FACES", "BEAM_STRUTS",
-             "SECONDARY_ELEMENTS"):
-    print("{} elements: {}".format(
-        name, len(gmsh_unit_cell.element_sets[name])))
-print("Periodic Gmsh mesh written to {}.".format(mesh_file))
+    response = evaluate_response(
+        cell, step_name, load_path, parameters["power_tolerance"])
+    peeq_history = evaluate_peeq_history(cell, step_name)
+    metrics = export_results(
+        result_directory, response, peeq_history)
 
+    if PARAQUS_INSTALLED:
+        cell.export_to_vtk(
+            vtk_directory, field_outputs=["U", "PEEQ"],
+            element_sets=["CONTINUUM_MATRIX", "SHELL_FACES", "BEAM_STRUTS"],
+            clear=True)
 
-# Stop after mesh generation outside the Abaqus Python environment.
-try:
-    from abaqusConstants import OFF
-except ImportError:
-    gmsh.finalize()
-    print("Abaqus modules are unavailable; mesh generation is complete.")
-    sys.exit(0)
-
-from abqhom.abqmodel import AbaqusRVE, LoadHistory
-
-
-# ---------------------------------------------------------------------------
-# Constituent parameters. Shells and beams have the same elastic constants
-# but distinct yield stresses. A single plastic-data point defines ideal J2
-# plasticity without hardening.
-parameters = {
-    "matrix_E": 1.0,
-    "matrix_nu": 0.3,
-    "shell_E": 100.0,
-    "shell_nu": 0.3,
-    "shell_yield": 0.4,
-    "beam_E": 100.0,
-    "beam_nu": 0.3,
-    "beam_yield": 0.6,
-    "shell_thickness": 0.02,
-    "beam_radius": 0.05,
-}
-
-# Two fully reversed cycles with a constant strain-rate magnitude. All
-# transverse macroscopic strain components remain zero.
-reversal_strains = np.asarray([
-    0.0, 0.03, -0.03, 0.03, -0.03, 0.03, 0.0])
-reversal_times = np.asarray([
-    0.0, 0.10, 0.30, 0.50, 0.70, 0.90, 1.00])
+    frame_times = response[:, 0]
+    print("\nCyclic effective response:")
+    print("  reversal | pseudo-time | epsilon_11 | sigma_11")
+    for reversal, (strain, time) in enumerate(
+            zip(reversal_strains[1:-1], reversal_times[1:-1]), start=1):
+        frame = int(np.argmin(np.abs(frame_times - time)))
+        print("  {:8d} | {:11.2f} | {:+.4f}    | {:+.6e}".format(
+            reversal, time, strain, response[frame, 2]))
+    print("  maximum stress asymmetry     = {:.3e}".format(
+        metrics["asymmetry"]))
+    print("  maximum Hill--Mandel residual = {:.3e}".format(
+        metrics["hill_mandel"]))
+    print("  maximum shell PEEQ            = {:.6e}".format(
+        metrics["shell_peeq"]))
+    print("  maximum beam PEEQ             = {:.6e}".format(
+        metrics["beam_peeq"]))
 
 
-def load_path(time):
-    return cyclic_strain_path(time, reversal_times, reversal_strains)
+def main():
+    """Run the cyclic small-strain plasticity example."""
+    original_directory = os.getcwd()
+    try:
+        # Geometry and material parameters are nondimensional.
+        parameters = {
+            "matrix_E": 1.0,
+            "matrix_nu": 0.3,
+            "shell_E": 100.0,
+            "shell_nu": 0.3,
+            "shell_yield": 0.4,
+            "beam_E": 100.0,
+            "beam_nu": 0.3,
+            "beam_yield": 0.6,
+            "shell_thickness": 0.02,
+            "beam_radius": 0.05,
+            "time_increment": 0.002,
+            "power_tolerance": 1.0e-8,
+        }
+        mesh_parameters = {
+            "edge_length": 1.0,
+            "matrix_elements_per_edge": 8,
+            "elements_per_strut": 16,
+            "element_order": 1,
+            "algorithm_2d": 6,
+            "algorithm_3d": 1,
+        }
+
+        # Mesh and loading settings. The reversal times give a constant
+        # strain-rate magnitude over the complete piecewise-linear history.
+        reversal_strains = np.asarray([
+            0.0, 0.03, -0.03, 0.03, -0.03, 0.03, 0.0])
+        reversal_times = np.asarray([
+            0.0, 0.10, 0.30, 0.50, 0.70, 0.90, 1.00])
+
+        output_directories = (
+            os.path.join(here, "abq"),
+            os.path.join(here, "results"),
+            os.path.join(here, "vtk_output"),
+        )
+
+        # ---------------------------------------------------------------
+        # Build the mixed-dimensional periodic mesh once.
+        model_name = "EXAMPLE_3"
+        create_geometry(
+            model_name, mesh_parameters["edge_length"],
+            mesh_parameters["elements_per_strut"])
+        gmsh_cell = GmshRVE(model_name)
+        gmsh_cell.add_periodic_mesh_constraints()
+        gmsh_cell.generate_mesh(
+            element_order=mesh_parameters["element_order"],
+            algorithm_2d=mesh_parameters["algorithm_2d"],
+            algorithm_3d=mesh_parameters["algorithm_3d"],
+            element_size=(mesh_parameters["edge_length"]
+                          / mesh_parameters["matrix_elements_per_edge"]))
+        gmsh_cell.build_node_sets()
+        gmsh_cell.build_element_sets()
+
+        # ---------------------------------------------------------------
+        # Solve and post-process the cyclic load path.
+        run_case(
+            gmsh_cell, reversal_times, reversal_strains, parameters,
+            output_directories)
+
+        if not PARAQUS_INSTALLED:
+            print("Paraqus is unavailable; skipping VTK export.")
+        print("*** Finished cyclic sandwich example ***")
+    finally:
+        os.chdir(original_directory)
+        if gmsh.is_initialized():
+            gmsh.finalize()
 
 
-history = LoadHistory(reversal_times, load_path)
-
-analysis_directory = os.path.join(here, "abq")
-if not os.path.isdir(analysis_directory):
-    os.makedirs(analysis_directory)
-os.chdir(analysis_directory)
-
-unit_cell = AbaqusRVE(
-    gmsh_unit_cell, custom_types={1: "B31"}, remove_secondary=True)
-assign_materials_and_sections(unit_cell, parameters)
-
-# The beam endpoints are shared with the matrix and shell meshes. The
-# complete beam core can therefore be used as the embedded-element region;
-# the shared corner translations already coincide with the host nodes.
-beam_region = unit_cell.instance.sets["ELSET_BEAM_STRUTS"]
-matrix_region = unit_cell.instance.sets["ELSET_CONTINUUM_MATRIX"]
-
-step_name = "CYCLIC_LOADING"
-unit_cell.model.StaticStep(
-    name=step_name, previous="Initial", nlgeom=OFF,
-    timePeriod=float(reversal_times[-1]), maxNumInc=500,
-    initialInc=0.002, minInc=0.002, maxInc=0.002)
-# Establish periodicity on the shared boundary nodes before registering the
-# embedded constraint for the complete beam core.
-unit_cell.apply_periodic_BC(step_name, history)
-unit_cell.model.EmbeddedRegion(
-    "EMBEDDED_BEAM_CORE", beam_region, matrix_region)
-unit_cell.run_analysis(
-    field_outputs=["S", "PE", "PEEQ"],
-    history_outputs=["ALLIE", "ALLPD", "ALLWK"],
-    numCpus=1)
-
-response = evaluate_response(unit_cell, step_name, load_path)
-phase_sets = ["SHELL_FACES", "BEAM_STRUTS"]
-phase_plasticity = evaluate_phase_plasticity(
-    unit_cell, step_name, phase_sets)
-result_directory = os.path.join(here, "results")
-if not os.path.isdir(result_directory):
-    os.makedirs(result_directory)
-
-header = ("time,epsilon_11,sigma_11,sigma_12,sigma_13,"
-          "sigma_21,sigma_22,sigma_23,sigma_31,sigma_32,sigma_33,"
-          "stress_asymmetry,hill_mandel_residual")
-write_csv(os.path.join(result_directory, "cyclic_response.csv"),
-          response, header)
-write_csv(os.path.join(result_directory, "phase_plasticity.csv"),
-          phase_plasticity,
-          "time,max_peeq_shell,max_peeq_beam")
-
-frame_times = response[:, 0]
-print("\nCyclic effective response:")
-print("  reversal | pseudo-time | epsilon_11 | sigma_11")
-for reversal, (strain, time) in enumerate(
-        zip(reversal_strains[1:-1], reversal_times[1:-1]), start=1):
-    frame = int(np.argmin(np.abs(frame_times - time)))
-    print("  {:8d} | {:11.2f} | {:+.4f}    | {:+.6e}".format(
-        reversal, time, strain, response[frame, 2]))
-print("  maximum Hill--Mandel residual = {:.3e}".format(
-    np.nanmax(response[:, -1])))
-print("  maximum shell PEEQ = {:.6e}".format(
-    np.max(phase_plasticity[:, 1])))
-print("  maximum beam PEEQ = {:.6e}".format(
-    np.max(phase_plasticity[:, 2])))
-
-gmsh.finalize()
-print("*** Finished ***")
+if __name__ == "__main__":
+    main()
