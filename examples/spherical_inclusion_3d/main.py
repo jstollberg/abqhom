@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
+# SPDX-License-Identifier: GPL-3.0-only
+
 """Homogenize a two-phase spherical-inclusion cell at finite strain.
 
 Automatic boundary sampling is unsuitable for the trimmed OpenCASCADE

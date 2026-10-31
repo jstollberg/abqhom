@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
+# SPDX-License-Identifier: GPL-3.0-only
+
 """Homogenize a re-entrant shell honeycomb in the linear regime.
 
 The ribs of a two-dimensional re-entrant honeycomb in the x--z plane are

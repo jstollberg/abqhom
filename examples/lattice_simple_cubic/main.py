@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
+# SPDX-License-Identifier: GPL-3.0-only
+
 """Homogenize a simple-cubic beam lattice in the linear regime.
 
 The twelve edge struts are shared by four neighboring cells, making this the

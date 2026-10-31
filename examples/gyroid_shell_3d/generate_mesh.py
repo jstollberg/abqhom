@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
+# SPDX-License-Identifier: GPL-3.0-only
+
 """Generate the periodic sheet-gyroid mesh used by ``main.py``.
 
 Microgen constructs the gyroid midsurface as a triangulated PyVista mesh. A

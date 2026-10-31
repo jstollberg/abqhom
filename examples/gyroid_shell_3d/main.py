@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
+# SPDX-License-Identifier: GPL-3.0-only
+
 """Homogenize an imported sheet-gyroid shell at finite strain.
 
 The periodic surface mesh is generated separately by ``generate_mesh.py``.

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
+# SPDX-License-Identifier: GPL-3.0-only
+
 """
 End-to-end homogenization tests for AbaqusRVE. These must be run in the
 Abaqus Python interpreter (they build a small RVE, run a linear analysis

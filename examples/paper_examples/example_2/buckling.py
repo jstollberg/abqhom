@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
+# SPDX-License-Identifier: GPL-3.0-only
+
 """Compute periodic buckling modes of the Octet cell and supercell.
 
 Run this script before ``main.py``. It writes the normalized translational

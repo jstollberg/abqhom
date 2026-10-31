@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
+# SPDX-License-Identifier: GPL-3.0-only
+
 """Sample the initial or evolved yield surface in normal-stress space.
 
 The sampling directions are the 642 vertices of a level-three icosphere. Both

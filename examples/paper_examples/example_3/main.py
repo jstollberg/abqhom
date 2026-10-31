@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
+# SPDX-License-Identifier: GPL-3.0-only
+
 """Compute the cyclic response of the elastoplastic sandwich cell.
 
 The mixed-dimensional cell combines a soft continuum matrix, two shell

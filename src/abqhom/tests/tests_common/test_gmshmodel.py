@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
+# SPDX-License-Identifier: GPL-3.0-only
+
 """
 Granular tests for individual GmshRVE methods. These cross-check the
 abqhom results against Gmsh's own query functions (mesh nodes/elements,

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
+# SPDX-License-Identifier: GPL-3.0-only
+
 """
 Granular tests for AbaqusRVE that exercise individual pieces of the API
 without running a finite element analysis: construction, set transfer,

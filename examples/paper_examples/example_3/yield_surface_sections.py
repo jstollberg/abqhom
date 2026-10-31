@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
+# SPDX-License-Identifier: GPL-3.0-only
+
 """Sample sections of the initial and evolved effective yield surfaces.
 
 Every direction uses a fresh RVE. Initial yield is probed from the stress-free

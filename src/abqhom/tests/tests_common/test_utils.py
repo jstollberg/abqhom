@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
+# SPDX-License-Identifier: GPL-3.0-only
+
 """
 Tests for abqhom.utils (Voigt/tensor conversion and the analytical
 Voigt/Reuss bounds). These do not need Gmsh or Abaqus.

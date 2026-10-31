@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
+# SPDX-License-Identifier: GPL-3.0-only
+
 """Verify beam clearance throughout the three Octet load histories.
 
 Every retained beam element in the central cell is compared with the central

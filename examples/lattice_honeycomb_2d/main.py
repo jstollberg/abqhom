@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
+# SPDX-License-Identifier: GPL-3.0-only
+
 """Homogenize a regular 2D beam honeycomb in the linear regime.
 
 The struts intersect the cell boundary away from its corners. The example

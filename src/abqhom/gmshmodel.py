@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
+# SPDX-License-Identifier: GPL-3.0-only
+
 """
 Module containing the GmshRVE class and related classes that are helpful
 to create representative volume elements using Gmsh and to prepare the

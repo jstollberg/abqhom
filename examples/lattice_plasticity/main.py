@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
+# SPDX-License-Identifier: GPL-3.0-only
+
 """Homogenize a perfectly plastic beam lattice under cyclic loading.
 
 The small-strain example isolates path-dependent material behavior from

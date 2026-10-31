@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
+# SPDX-License-Identifier: GPL-3.0-only
+
 """Homogenize a two-phase plane-strain composite in the linear regime.
 
 The cell contains a square arrangement of stiff circular inclusions in a soft

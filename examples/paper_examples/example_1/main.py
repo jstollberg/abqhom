@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
+# SPDX-License-Identifier: GPL-3.0-only
+
 """Verify small-strain homogenization of a mixed-dimensional unit cell.
 
 The cell combines continuum, shell, and beam constituents. Six independent

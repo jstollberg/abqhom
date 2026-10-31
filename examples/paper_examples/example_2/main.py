@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
+# SPDX-License-Identifier: GPL-3.0-only
+
 """Compute the finite-strain response of imperfect Octet cells.
 
 The primitive cell and, optionally, a 2 x 2 x 2 supercell are perturbed

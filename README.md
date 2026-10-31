@@ -270,6 +270,8 @@ Jonathan Stollberg
 
 ## License
 
+Copyright (C) 2023-2026 Jonathan Stollberg.
+
 Distributed under the terms of the GNU General Public License v3.0. See
 [`LICENSE`](LICENSE) for details.
 

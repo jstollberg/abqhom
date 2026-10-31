@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
+# SPDX-License-Identifier: GPL-3.0-only
+
 """Homogenize a Kelvin beam lattice at finite strain.
 
 The vertices of the truncated octahedron lie on the faces of the cuboidal
