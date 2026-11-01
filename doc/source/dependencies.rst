@@ -13,26 +13,27 @@ Required software
    the Python 3 interface of current releases.
 
 **Gmsh**
-   Geometry handling and meshing use the Gmsh Python API. Use the Python
-   module supplied with the official `Gmsh SDK <https://gmsh.info/>`_ and
-   keep its accompanying shared libraries in place.
+   Geometry handling and meshing use Gmsh 4.9.4 or newer. The installation
+   helper obtains its Python API and shared library from the published wheel.
 
 **NumPy**
    Array and tensor operations use NumPy. A compatible NumPy distribution is
    included with current Abaqus installations.
 
-Optional software
------------------
-
 **Paraqus**
    :meth:`~abqhom.abqmodel.AbaqusRVE.export_to_vtk` uses
    `Paraqus <https://github.com/InstituteOfMechanics/Paraqus>`_ to write VTK
-   files. All meshing, analysis, and homogenization functionality remains
-   available without it.
+   files. Version 1.0.2 or newer provides the required API; the oldest
+   compatible release currently published on PyPI is 1.0.4.
+
+**backports.weakref**
+   The runtime includes this pure-Python backport so current Gmsh releases can
+   also be imported by legacy Abaqus versions using Python 2.7. It is harmless
+   when the standard-library implementation is available.
 
 .. note::
 
    Abaqus uses its own Python interpreter. Installing a package in a regular
    Python environment does not automatically make it available to Abaqus.
-   :doc:`installation` therefore configures source directories through
-   ``PYTHONPATH`` rather than modifying the Abaqus installation.
+   :doc:`installation` therefore creates a dedicated runtime prefix and adds
+   only that prefix to ``PYTHONPATH``.

@@ -9,14 +9,16 @@ import sys
 
 sys.path.insert(0, os.path.abspath("../../src"))
 
+from abqhom import __version__
+
 
 # -- Project information -----------------------------------------------------
 
 project = "abqhom"
 copyright = "2026, Jonathan Stollberg"
 author = "Jonathan Stollberg"
-version = "0.1"
-release = "0.1.0"
+version = ".".join(__version__.split(".")[:2])
+release = __version__
 
 
 # -- General configuration ---------------------------------------------------

@@ -11,8 +11,9 @@ The tests under ``src/abqhom/tests`` are split into two groups:
    Model construction, constraints, analysis, and homogenization tests that
    require Abaqus.
 
-The test runners load Gmsh only from the explicitly supplied SDK path. This
-avoids accidentally mixing the solver process with a different Gmsh build.
+The test runners load Gmsh only from the explicitly supplied module directory.
+This avoids accidentally mixing the solver process with a different Gmsh
+build.
 
 Run the common tests
 --------------------
@@ -23,7 +24,7 @@ From a Python interpreter that can import ``abqhom``:
 
    import abqhom.tests as tests
 
-   tests.run_python_tests("C:/path/to/gmsh/lib")
+   tests.run_python_tests("C:/path/reported/by/abqhom-install-abaqus")
 
 Run the complete suite
 ----------------------
@@ -34,7 +35,7 @@ Execute the following through an Abaqus CAE Python kernel:
 
    import abqhom.tests as tests
 
-   tests.run_abaqus_tests("C:/path/to/gmsh/lib")
+   tests.run_abaqus_tests("C:/path/reported/by/abqhom-install-abaqus")
 
 Both runners isolate generated files in a temporary directory and write a
 test report to the original working directory. Artifacts from failing tests

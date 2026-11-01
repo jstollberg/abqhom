@@ -1,45 +1,60 @@
 Installation
 ============
 
-``abqhom`` is currently used directly from a source checkout. Clone the
-repository and add its ``src`` directory, the Gmsh SDK, and optionally
-Paraqus to ``PYTHONPATH``. This approach works without write access to the
-Abaqus installation and is suitable for local workstations and compute
-clusters.
+Install ``abqhom`` in a regular Python environment and use its installation
+helper to create an isolated Abaqus runtime. The Abaqus installation remains
+unchanged, which makes the workflow suitable for workstations and compute
+clusters without administrative access.
 
-Obtain the source
------------------
+Install the package
+-------------------
 
 .. code-block:: console
 
-   git clone https://github.com/jstollberg/abqhom.git
+   python -m pip install abqhom
+   abqhom-install-abaqus
 
-Configure the Python path
--------------------------
+The helper installs only ``abqhom``, Gmsh, Paraqus, and
+``backports.weakref`` into a versioned prefix below
+``~/.abqhom/abaqus-runtime``. Dependencies are deliberately disabled during
+this step. Abaqus therefore continues to use its bundled NumPy installation.
 
-The Gmsh path below is the directory containing ``gmsh.py`` and the Gmsh
-shared library. The Paraqus entry is optional.
+Activate the runtime
+--------------------
+
+The command reports the installed ``site-packages`` path and creates an
+activation script in the runtime prefix. Run that script in the shell from
+which Abaqus will be launched.
 
 On Windows PowerShell:
 
 .. code-block:: powershell
 
-   $env:PYTHONPATH = (
-       "C:/path/to/abqhom/src;" +
-       "C:/path/to/gmsh/lib;" +
-       "C:/path/to/Paraqus/src;" +
-       $env:PYTHONPATH
-   )
+   . "C:/Users/name/.abqhom/abaqus-runtime/.../activate_abqhom.ps1"
 
 On Linux or macOS:
 
 .. code-block:: bash
 
-   export PYTHONPATH="/path/to/abqhom/src:/path/to/gmsh/lib:/path/to/Paraqus/src:${PYTHONPATH}"
+   . ~/.abqhom/abaqus-runtime/.../activate_abqhom.sh
 
-Set the variable in the shell from which Abaqus is launched. For a persistent
-installation, define the same entries in the environment setup used by your
-workstation or job scheduler.
+Only this dedicated runtime directory is added to ``PYTHONPATH``. Other
+packages installed in the regular Python environment are not exposed to
+Abaqus. For batch systems, the reported path can equivalently be added by the
+job scheduler environment.
+
+Install from a source checkout
+------------------------------
+
+For development, install the checkout in the regular Python environment and
+tell the helper to use the local source or a locally built wheel:
+
+.. code-block:: console
+
+   git clone https://github.com/jstollberg/abqhom.git
+   cd abqhom
+   python -m pip install .
+   abqhom-install-abaqus --abqhom-source .
 
 Verify the setup
 ----------------
@@ -59,12 +74,11 @@ side:
    abaqus cae noGUI=main.py
 
 The bundled examples locate the repository's ``src`` directory relative to
-their own files, so only Gmsh and optional Paraqus must be exposed to them
-through ``PYTHONPATH``.
+their own files. The activated runtime supplies Gmsh, Paraqus, and the legacy
+weak-reference backport.
 
 .. tip::
 
-   Avoid adding imports to every analysis script or copying packages into the
-   Abaqus ``site-packages`` directory. A configured ``PYTHONPATH`` keeps the
-   solver installation untouched and makes the same script portable between
-   machines.
+   Do not copy packages into the Abaqus ``site-packages`` directory. The
+   isolated runtime and its activation script keep the solver installation
+   untouched and make the same analysis scripts portable between machines.

@@ -9,9 +9,9 @@ Run each tutorial from its own directory:
 
    abaqus cae noGUI=main.py
 
-Before launching Abaqus, expose Gmsh and optional Paraqus through
-``PYTHONPATH`` as described in :doc:`installation`. Paraqus-dependent VTK
-export is skipped when Paraqus is unavailable.
+Before launching Abaqus, activate the isolated runtime described in
+:doc:`installation`. This exposes abqhom, Gmsh, Paraqus, and the weak-reference
+backport through a single ``PYTHONPATH`` entry.
 
 Tutorial examples
 -----------------

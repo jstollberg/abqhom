@@ -9,20 +9,15 @@ abaqus cae noGUI=main.py
 ```
 
 The abqhom source is located automatically relative to the example. Before
-launching Abaqus, add the directories containing the Gmsh and optional
-Paraqus Python modules to `PYTHONPATH`. Results are written next to the script
-into `abq/` (Abaqus job files), `results/` (CSV data and, where applicable,
-plots) and, when Paraqus is available, `vtk_output/` (VTK files). VTK export
-is skipped when Paraqus is not installed.
+launching Abaqus, activate the isolated runtime created with
+`abqhom-install-abaqus`. Results are written next to the script into `abq/`
+(Abaqus job files), `results/` (CSV data and, where applicable, plots) and
+`vtk_output/` (VTK files).
 
 For example, in PowerShell:
 
 ```powershell
-$env:PYTHONPATH = (
-    "C:/path/to/gmsh/lib;" +
-    "C:/path/to/Paraqus/src;" +
-    $env:PYTHONPATH
-)
+. "C:/Users/name/.abqhom/abaqus-runtime/.../activate_abqhom.ps1"
 ```
 
 ## Beam / truss lattices

@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "abqhom"
+dynamic = ["version"]
+description = "Computational homogenization of periodic unit cells with Abaqus and Gmsh"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Jonathan Stollberg", email = "jonathan.stollberg@tu-darmstadt.de" },
+]
+keywords = [
+    "Abaqus",
+    "computational homogenization",
+    "finite elements",
+    "Gmsh",
+    "periodic unit cells",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+dependencies = [
+    "backports.weakref>=1.0.post1",
+    "gmsh>=4.9.4",
+    "numpy",
+    "paraqus>=1.0.2",
+]
+
+[project.scripts]
+abqhom-install-abaqus = "abqhom_installer:main"
+
+[project.urls]
+Documentation = "https://abqhom.readthedocs.io/"
+Homepage = "https://github.com/jstollberg/abqhom"
+Issues = "https://github.com/jstollberg/abqhom/issues"
+Repository = "https://github.com/jstollberg/abqhom"
+
+[tool.setuptools.dynamic]
+version = { attr = "abqhom.__version__" }
+
+[tool.setuptools]
+py-modules = ["abqhom_installer"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["abqhom*"]

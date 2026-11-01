@@ -90,11 +90,12 @@ Gmsh geometry or mesh
 
 - **Abaqus** CAE and solver. Scripts using `AbaqusRVE` execute through, for
   example, `abaqus cae noGUI=main.py`.
-- **Gmsh** with its Python API and shared library.
+- **Gmsh 4.9.4 or newer** with its Python API and shared library.
 - **NumPy**, which is included with supported Abaqus installations.
-- **backports.weakref**, required by current Gmsh versions only when using a
-  legacy Abaqus installation with Python 2.7.
-- **Paraqus**, optional and required only for VTK export.
+- **backports.weakref**, installed in the Abaqus runtime for compatibility
+  with legacy Python 2.7 releases.
+- **Paraqus 1.0.2 or newer**, used for VTK export. The oldest compatible
+  release currently available from PyPI is 1.0.4.
 
 The code is compatible with both the Python 3 environment of current Abaqus
 releases and legacy Abaqus installations using Python 2.7. The examples may
@@ -105,46 +106,42 @@ not a runtime dependency of `abqhom` or Abaqus.
 
 ## Installation
 
-`abqhom` is currently used directly from a source checkout. This avoids
-modifying the Abaqus installation and works on local machines and compute
-clusters without write access to Abaqus `site-packages`.
+Install `abqhom` in a regular Python environment and use the supplied helper
+to create an isolated runtime for Abaqus. The Abaqus installation itself is
+not modified, so this workflow also works without administrative access.
 
-Clone the repository:
+Install the package and create the runtime:
 
 ```console
-git clone https://github.com/jstollberg/abqhom.git
-cd abqhom
+python -m pip install abqhom
+abqhom-install-abaqus
 ```
 
-Add the package source, the directory containing `gmsh.py`, and optionally
-the Paraqus source to `PYTHONPATH` before launching Abaqus.
+The helper creates a versioned prefix below `~/.abqhom/abaqus-runtime`. It
+installs only abqhom, Gmsh, Paraqus and `backports.weakref` there, without
+their dependencies. In particular, no external NumPy is exposed to Abaqus.
+The command prints the resulting `site-packages` path and writes activation
+scripts next to it.
 
-PowerShell:
+Activate the runtime in the shell from which Abaqus will be launched. For
+example, on PowerShell use the path printed by the helper:
 
 ```powershell
-$env:PYTHONPATH = (
-    "C:/path/to/abqhom/src;" +
-    "C:/path/to/gmsh/lib;" +
-    "C:/path/to/Paraqus/src;" +
-    $env:PYTHONPATH
-)
+. "C:/Users/name/.abqhom/abaqus-runtime/.../activate_abqhom.ps1"
 ```
 
-Linux:
+On Linux, source the generated shell script:
 
 ```bash
-export PYTHONPATH="/path/to/abqhom/src:/path/to/gmsh/lib:/path/to/Paraqus/src:${PYTHONPATH}"
+. ~/.abqhom/abaqus-runtime/.../activate_abqhom.sh
 ```
 
-The Paraqus entry may be omitted when VTK export is not needed. Set the
-variable in the shell or scheduler environment from which Abaqus is launched.
-For legacy Abaqus installations, make the PyPI package
-`backports.weakref` available in the same environment or on `PYTHONPATH`.
-Current Python versions provide the required functionality directly.
+The generated path may instead be added to the environment setup of a job
+scheduler. Only the dedicated runtime `site-packages` directory is exposed;
+packages from the Python environment used to run the installer are not added.
 
-The bundled examples locate the repository's `src` directory relative to
-their own files. When running those examples, only Gmsh and optional Paraqus
-must therefore be exposed through `PYTHONPATH`.
+For a source checkout, first run `python -m pip install .` and pass the local
+source or wheel to the helper with `--abqhom-source`.
 
 ## Quick start
 
@@ -227,16 +224,16 @@ Abaqus or Gmsh installation is not required to render the documentation.
 ## Tests
 
 Tests are split into a Gmsh-only group and a group requiring the Abaqus
-kernel. Both runners load Gmsh exclusively from the explicitly supplied SDK
-path, isolate generated files in a temporary directory, and write a report to
-the current working directory.
+kernel. Both runners load Gmsh exclusively from the explicitly supplied
+module directory, isolate generated files in a temporary directory, and write
+a report to the current working directory.
 
 Run the complete suite from the Abaqus Python interpreter:
 
 ```python
 import abqhom.tests as tests
 
-tests.run_abaqus_tests("C:/path/to/gmsh/lib")
+tests.run_abaqus_tests("C:/path/reported/by/abqhom-install-abaqus")
 ```
 
 Run only the Gmsh and utility tests from a compatible Python interpreter:
@@ -244,7 +241,7 @@ Run only the Gmsh and utility tests from a compatible Python interpreter:
 ```python
 import abqhom.tests as tests
 
-tests.run_python_tests("C:/path/to/gmsh/lib")
+tests.run_python_tests("C:/path/reported/by/abqhom-install-abaqus")
 ```
 
 Failed test runs retain their temporary artifacts for inspection. See

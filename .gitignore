@@ -2,6 +2,11 @@
 __pycache__/
 *.pyc
 
+# Python package builds
+/build/
+/dist/
+*.egg-info/
+
 # Output directories written by the examples
 abq/
 abq_weighted/
