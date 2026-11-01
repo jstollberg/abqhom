@@ -14,6 +14,7 @@ completed plane sections are resumed from their CSV files.
 """
 
 import csv
+import errno
 import inspect
 import json
 import os
@@ -41,6 +42,20 @@ from abqhom.abqmodel import AbaqusRVE, LoadHistory
 from abqhom.gmshmodel import GmshRVE
 from abqhom.utils import tensor_to_voigt, voigt_to_tensor
 from sandwich import create_geometry
+
+
+def _open_csv_file(path, mode):
+    """Open a CSV file correctly under Python 2.7 and Python 3."""
+    if sys.version_info[0] < 3:
+        return open(path, mode + "b")
+    return open(path, mode, newline="")
+
+
+def _open_csv_descriptor(descriptor):
+    """Open a temporary CSV descriptor for the active Python version."""
+    if sys.version_info[0] < 3:
+        return os.fdopen(descriptor, "wb")
+    return os.fdopen(descriptor, "w", newline="")
 
 
 # ---------------------------------------------------------------
@@ -447,7 +462,9 @@ def _acquire_configuration_lock(path, timeout=30.0):
         try:
             os.mkdir(lock_path)
             return lock_path
-        except FileExistsError:
+        except OSError as error:
+            if error.errno != errno.EEXIST:
+                raise
             if time.time() >= deadline:
                 raise RuntimeError(
                     "Timed out waiting for the result-configuration lock "
@@ -466,7 +483,7 @@ def _validate_result_configuration(path, configuration, result_paths):
     }
 
     if os.path.isfile(path):
-        with open(path, "r", newline="") as csv_file:
+        with _open_csv_file(path, "r") as csv_file:
             reader = csv.DictReader(csv_file)
             if reader.fieldnames != ["setting", "value"]:
                 raise RuntimeError(
@@ -499,12 +516,12 @@ def _validate_result_configuration(path, configuration, result_paths):
         prefix="." + os.path.basename(path) + ".", suffix=".tmp",
         dir=directory, text=True)
     try:
-        with os.fdopen(descriptor, "w", newline="") as csv_file:
+        with _open_csv_descriptor(descriptor) as csv_file:
             writer = csv.writer(csv_file)
             writer.writerow(["setting", "value"])
             for key in sorted(expected):
                 writer.writerow([key, expected[key]])
-        os.replace(temporary_path, path)
+        os.rename(temporary_path, path)
     finally:
         if os.path.isfile(temporary_path):
             os.remove(temporary_path)
@@ -532,7 +549,7 @@ def write_yield_results(path, records):
                  "max-unload-delta-peeq-beam",
                  "max-delta-peeq-shell", "max-delta-peeq-beam",
                  "controlling-constituent"])
-    with open(path, "w", newline="") as csv_file:
+    with _open_csv_file(path, "w") as csv_file:
         writer = csv.writer(csv_file)
         writer.writerow(header)
         for record in records:
@@ -554,7 +571,7 @@ def read_yield_results(path):
         return []
 
     records = []
-    with open(path, "r", newline="") as csv_file:
+    with _open_csv_file(path, "r") as csv_file:
         for row in csv.DictReader(csv_file):
             records.append({
                 "theta": float(row["theta"]),

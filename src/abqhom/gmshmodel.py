@@ -959,6 +959,7 @@ class GmshRVE(object):
             Absolute path to the generated Abaqus input file.
 
         """
+
         # Activate the model in Gmsh
         self.activate()
 

@@ -37,9 +37,11 @@ class TestBoundaryGeometry(GmshTestCase):
         """Group identifiers encode fixed and unconstrained coordinates."""
         fixtures.simple_cubic("ID", length=2.0)
         identifiers = Boundary("ID").get_group_coordinate_identifiers()
+
         # POINT_1 is the min corner, POINT_7 the max corner
         self.assertTrue(np.allclose(identifiers["POINT_1"], [-1, -1, -1]))
         self.assertTrue(np.allclose(identifiers["POINT_7"], [1, 1, 1]))
+
         # FACE_1 lies at z = zmin and is free in x and y
         face1 = identifiers["FACE_1"]
         self.assertTrue(np.isnan(face1[0]) and np.isnan(face1[1]))
@@ -88,6 +90,7 @@ class TestBoundaryPeriodicity(GmshTestCase):
         fixtures.simple_cubic("PP", length=length)
         boundary = Boundary("PP")
         self.assertTrue(boundary.periodic)
+
         # POINT_2 = (xmax, ymin, zmin) is the x-shifted image of POINT_1
         primary_dim, primary_tag = boundary["POINT_1"][0]
         secondary_dim, secondary_tag = boundary["POINT_2"][0]

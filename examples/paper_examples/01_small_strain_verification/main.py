@@ -296,6 +296,7 @@ def main():
         edge_length = 1.0
         shell_thickness = 0.02
         beam_radius = 0.04
+
         # Values are (Young's modulus, Poisson's ratio)
         properties = {
             "CONTINUUM": (100.0, 0.3),
@@ -310,6 +311,7 @@ def main():
         power_tolerance = 1.0e-8
         step_name = "LOAD"
         component_names = ("xx", "yy", "zz", "yz", "xz", "xy")
+
         # Gmsh line, quadrilateral, and hexahedral element types
         element_types = {1: "B31", 3: "S4", 5: "C3D8"}
         vtk_element_sets = [

@@ -24,6 +24,7 @@ here = os.path.dirname(os.path.abspath(__file__))
 
 def segment_distances(first_start, first_end, second_start, second_end):
     """Return exact distances between corresponding line segments."""
+
     # Solve the closest-point problem on the supporting lines and clamp both
     # parameters to cover endpoint as well as interior closest points.
     first_direction = first_end - first_start
@@ -181,6 +182,7 @@ def build_admissible_pair_masks(element_strut, strut_start, strut_end,
             np.linalg.norm(
                 element_end[:, None, :] - image_end[None, :, :],
                 axis=2)))
+
         # Parent struts sharing an ideal endpoint represent one rigid joint,
         # not contact between independent members.
         masks[shift_index] = junction_distance > tolerance
@@ -219,9 +221,11 @@ def minimum_periodic_distance(current_start, current_end, current_shifts,
 
         midpoint_distance = np.linalg.norm(
             midpoint[:, None, :] - image_midpoint[None, :, :], axis=2)
+
         # Every point of a segment lies within half its length of its
         # midpoint. Hence this is a rigorous lower bound on segment distance.
         lower_bound = midpoint_distance - half_length_sum
+
         # Only pairs whose lower bound can improve the current upper bound
         # need the more expensive exact segment-distance evaluation.
         candidates = (admissible_pairs[shift_index]
@@ -279,6 +283,7 @@ def evaluate_clearance(case_name, vtk_root, model_name, edge_length):
 
         deformation, loading_magnitude = prescribed_state(
             case_name, pseudo_time)
+
         # Periodic fluctuations repeat, while each reference lattice vector
         # is carried to the current configuration by the macroscopic F.
         current_shifts = edge_length * integer_shifts.dot(deformation.T)
@@ -366,8 +371,8 @@ def main():
     diameter = 2.0 * beam_radius
     model_name = "EXAMPLE_2_OCTET"
     cases = ("compression", "tension", "shear_12")
-    vtk_root = os.path.join(here, "final_vtk")
-    result_root = os.path.join(here, "final_results")
+    vtk_root = os.path.join(here, "vtk_output")
+    result_root = os.path.join(here, "results")
 
     for case_name in cases:
         result, closest_pair = evaluate_clearance(

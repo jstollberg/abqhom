@@ -91,6 +91,7 @@ def _cuboidal_boundary(dx, dy, dz):
 def create_geometry(model_name, dx=1.0, dy=1.0, dz=1.0,
                     inclusion_fraction=0.2):
     """Create a cuboidal matrix with a centered spherical inclusion."""
+
     # Compute the radius of the inclusion
     radius = ((0.75*inclusion_fraction*dx*dy*dz)/np.pi)**(1.0/3.0)
     if 2*radius >= min(dx, dy, dz):
@@ -127,20 +128,6 @@ def create_geometry(model_name, dx=1.0, dy=1.0, dz=1.0,
     return boundary
 
 
-def neo_hookean_parameters(E, nu):
-    """Return Abaqus Neo-Hookean parameters for ``E`` and ``nu``."""
-    shear_modulus = E/(2.0*(1.0 + nu))
-    bulk_modulus = E/(3.0*(1.0 - 2.0*nu))
-    return 0.5*shear_modulus, 2.0/bulk_modulus
-
-
-def load_path(time):
-    """Return the macroscopic displacement gradient at ``time``."""
-    displacement_gradient = np.zeros((3, 3))
-    displacement_gradient[0, 0] = 0.2*time
-    return displacement_gradient
-
-
 def get_frame_times(unit_cell, step_name):
     """Return the output-frame times and close the ODB."""
     unit_cell.open_odb_file()
@@ -166,6 +153,7 @@ def main():
         inclusion_fraction = 0.3       # volume fraction of the inclusion
         parameters = {"MATRIX":    [3.5, 0.35],    # soft matrix
                       "INCLUSION": [230.0, 0.2]}   # stiff inclusion
+        final_displacement_gradient = 0.2
 
         # ---------------------------------------------------------------
         # Build the geometry with a manually supplied boundary and a periodic mesh.
@@ -177,11 +165,13 @@ def main():
 
         unit_cell = AbaqusRVE(unit_cell)
         for name, (E, nu) in parameters.items():
-            c10, d1 = neo_hookean_parameters(E, nu)
+            shear_modulus = E/(2.0*(1.0 + nu))
+            bulk_modulus = E/(3.0*(1.0 - 2.0*nu))
             material = unit_cell.model.Material(name=name)
             material.Hyperelastic(
-                materialType=ISOTROPIC, table=((c10, d1),), testData=OFF,
-                type=NEO_HOOKE,
+                materialType=ISOTROPIC,
+                table=((0.5*shear_modulus, 2.0/bulk_modulus),),
+                testData=OFF, type=NEO_HOOKE,
                 volumetricResponse=VOLUMETRIC_DATA)
             unit_cell.assign_solid_section(name, name)
 
@@ -191,7 +181,10 @@ def main():
             name=step_name, previous="Initial", nlgeom=ON, maxNumInc=200,
             initialInc=increment, minInc=increment, maxInc=increment)
 
-        history = LoadHistory(np.array([0.0, 1.0]), load_path)
+        history = LoadHistory(
+            np.array([0.0, 1.0]),
+            lambda pseudo_time: np.diag(
+                [final_displacement_gradient*pseudo_time, 0.0, 0.0]))
         unit_cell.apply_periodic_BC(step_name, history)
         unit_cell.run_analysis(field_outputs=["U", "S"])
 
@@ -200,7 +193,7 @@ def main():
 
         curve = []
         for index, frame_time in enumerate(frame_times):
-            F11 = 1.0 + load_path(frame_time)[0, 0]
+            F11 = 1.0 + final_displacement_gradient*frame_time
             stress = unit_cell.average_stress(step_name, frame=index)
             curve.append([F11, stress[0, 0]])
         curve = np.asarray(curve)

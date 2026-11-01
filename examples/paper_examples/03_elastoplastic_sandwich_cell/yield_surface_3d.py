@@ -14,6 +14,7 @@ surface and its triangular connectivity.
 """
 
 import csv
+import errno
 import inspect
 import os
 import sys
@@ -30,8 +31,9 @@ here = os.path.dirname(os.path.abspath(
 if here not in sys.path:
     sys.path.insert(0, here)
 
-from yield_surface_sections import (build_gmsh_cell, elastic_calibration,
-                                    sample_direction, state_definition,
+from yield_surface_sections import (_open_csv_file, build_gmsh_cell,
+                                    elastic_calibration, sample_direction,
+                                    state_definition,
                                     validate_result_configuration)
 
 COMPONENT_NAMES = ("11", "22", "33", "23", "13", "12")
@@ -44,6 +46,15 @@ CSV_HEADER = (["direction-index", "n1", "n2", "n3", "yield-time",
                  "max-unload-delta-peeq-beam",
                  "max-delta-peeq-shell", "max-delta-peeq-beam",
                  "controlling-constituent"])
+
+
+def _make_directory(path):
+    """Create a directory safely under Python 2.7 and Python 3."""
+    try:
+        os.makedirs(path)
+    except OSError as error:
+        if error.errno != errno.EEXIST or not os.path.isdir(path):
+            raise
 
 
 # ---------------------------------------------------------------
@@ -129,7 +140,7 @@ def read_worker_results(path):
     if not os.path.isfile(path) or os.path.getsize(path) == 0:
         return {}
 
-    with open(path, newline="") as csv_file:
+    with _open_csv_file(path, "r") as csv_file:
         reader = csv.DictReader(csv_file)
         if reader.fieldnames != CSV_HEADER:
             raise RuntimeError(
@@ -167,7 +178,7 @@ def append_worker_result(path, row):
         raise ValueError("The worker result does not match the CSV header.")
 
     has_content = os.path.isfile(path) and os.path.getsize(path) > 0
-    with open(path, "a", newline="") as csv_file:
+    with _open_csv_file(path, "a") as csv_file:
         writer = csv.writer(csv_file)
         if not has_content:
             writer.writerow(CSV_HEADER)
@@ -221,7 +232,7 @@ def merge_worker_results(state_name, root_directory, directions, faces,
             "consistent effective stresses.")
 
     output = os.path.join(root_directory, "yield_surface.csv")
-    with open(output, "w", newline="") as csv_file:
+    with _open_csv_file(output, "w") as csv_file:
         writer = csv.DictWriter(csv_file, fieldnames=CSV_HEADER)
         writer.writeheader()
         for index in range(len(directions)):
@@ -318,7 +329,7 @@ def main():
     root_directory = os.path.join(
         here, "yield_surface", "surface_3d", state_name)
     part_directory = os.path.join(root_directory, "parts")
-    os.makedirs(part_directory, exist_ok=True)
+    _make_directory(part_directory)
     existing_results = [
         os.path.join(root_directory, "yield_surface.csv"),
         os.path.join(root_directory, "directions.csv"),
@@ -357,7 +368,7 @@ def main():
 
     analysis_directory = os.path.join(
         root_directory, "abq_worker_{:02d}".format(worker_index))
-    os.makedirs(analysis_directory, exist_ok=True)
+    _make_directory(analysis_directory)
 
     part_path = os.path.join(
         part_directory, "worker_{:02d}.csv".format(worker_index))

@@ -72,20 +72,6 @@ def create_kelvin(model_name, edge=4.0):
     gmsh.model.set_physical_name(1, grp, "STRUTS")
 
 
-def neo_hookean_parameters(E, nu):
-    """Return Abaqus Neo-Hookean parameters for ``E`` and ``nu``."""
-    shear_modulus = E/(2.0*(1.0 + nu))
-    bulk_modulus = E/(3.0*(1.0 - 2.0*nu))
-    return 0.5*shear_modulus, 2.0/bulk_modulus
-
-
-def load_path(time):
-    """Return the macroscopic displacement gradient at ``time``."""
-    displacement_gradient = np.zeros((3, 3))
-    displacement_gradient[0, 0] = 0.2*time
-    return displacement_gradient
-
-
 def get_frame_times(unit_cell, step_name):
     """Return the output-frame times and close the ODB."""
     unit_cell.open_odb_file()
@@ -109,6 +95,7 @@ def main():
         # Material parameters (of the solid strut material)
         E = 1.0     # Young's modulus
         nu = 0.3    # Poisson's ratio
+        final_displacement_gradient = 0.2
 
         # Lattice parameters
         edge = 4.0          # cubic unit-cell edge length
@@ -124,11 +111,13 @@ def main():
         unit_cell.generate_mesh(element_size=element_size)
 
         unit_cell = AbaqusRVE(unit_cell, custom_types={1: "B31"})
-        c10, d1 = neo_hookean_parameters(E, nu)
+        shear_modulus = E/(2.0*(1.0 + nu))
+        bulk_modulus = E/(3.0*(1.0 - 2.0*nu))
         material = unit_cell.model.Material(name="NEO_HOOKE")
         material.Hyperelastic(
-            materialType=ISOTROPIC, table=((c10, d1),), testData=OFF,
-            type=NEO_HOOKE,
+            materialType=ISOTROPIC,
+            table=((0.5*shear_modulus, 2.0/bulk_modulus),),
+            testData=OFF, type=NEO_HOOKE,
             volumetricResponse=VOLUMETRIC_DATA)
         unit_cell.assign_beam_section("STRUTS", "NEO_HOOKE", radius)
 
@@ -138,7 +127,10 @@ def main():
             name=step_name, previous="Initial", nlgeom=ON, maxNumInc=200,
             initialInc=increment, minInc=increment, maxInc=increment)
 
-        history = LoadHistory(np.array([0.0, 1.0]), load_path)
+        history = LoadHistory(
+            np.array([0.0, 1.0]),
+            lambda pseudo_time: np.diag(
+                [final_displacement_gradient*pseudo_time, 0.0, 0.0]))
         unit_cell.apply_periodic_BC(step_name, history)
         unit_cell.run_analysis(field_outputs=["U", "S"])
 
@@ -146,7 +138,7 @@ def main():
 
         curve = []
         for index, frame_time in enumerate(frame_times):
-            F11 = 1.0 + load_path(frame_time)[0, 0]
+            F11 = 1.0 + final_displacement_gradient*frame_time
             stress = unit_cell.average_stress(step_name, frame=index)
             curve.append([F11, stress[0, 0]])
         curve = np.asarray(curve)

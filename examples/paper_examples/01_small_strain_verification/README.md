@@ -11,7 +11,7 @@ The analysis evaluates:
 - the complete effective stiffness from six independent strain cases;
 - the analytical normal-stiffness block;
 - major and cubic symmetry residuals;
-- the discrete Hill--Mandel residual in every strain case;
+- the discrete Hill–Mandel residual in every strain case;
 - equivalence between the reduced cell and the complete cell with
   ownership-weighted linear-elastic properties.
 
@@ -46,7 +46,7 @@ The `results/` directory contains:
 | `effective_stiffness_computed.csv` | Numerical 6 x 6 stiffness matrix |
 | `normal_stiffness_computed.csv` | Numerical 3 x 3 normal block |
 | `normal_stiffness_analytical.csv` | Analytical 3 x 3 normal block |
-| `hill_mandel_residuals.csv` | Hill--Mandel residuals for the six strain cases |
+| `hill_mandel_residuals.csv` | Hill–Mandel residuals for the six strain cases |
 | `effective_stiffness_weighted.csv` | Stiffness of the complete ownership-weighted cell |
 | `verification_residuals.csv` | Summary residuals reported for the verification study |
 
@@ -56,7 +56,7 @@ same strain-case order.
 
 The columns of `verification_residuals.csv` contain the normal-block error,
 major-symmetry residual, cubic-symmetry residual, reduction residual, and
-maximum Hill--Mandel residual. The CSV header records these names explicitly.
+maximum Hill–Mandel residual. The CSV header records these names explicitly.
 
 All model and material parameters are defined together near the beginning of
 `main.py`. The analysis uses 25 elements per cell edge and a macroscopic

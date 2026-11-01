@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
+# SPDX-License-Identifier: GPL-3.0-only
+
+# Documentation build requirements. Solver and meshing modules are mocked.
+sphinx>=7,<9
+sphinx-rtd-theme>=2,<4
+numpy>=1.24

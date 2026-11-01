@@ -34,20 +34,6 @@ from abqhom.gmshmodel import GmshRVE
 from abqhom.utils import export_to_csv_file
 
 
-def neo_hookean_parameters(E, nu):
-    """Return Abaqus Neo-Hookean parameters for ``E`` and ``nu``."""
-    shear_modulus = E/(2.0*(1.0 + nu))
-    bulk_modulus = E/(3.0*(1.0 - 2.0*nu))
-    return 0.5*shear_modulus, 2.0/bulk_modulus
-
-
-def load_path(time):
-    """Return the macroscopic displacement gradient at ``time``."""
-    displacement_gradient = np.zeros((3, 3))
-    displacement_gradient[0, 0] = 0.2*time
-    return displacement_gradient
-
-
 def get_frame_times(unit_cell, step_name):
     """Return the output-frame times and close the ODB."""
     unit_cell.open_odb_file()
@@ -56,6 +42,7 @@ def get_frame_times(unit_cell, step_name):
                 for frame in unit_cell.odb.steps[step_name].frames]
     finally:
         unit_cell.close_odb_file()
+
 
 def main():
     """Run the example workflow."""
@@ -71,6 +58,7 @@ def main():
         thickness = 0.05     # shell thickness
         E = 210.0            # Young's modulus of the shell material
         nu = 0.3             # Poisson's ratio
+        final_displacement_gradient = 0.2
 
         # Load the pre-computed microgen mesh (physical group 'GYROID').
         mesh_file = os.path.join(here, "gyroid.msh")
@@ -81,6 +69,7 @@ def main():
                 .format(mesh_file))
 
         gmsh.initialize()
+
         # Merge the mesh into an explicitly named model (Abaqus uppercases the
         # part name, so the model name must match that case).
         model_name = "GYROID"
@@ -93,11 +82,13 @@ def main():
         # ---------------------------------------------------------------
         # Build the Abaqus model, assign the shell section and define the load step.
         cell = AbaqusRVE(unit_cell)
+        shear_modulus = E/(2.0*(1.0 + nu))
+        bulk_modulus = E/(3.0*(1.0 - 2.0*nu))
         material = cell.model.Material(name="SHELL")
-        c10, d1 = neo_hookean_parameters(E, nu)
         material.Hyperelastic(
-            materialType=ISOTROPIC, table=((c10, d1),), testData=OFF,
-            type=NEO_HOOKE,
+            materialType=ISOTROPIC,
+            table=((0.5*shear_modulus, 2.0/bulk_modulus),),
+            testData=OFF, type=NEO_HOOKE,
             volumetricResponse=VOLUMETRIC_DATA)
         cell.assign_shell_section("GYROID", "SHELL", thickness)
 
@@ -107,7 +98,10 @@ def main():
             name=step_name, previous="Initial", nlgeom=ON, maxNumInc=200,
             initialInc=increment, minInc=increment, maxInc=increment)
 
-        history = LoadHistory(np.array([0.0, 1.0]), load_path)
+        history = LoadHistory(
+            np.array([0.0, 1.0]),
+            lambda pseudo_time: np.diag(
+                [final_displacement_gradient*pseudo_time, 0.0, 0.0]))
         cell.apply_periodic_BC(step_name, history)
         cell.run_analysis(field_outputs=["U", "S"])
 
@@ -115,7 +109,7 @@ def main():
 
         curve = []
         for index, frame_time in enumerate(frame_times):
-            F11 = 1.0 + load_path(frame_time)[0, 0]
+            F11 = 1.0 + final_displacement_gradient*frame_time
             stress = cell.average_stress(step_name, frame=index)
             curve.append([F11, stress[0, 0]])
         curve = np.asarray(curve)

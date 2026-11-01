@@ -264,6 +264,7 @@ class TestWriteAbaqusInput(GmshTestCase):
             if os.path.isfile(path):
                 os.remove(path)
         self.assertIn("*NODE", content)
+
         # Gmsh 2-node line maps to the Abaqus B33 beam in 3D
         self.assertIn("*ELEMENT, TYPE=B33", content)
 
@@ -282,8 +283,10 @@ class TestWriteAbaqusInput(GmshTestCase):
         finally:
             if os.path.isfile(path):
                 os.remove(path)
+
         # The override reaches the written file ...
         self.assertIn("*ELEMENT, TYPE=B31", content)
+
         # ... but the shared default map is left untouched.
         self.assertEqual(ABAQUS_ELEMENT_TYPES_3D, before)
 

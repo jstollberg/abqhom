@@ -91,6 +91,8 @@ Gmsh geometry or mesh
   example, `abaqus cae noGUI=main.py`.
 - **Gmsh** with its Python API and shared library.
 - **NumPy**, which is included with supported Abaqus installations.
+- **backports.weakref**, required by current Gmsh versions only when using a
+  legacy Abaqus installation with Python 2.7.
 - **Paraqus**, optional and required only for VTK export.
 
 The code is compatible with both the Python 3 environment of current Abaqus
@@ -127,7 +129,7 @@ $env:PYTHONPATH = (
 )
 ```
 
-Linux or macOS:
+Linux:
 
 ```bash
 export PYTHONPATH="/path/to/abqhom/src:/path/to/gmsh/lib:/path/to/Paraqus/src:${PYTHONPATH}"
@@ -135,6 +137,9 @@ export PYTHONPATH="/path/to/abqhom/src:/path/to/gmsh/lib:/path/to/Paraqus/src:${
 
 The Paraqus entry may be omitted when VTK export is not needed. Set the
 variable in the shell or scheduler environment from which Abaqus is launched.
+For legacy Abaqus installations, make the PyPI package
+`backports.weakref` available in the same environment or on `PYTHONPATH`.
+Current Python versions provide the required functionality directly.
 
 The bundled examples locate the repository's `src` directory relative to
 their own files. When running those examples, only Gmsh and optional Paraqus
@@ -146,7 +151,7 @@ The simple-cubic lattice is the shortest complete example. From an Abaqus
 command prompt:
 
 ```console
-cd examples/lattice_simple_cubic
+cd examples/beam_lattice_simple_cubic_3d
 abaqus cae noGUI=main.py
 ```
 
@@ -157,7 +162,7 @@ compares the axial modulus with its analytical value. Results are written to
 available.
 
 See the complete
-[`lattice_simple_cubic/main.py`](examples/lattice_simple_cubic/main.py) source
+[`beam_lattice_simple_cubic_3d/main.py`](examples/beam_lattice_simple_cubic_3d/main.py) source
 for the minimal API sequence. The broader tutorial collection is described in
 [`examples/README.md`](examples/README.md).
 
@@ -195,9 +200,9 @@ studies accompanying the computational-homogenization manuscript:
 
 | Example | Study |
 |---|---|
-| [`example_1`](examples/paper_examples/example_1) | Small-strain mixed continuum–shell–beam verification |
-| [`example_2`](examples/paper_examples/example_2) | Imperfect hyperelastic Octet lattice, periodic buckling, and supercell check |
-| [`example_3`](examples/paper_examples/example_3) | Elastoplastic sandwich cell, cyclic response, and effective yield surfaces |
+| [`01_small_strain_verification`](examples/paper_examples/01_small_strain_verification) | Small-strain mixed continuum–shell–beam verification |
+| [`02_hyperelastic_octet_lattice`](examples/paper_examples/02_hyperelastic_octet_lattice) | Imperfect hyperelastic Octet lattice, periodic buckling, and supercell check |
+| [`03_elastoplastic_sandwich_cell`](examples/paper_examples/03_elastoplastic_sandwich_cell) | Elastoplastic sandwich cell, cyclic response, and effective yield surfaces |
 
 Execution notes for the manuscript cases are collected in the
 [`paper_examples` README](examples/paper_examples/README.md).
@@ -263,6 +268,12 @@ The cases under `examples/paper_examples` accompany a manuscript on nonlinear
 computational homogenization of periodic cells containing continuum and
 structural constituents. Formal citation information and an archived software
 release will be added when they become available.
+
+## Development disclosure
+
+Generative AI tools assisted with code review, refactoring, documentation,
+and language editing. All resulting changes were reviewed and tested by the
+author, who remains responsible for the software and documentation.
 
 ## Author
 

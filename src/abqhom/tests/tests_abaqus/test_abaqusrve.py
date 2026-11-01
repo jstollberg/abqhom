@@ -319,6 +319,7 @@ class TestRigidBodyAnchor(AbaqusTestCase):
 
     def test_user_defined_anchor_is_used(self):
         """A user-specified node set controls rigid-body anchoring."""
+
         # The BCC cell has an interior center node, so INNER_NODES is not
         # empty and can be used as a user-defined anchor.
         unit = _build(lambda: fixtures.bcc("M", 2.0))

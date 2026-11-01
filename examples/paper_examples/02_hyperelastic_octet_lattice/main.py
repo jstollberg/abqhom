@@ -51,36 +51,20 @@ def assign_section(cell, radius, youngs_modulus, poissons_ratio, density):
         "OCTET_BEAMS", "OCTET_MATERIAL", radius, pre_integrate=False)
 
 
-def make_load_path(component, final_value):
-    """Return a linear displacement-gradient path for pseudo-time [0, 1]."""
-    def load_path(pseudo_time):
-        """Evaluate the macroscopic displacement gradient."""
-        gradient = np.zeros((3, 3))
-        gradient[component] = final_value * pseudo_time
-        return gradient
-
-    return load_path
-
-
-def axial_stretch(gradient):
-    """Return the axial stretch associated with a displacement gradient."""
-    return 1.0 + gradient[0, 0]
-
-
-def shear_amount(gradient):
-    """Return the imposed 12-shear component."""
-    return gradient[0, 1]
-
-
 def maximum_rotation(cell, step_name):
-    """Return the maximum final nodal rotation-vector magnitude."""
+    """Return the maximum nodal rotation-vector magnitude over all frames."""
     cell.open_odb_file()
     try:
-        outputs = cell.odb.steps[step_name].frames[-1].fieldOutputs
         instance = cell.odb.rootAssembly.instances[cell.model_name]
-        values = outputs["UR"].getSubset(region=instance).values
-        return max(np.linalg.norm(np.asarray(value.data, dtype=float))
-                   for value in values)
+        maximum = 0.0
+        for frame in cell.odb.steps[step_name].frames:
+            values = frame.fieldOutputs["UR"].getSubset(
+                region=instance).values
+            for value in values:
+                magnitude = np.linalg.norm(
+                    np.asarray(value.data, dtype=float))
+                maximum = max(maximum, magnitude)
+        return maximum
     finally:
         cell.close_odb_file()
 
@@ -124,7 +108,7 @@ def energy_ratios(cell, step_name, minimum_pseudo_time=0.02):
     raise RuntimeError("ALLIE and ALLKE are unavailable in the ODB.")
 
 
-def evaluate_response(cell, step_name, load_path, loading_measure,
+def evaluate_response(cell, step_name, load_path, component,
                       power_tolerance):
     """Evaluate effective stresses and discrete Hill--Mandel residuals."""
     response = []
@@ -159,7 +143,7 @@ def evaluate_response(cell, step_name, load_path, loading_measure,
                     macroscopic_work, microscopic_work, power_tolerance)
 
             response.append(np.concatenate((
-                [frame.frameValue, loading_measure(gradient)],
+                [frame.frameValue, deformation_gradient[component]],
                 nominal_stress.reshape(-1), cauchy_stress.reshape(-1),
                 [asymmetry, hill_mandel])))
             previous_gradient = gradient
@@ -195,8 +179,9 @@ def export_results(result_directory, response, component, energies,
     loaded_frames = cauchy_norm > 1.0e-6 * maximum_cauchy_norm
     maximum_asymmetry = np.max(response[loaded_frames, -2])
     maximum_hill_mandel = np.nanmax(response[:, -1])
+
     # Columns: peak ratio and time, final ratio, global ratio, stress
-    # asymmetry, Hill--Mandel residual, and final nodal rotation
+    # asymmetry, Hill--Mandel residual, and maximum nodal rotation
     metrics = np.array([[
         energies["peak_ratio"], energies["peak_time"],
         energies["final_ratio"], energies["global_ratio"],
@@ -207,8 +192,8 @@ def export_results(result_directory, response, component, energies,
     return curve, maximum_hill_mandel
 
 
-def run_case(gmsh_cell, case_name, component, final_value, loading_measure,
-             parameters, output_directories):
+def run_case(gmsh_cell, case_name, component, final_value, parameters,
+             output_directories):
     """Build, solve, and post-process one macroscopic load path."""
     analysis_root, result_root, vtk_root = output_directories
     analysis_directory = os.path.join(analysis_root, case_name)
@@ -230,13 +215,18 @@ def run_case(gmsh_cell, case_name, component, final_value, loading_measure,
         nlgeom=ON, timePeriod=1.0, maxNumInc=8000,
         initialInc=time_increment, minInc=1.0e-7, maxInc=time_increment)
 
-    load_path = make_load_path(component, final_value)
+    def load_path(pseudo_time):
+        """Evaluate the macroscopic displacement gradient."""
+        gradient = np.zeros((3, 3))
+        gradient[component] = final_value * pseudo_time
+        return gradient
+
     load_history = LoadHistory(np.asarray([0.0, 1.0]), load_path)
     cell.apply_periodic_BC(step_name, load_history)
     cell.run_analysis(history_outputs=["ALLIE", "ALLKE"])
 
     response = evaluate_response(
-        cell, step_name, load_path, loading_measure,
+        cell, step_name, load_path, component,
         parameters["power_tolerance"])
     if not np.isclose(response[-1, 0], 1.0):
         raise RuntimeError(
@@ -268,6 +258,7 @@ def run_cell(model_name, cells_per_axis, elements_per_strut, edge_length,
              imperfection_amplitude, parameters, load_cases,
              output_directories, buckling_directory):
     """Build one cell size and run all prescribed load cases."""
+
     # Regenerate the same perfect mesh used by the corresponding buckling
     # analysis; the mode-file coordinates verify this compatibility.
     create_geometry(
@@ -289,7 +280,7 @@ def run_cell(model_name, cells_per_axis, elements_per_strut, edge_length,
 
     for case in load_cases:
         run_case(
-            gmsh_cell, case[0], case[1], case[2], case[3], parameters,
+            gmsh_cell, case[0], case[1], case[2], parameters,
             output_directories)
 
 
@@ -313,30 +304,31 @@ def main(include_supercell=True):
         # Mesh, loading, and output settings
         elements_per_strut = 16
         load_cases = (
-            ("compression", (0, 0), -0.40, axial_stretch),
-            ("tension", (0, 0), 0.40, axial_stretch),
-            ("shear_12", (0, 1), 0.40, shear_amount),
+            ("compression", (0, 0), -0.40),
+            ("tension", (0, 0), 0.40),
+            ("shear_12", (0, 1), 0.40),
         )
 
         imperfection_amplitude = imperfection_ratio * beam_radius
+
         # Primitive-cell analyses reported throughout the example
         primitive_outputs = (
-            os.path.join(here, "final_abq"),
-            os.path.join(here, "final_results"),
-            os.path.join(here, "final_vtk"),
+            os.path.join(here, "abq"),
+            os.path.join(here, "results"),
+            os.path.join(here, "vtk_output"),
         )
         run_cell(
             "EXAMPLE_2_OCTET", 1, elements_per_strut, edge_length,
             imperfection_amplitude, parameters, load_cases,
             primitive_outputs,
-            os.path.join(here, "final_results", "buckling"))
+            os.path.join(here, "results", "buckling"))
 
         if include_supercell:
             # Identical load paths on the conforming 2 x 2 x 2 supercell
             supercell_outputs = (
-                os.path.join(here, "sc_abq"),
+                os.path.join(here, "supercell_abq"),
                 os.path.join(here, "supercell_results"),
-                os.path.join(here, "supercell_vtk"),
+                os.path.join(here, "supercell_vtk_output"),
             )
             buckling_tag = "buckling_2x2x2_n{}".format(
                 elements_per_strut)

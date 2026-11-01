@@ -7,6 +7,10 @@ abq/
 abq_weighted/
 results/
 vtk_output/
+supercell_abq/
+supercell_results/
+supercell_vtk_output/
+yield_surface/
 
 # Abaqus job, scratch and CAE files
 *.abq
@@ -42,3 +46,6 @@ vtk_output/
 # Generated figures and animations
 *.png
 *.mp4
+
+# Generated documentation
+/doc/build/

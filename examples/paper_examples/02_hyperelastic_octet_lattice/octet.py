@@ -174,6 +174,7 @@ def apply_eigenmode_imperfection(gmsh_cell, result_directory, amplitude,
     coordinate_error = 0.0
     coordinate_scale = 1.0
     gmsh_cell.activate()
+
     # Validate labels and reference coordinates before applying a mode from
     # the independently generated buckling model.
     for tag in node_tags:
@@ -193,6 +194,7 @@ def apply_eigenmode_imperfection(gmsh_cell, result_directory, amplitude,
     normalization = max(np.linalg.norm(mode[tag]) for tag in node_tags)
     if normalization <= 0.0:
         raise RuntimeError("The selected buckling mode is zero.")
+
     # The prescribed amplitude is therefore the largest nodal perturbation.
     direction = {tag: mode[tag] / normalization for tag in node_tags}
 
