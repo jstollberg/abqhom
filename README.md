@@ -1,6 +1,7 @@
 # abqhom
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![Documentation Status](https://readthedocs.org/projects/abqhom/badge/?version=latest)](https://abqhom.readthedocs.io/en/latest/?badge=latest)
 
 `abqhom` is an open-source Python framework for first-order computational
 homogenization of periodic two- and three-dimensional unit cells. It connects
