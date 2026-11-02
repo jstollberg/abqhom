@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """
 Module containing the AbaqusRVE class that provides useful methods for
@@ -1441,11 +1441,12 @@ class AbaqusRVE(object):
                          [vector[2], 0.0, -vector[0]],
                          [-vector[1], vector[0], 0.0]])
 
-    def _left_jacobian(self, rotation):
+    @staticmethod
+    def _left_jacobian(rotation):
         """Evaluate the SO(3) left Jacobian, using its series near zero."""
 
         angle = np.linalg.norm(rotation)
-        rotation_hat = self._hat_operator(rotation)
+        rotation_hat = AbaqusRVE._hat_operator(rotation)
         if angle < 1.0e-8:
             return (np.eye(3) + 0.5*rotation_hat
                     + rotation_hat.dot(rotation_hat)/6.0)

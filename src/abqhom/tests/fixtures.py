@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """
 Geometry fixtures shared by the abqhom unit tests.
@@ -157,14 +157,67 @@ def bcc(name="BCC", length=1.0):
     return name
 
 
-def square_lattice(name="SQUARE", size=1.0):
-    """The four edge struts of a square (2D); one group 'STRUTS'."""
+def square_lattice_in_plane(name="SQUARE", size=1.0, axes=(0, 1),
+                            offset=0.0):
+    """Four square edge struts in a coordinate plane; group 'STRUTS'."""
+    if len(axes) != 2 or len(set(axes)) != 2:
+        raise ValueError("Two distinct coordinate axes are required.")
+    if not set(axes) <= {0, 1, 2}:
+        raise ValueError("Coordinate axes must be selected from 0, 1, 2.")
+
     g = _new_model(name)
     h = 0.5*size
-    p = [g.add_point(-h, -h, 0.0), g.add_point(h, -h, 0.0),
-         g.add_point(h, h, 0.0), g.add_point(-h, h, 0.0)]
+    inactive_axis = ({0, 1, 2} - set(axes)).pop()
+
+    def add_point(first, second):
+        """Add a point using the selected in-plane coordinate axes."""
+        coordinates = [0.0, 0.0, 0.0]
+        coordinates[axes[0]] = first
+        coordinates[axes[1]] = second
+        coordinates[inactive_axis] = offset
+        return g.add_point(*coordinates)
+
+    p = [add_point(-h, -h), add_point(h, -h),
+         add_point(h, h), add_point(-h, h)]
     struts = [g.add_line(p[0], p[1]), g.add_line(p[1], p[2]),
               g.add_line(p[2], p[3]), g.add_line(p[3], p[0])]
+    g.synchronize()
+    group = gmsh.model.add_physical_group(1, struts)
+    gmsh.model.set_physical_name(1, group, "STRUTS")
+    return name
+
+
+def square_lattice(name="SQUARE", size=1.0):
+    """The four edge struts of an x-y square; group 'STRUTS'."""
+    return square_lattice_in_plane(name, size=size, axes=(0, 1))
+
+
+def square_without_primary_edge(name="OPEN_SQUARE", size=1.0):
+    """An x-y square missing its left primary edge."""
+    g = _new_model(name)
+    h = 0.5*size
+    points = [g.add_point(-h, -h, 0.0), g.add_point(h, -h, 0.0),
+              g.add_point(h, h, 0.0), g.add_point(-h, h, 0.0)]
+    struts = [g.add_line(points[0], points[1]),
+              g.add_line(points[1], points[2]),
+              g.add_line(points[2], points[3])]
+    g.synchronize()
+    group = gmsh.model.add_physical_group(1, struts)
+    gmsh.model.set_physical_name(1, group, "STRUTS")
+    return name
+
+
+def square_with_duplicate_primary_edge(name="DUPLICATE_EDGE", size=1.0):
+    """A square with its left primary edge represented by two curves."""
+    g = _new_model(name)
+    h = 0.5*size
+    points = [g.add_point(-h, -h, 0.0), g.add_point(h, -h, 0.0),
+              g.add_point(h, h, 0.0), g.add_point(-h, h, 0.0)]
+    struts = [g.add_line(points[0], points[1]),
+              g.add_line(points[1], points[2]),
+              g.add_line(points[2], points[3]),
+              g.add_line(points[3], points[0]),
+              g.add_line(points[3], points[0])]
     g.synchronize()
     group = gmsh.model.add_physical_group(1, struts)
     gmsh.model.set_physical_name(1, group, "STRUTS")
@@ -184,6 +237,48 @@ def solid_cube(name="SOLID", length=1.0):
     gmsh.model.occ.synchronize()
     group = gmsh.model.add_physical_group(3, [box])
     gmsh.model.set_physical_name(3, group, "SOLID")
+    return name
+
+
+def spherical_inclusion_cube(name="SPHERICAL_INCLUSION", length=1.0,
+                             radius=0.2):
+    """A cube containing a retained sphere and a spherical cavity."""
+    if not gmsh.is_initialized():
+        gmsh.initialize()
+    if name in gmsh.model.list():
+        gmsh.model.set_current(name)
+        gmsh.model.remove()
+    gmsh.model.add(name)
+
+    h = 0.5*length
+    box = gmsh.model.occ.add_box(-h, -h, -h, length, length, length)
+    sphere = gmsh.model.occ.add_sphere(0.0, 0.0, 0.0, radius)
+    matrix, _ = gmsh.model.occ.cut(
+        [(3, box)], [(3, sphere)], removeTool=False)
+    gmsh.model.occ.synchronize()
+
+    group = gmsh.model.add_physical_group(
+        3, [tag for _, tag in matrix])
+    gmsh.model.set_physical_name(3, group, "MATRIX")
+    group = gmsh.model.add_physical_group(3, [sphere])
+    gmsh.model.set_physical_name(3, group, "INCLUSION")
+    return name
+
+
+def fragmented_cube(name="FRAGMENTED", length=1.0):
+    """Two conforming half-cubes with fragmented exterior boundaries."""
+    if not gmsh.is_initialized():
+        gmsh.initialize()
+    if name in gmsh.model.list():
+        gmsh.model.set_current(name)
+        gmsh.model.remove()
+    gmsh.model.add(name)
+
+    h = 0.5*length
+    left = gmsh.model.occ.add_box(-h, -h, -h, h, length, length)
+    right = gmsh.model.occ.add_box(0.0, -h, -h, h, length, length)
+    gmsh.model.occ.fragment([(3, left)], [(3, right)])
+    gmsh.model.occ.synchronize()
     return name
 
 

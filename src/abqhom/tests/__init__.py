@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """
 Unit tests for abqhom.
@@ -13,80 +13,38 @@ The tests are split into two groups:
   full homogenization workflow. They must be run in the Abaqus Python
   interpreter (``abaqus cae noGUI=...``).
 
-Use ``run_abaqus_tests(gmsh_path)`` (in Abaqus Python) to run everything,
-or ``run_python_tests(gmsh_path)`` (in any compatible Python interpreter)
-to run the Gmsh-only subset. ``gmsh_path`` must be the directory containing
-the prescribed ``gmsh.py`` installation. Both runners isolate generated
-files and write a report to the current working directory.
+Use ``run_abaqus_tests()`` (in Abaqus Python) to run everything, or
+``run_python_tests()`` (in any compatible Python interpreter) to run the
+Gmsh-only subset. Both runners use the Gmsh package installed in the active
+environment, isolate generated files and write a report to the current
+working directory.
 
 """
 import os
 import shutil
-import sys
 import tempfile
 import time
 import unittest
 
 
-def _canonical_path(path):
-    """Return a case-normalized physical path for reliable comparison."""
-    return os.path.normcase(os.path.realpath(os.path.abspath(path)))
+def _require_gmsh():
+    """Verify that the installed Gmsh dependency can be imported."""
 
-
-def _load_gmsh(gmsh_path):
-    """Load Gmsh exclusively from the prescribed library directory."""
-
-    if gmsh_path is None:
-        raise ValueError(
-            "A path to the prescribed Gmsh library must be provided.")
     try:
-        gmsh_path = os.fspath(gmsh_path)
-    except AttributeError:  # Legacy Abaqus releases use Python 2.7
-        pass
-    gmsh_path = _canonical_path(gmsh_path)
-    gmsh_file = os.path.join(gmsh_path, "gmsh.py")
-    if not os.path.isfile(gmsh_file):
-        raise IOError("The prescribed Gmsh module does not exist: {}"
-                      .format(gmsh_file))
-
-    loaded = sys.modules.get("gmsh")
-    if loaded is not None:
-        loaded_directory = _canonical_path(os.path.dirname(loaded.__file__))
-        if loaded_directory != gmsh_path:
-            raise RuntimeError(
-                "Gmsh is already loaded from '{}', not from the prescribed "
-                "directory '{}'. Start a fresh interpreter and provide the "
-                "Gmsh path before importing gmsh."
-                .format(loaded_directory, gmsh_path))
-        return loaded
-
-    sys.path.insert(0, gmsh_path)
-    try:
-        import gmsh
-    finally:
-        if sys.path[0] == gmsh_path:
-            del sys.path[0]
-
-    loaded_directory = _canonical_path(os.path.dirname(gmsh.__file__))
-    if loaded_directory != gmsh_path:
+        __import__("gmsh")
+    except ImportError:
         raise RuntimeError(
-            "Gmsh was loaded from '{}', not from the prescribed directory "
-            "'{}'.".format(loaded_directory, gmsh_path))
-    return gmsh
+            "Gmsh is not importable. Install the abqhom dependencies or "
+            "activate the isolated Abaqus runtime before running the tests.")
 
 
-def run_abaqus_tests(gmsh_path):
+def run_abaqus_tests():
     """
     Run all unit tests (Gmsh-only and Abaqus) using Abaqus Python.
 
     Generated Abaqus files are isolated in a temporary subdirectory. A report
     is written to ``abqhom_test_report_abaqus.txt`` in the current working
     directory. The temporary directory is retained when a test fails.
-
-    Parameters
-    ----------
-    gmsh_path : str or os.PathLike
-        Directory containing the prescribed ``gmsh.py`` installation.
 
     Raises
     ------
@@ -99,7 +57,7 @@ def run_abaqus_tests(gmsh_path):
     except ImportError:
         raise RuntimeError("run_abaqus_tests() must be run in Abaqus Python.")
 
-    _load_gmsh(gmsh_path)
+    _require_gmsh()
 
     from abqhom.tests import tests_common, tests_abaqus
     suites = [_find_tests(m) for m in (tests_common, tests_abaqus)]
@@ -107,7 +65,7 @@ def run_abaqus_tests(gmsh_path):
         unittest.TestSuite(suites), "abqhom_test_report_abaqus.txt")
 
 
-def run_python_tests(gmsh_path):
+def run_python_tests():
     """
     Run the Gmsh-only subset of the unit tests.
 
@@ -115,13 +73,8 @@ def run_python_tests(gmsh_path):
     written to ``abqhom_test_report_python.txt`` in the current working
     directory. The temporary directory is retained when a test fails.
 
-    Parameters
-    ----------
-    gmsh_path : str or os.PathLike
-        Directory containing the prescribed ``gmsh.py`` installation.
-
     """
-    _load_gmsh(gmsh_path)
+    _require_gmsh()
 
     from abqhom.tests import tests_common
     _run_isolated(

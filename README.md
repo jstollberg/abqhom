@@ -1,6 +1,6 @@
 # abqhom
 
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![License: GPL v3+](https://img.shields.io/badge/License-GPL_v3%2B-blue.svg)](LICENSE)
 [![Documentation Status](https://readthedocs.org/projects/abqhom/badge/?version=latest)](https://abqhom.readthedocs.io/en/latest/?badge=latest)
 
 `abqhom` is an open-source Python framework for first-order computational
@@ -47,9 +47,11 @@ integration, nonlinear solution procedures, and output databases.
 
 ## Scope and limitations
 
-The automatic boundary classification assumes an axis-aligned rectangular
-cell in two dimensions or a cuboidal cell in three dimensions. The
-constituent topology inside and on that boundary may be general.
+The reference cell must be rectangular in the global X1-X2 plane with
+X3 = 0 in two dimensions or cuboidal and aligned with the global coordinate
+axes in three dimensions. Rotated or sheared cells are not supported, and a
+manually supplied boundary must follow the same convention. The constituent
+topology inside and on the cell boundary may otherwise be general.
 
 The current framework identifies a first-order Cauchy effective response:
 
@@ -61,8 +63,8 @@ The current framework identifies a first-order Cauchy effective response:
 - the Abaqus-facing API must run in the Abaqus CAE Python kernel.
 
 See the detailed
-[modeling assumptions and limitations](doc/source/limitations.rst) for the
-complete scope.
+[modeling assumptions and limitations](https://abqhom.readthedocs.io/en/latest/limitations.html)
+for the complete scope.
 
 ## Workflow
 
@@ -179,7 +181,8 @@ The principal post-processing methods are:
   metadata;
 - `AbaqusRVE.export_to_vtk` for VTK visualization through Paraqus.
 
-The complete API is documented in [`doc/source/api.rst`](doc/source/api.rst).
+The complete API is available in the
+[online API reference](https://abqhom.readthedocs.io/en/latest/api.html).
 
 ## Examples
 
@@ -192,8 +195,8 @@ Concise tutorials under [`examples/`](examples) cover:
 - cyclic perfect plasticity;
 - imported periodic gyroid meshes.
 
-The larger [`paper_examples`](examples/paper_examples) reproduce the numerical
-studies accompanying the computational-homogenization manuscript:
+The larger [`paper_examples`](examples/paper_examples) reproduce numerical
+studies from the [accompanying publication](https://doi.org/TO_BE_ADDED_UPON_PUBLICATION):
 
 | Example | Study |
 |---|---|
@@ -206,9 +209,9 @@ Execution notes for the manuscript cases are collected in the
 
 ## Documentation
 
-The Sphinx documentation in [`doc/source`](doc/source) contains the
-installation guide, modeling assumptions, user workflow, example overview,
-API reference, and testing instructions.
+The [online documentation](https://abqhom.readthedocs.io/en/latest/) contains
+the installation guide, modeling assumptions, user workflow, example
+overview, API reference, and testing instructions.
 
 Build it locally with:
 
@@ -223,16 +226,17 @@ Abaqus or Gmsh installation is not required to render the documentation.
 ## Tests
 
 Tests are split into a Gmsh-only group and a group requiring the Abaqus
-kernel. Both runners load Gmsh exclusively from the explicitly supplied
-module directory, isolate generated files in a temporary directory, and write
-a report to the current working directory.
+kernel. Both runners use the Gmsh dependency installed in the active Python
+environment, isolate generated files in a temporary directory, and write a
+report to the current working directory. Activate the isolated abqhom runtime
+before launching the Abaqus test process.
 
 Run the complete suite from the Abaqus Python interpreter:
 
 ```python
 import abqhom.tests as tests
 
-tests.run_abaqus_tests("C:/path/reported/by/abqhom-install-abaqus")
+tests.run_abaqus_tests()
 ```
 
 Run only the Gmsh and utility tests from a compatible Python interpreter:
@@ -240,11 +244,12 @@ Run only the Gmsh and utility tests from a compatible Python interpreter:
 ```python
 import abqhom.tests as tests
 
-tests.run_python_tests("C:/path/reported/by/abqhom-install-abaqus")
+tests.run_python_tests()
 ```
 
 Failed test runs retain their temporary artifacts for inspection. See
-[`doc/source/tests.rst`](doc/source/tests.rst) for details.
+the [online testing documentation](https://abqhom.readthedocs.io/en/latest/tests.html)
+for details.
 
 ## Repository layout
 
@@ -259,12 +264,13 @@ examples/              concise tutorials and manuscript examples
 doc/                   Sphinx documentation
 ```
 
-## Research context and citation
+## Citation
 
-The cases under `examples/paper_examples` accompany a manuscript on nonlinear
-computational homogenization of periodic cells containing continuum and
-structural constituents. Formal citation information and an archived software
-release will be added when they become available.
+If you use `abqhom` in your research, please cite the following publication:
+
+```bibtex
+% Reference will be added upon publication.
+```
 
 ## Development disclosure
 
@@ -280,12 +286,5 @@ Jonathan Stollberg
 
 Copyright (C) 2023-2026 Jonathan Stollberg.
 
-Distributed under the terms of the GNU General Public License v3.0. See
-[`LICENSE`](LICENSE) for details.
-
-## Acknowledgements
-
-`abqhom` uses [Gmsh](https://gmsh.info/) for geometry and meshing,
-[Abaqus](https://www.3ds.com/products/simulia/abaqus) for finite element
-analysis, and [Paraqus](https://github.com/InstituteOfMechanics/Paraqus) for
-VTK export.
+Distributed under the terms of the GNU General Public License v3.0 or later.
+See [`LICENSE`](LICENSE) for the GPLv3 terms.

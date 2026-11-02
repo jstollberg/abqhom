@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """
 Tests for abqhom.utils (Voigt/tensor conversion and the analytical
@@ -15,7 +15,7 @@ import numpy as np
 
 from abqhom.utils import (voigt_to_tensor, tensor_to_voigt, voigt, reuss,
                           hill_mandel_residual, export_to_csv_file,
-                          read_csv_file, find_all_files)
+                          read_csv_file)
 
 
 class TestVoigtTensor(unittest.TestCase):
@@ -118,15 +118,3 @@ class TestFileIO(unittest.TestCase):
         export_to_csv_file(data, base)
         back = read_csv_file(base + ".csv")
         self.assertTrue(np.allclose(back, data))
-
-    def test_find_all_files_with_extension(self):
-        """find_all_files returns only the files with the given extension."""
-        for name in ("a.csv", "b.csv", "c.txt"):
-            with open(os.path.join(self.tmp, name), "w"):
-                pass
-        os.mkdir(os.path.join(self.tmp, "directory.csv"))
-        found = find_all_files(self.tmp, extension=".csv")
-        self.assertEqual(len(found), 2)
-        for path in found:
-            self.assertTrue(path.endswith(".csv"))
-            self.assertTrue(os.path.isfile(path))

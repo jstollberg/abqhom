@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """
 Granular tests for individual GmshRVE methods. These cross-check the
@@ -311,8 +311,7 @@ class TestWriteAbaqusInput(GmshTestCase):
 class TestReadFromMesh(GmshTestCase):
 
     def test_pairs_periodic_edges_of_a_prebuilt_2d_mesh(self):
-        """read_from_mesh supports a ready-made periodic planar mesh and
-        pairs the nodes on opposite edges one to one."""
+        """A periodic planar mesh has matching opposite-edge nodes."""
         size = 2.0
         fixtures.discrete_periodic_square("DPS", size=size)
         rve = GmshRVE.read_from_mesh("DPS")
@@ -349,12 +348,20 @@ class TestReadFromMesh(GmshTestCase):
         self.assertEqual(rve.model_dimension, 2)
         self.assertFalse(rve.periodic_mesh)
 
+    def test_rejects_a_prebuilt_2d_mesh_outside_xy_plane(self):
+        """A pre-built x-z mesh is rejected instead of being projected."""
+        fixtures.square_lattice_in_plane(
+            "DPS_XZ", size=2.0, axes=(0, 2))
+        gmsh.model.mesh.generate(1)
+
+        with self.assertRaises(RuntimeError) as context:
+            GmshRVE.read_from_mesh("DPS_XZ")
+        self.assertIn("x-y plane", str(context.exception))
+
     def test_pairs_periodic_faces_of_a_prebuilt_mesh(self):
-        """read_from_mesh classifies the nodes of a ready-made periodic mesh
-        onto the box groups, detects periodicity and pairs opposite faces
-        one to one."""
-        L = 2.0
-        fixtures.discrete_periodic_plates("DPP", size=L)
+        """A periodic spatial mesh has matching opposite-face nodes."""
+        size = 2.0
+        fixtures.discrete_periodic_plates("DPP", size=size)
         rve = GmshRVE.read_from_mesh("DPP")
 
         self.assertEqual(rve.model_dimension, 3)
@@ -381,11 +388,10 @@ class TestReadFromMesh(GmshTestCase):
         coord = {int(t): coords[i] for i, t in enumerate(tags)}
         for primary_tag, secondary_tag in zip(ns["FACE_1"], ns["FACE_2"]):
             offset = coord[int(secondary_tag)] - coord[int(primary_tag)]
-            self.assertTrue(np.allclose(offset, [0.0, 0.0, L]))
+            self.assertTrue(np.allclose(offset, [0.0, 0.0, size]))
 
     def test_detects_a_non_periodic_mesh(self):
-        """A mesh whose opposite faces are not node-matched is reported as
-        non-periodic (periodic_mesh is False)."""
+        """Mismatched spatial boundary nodes are detected as nonperiodic."""
         fixtures.discrete_periodic_plates("DPP2", size=2.0, perturb=0.3)
         rve = GmshRVE.read_from_mesh("DPP2")
         self.assertEqual(rve.model_dimension, 3)

@@ -1,5 +1,5 @@
 @REM SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
-@REM SPDX-License-Identifier: GPL-3.0-only
+@REM SPDX-License-Identifier: GPL-3.0-or-later
 
 @ECHO OFF
 

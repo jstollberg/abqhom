@@ -11,9 +11,10 @@ The tests under ``src/abqhom/tests`` are split into two groups:
    Model construction, constraints, analysis, and homogenization tests that
    require Abaqus.
 
-The test runners load Gmsh only from the explicitly supplied module directory.
-This avoids accidentally mixing the solver process with a different Gmsh
-build.
+The test runners use the Gmsh dependency installed in the active Python
+environment. Before launching Abaqus, activate the isolated runtime generated
+by ``abqhom-install-abaqus`` so that Abaqus imports the matching abqhom, Gmsh
+and Paraqus packages.
 
 Run the common tests
 --------------------
@@ -24,7 +25,7 @@ From a Python interpreter that can import ``abqhom``:
 
    import abqhom.tests as tests
 
-   tests.run_python_tests("C:/path/reported/by/abqhom-install-abaqus")
+   tests.run_python_tests()
 
 Run the complete suite
 ----------------------
@@ -35,7 +36,7 @@ Execute the following through an Abaqus CAE Python kernel:
 
    import abqhom.tests as tests
 
-   tests.run_abaqus_tests("C:/path/reported/by/abqhom-install-abaqus")
+   tests.run_abaqus_tests()
 
 Both runners isolate generated files in a temporary directory and write a
 test report to the original working directory. Artifacts from failing tests

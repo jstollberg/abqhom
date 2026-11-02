@@ -51,8 +51,10 @@ the complete workflow in one Abaqus CAE session.
 Cell convention
 ---------------
 
-Automatic boundary classification currently assumes a rectangular cell in
-two dimensions or a cuboidal cell in three dimensions, aligned with the
-global coordinate axes. Physical groups in the Gmsh model identify the
-constituents to which Abaqus sections are later assigned. See
+The reference cell must be rectangular in the global :math:`X_1`--:math:`X_2`
+plane with :math:`X_3=0` in two dimensions or cuboidal and aligned with the
+global coordinate axes in three dimensions. This restriction also applies
+when the boundary is supplied manually, in which case its geometric
+assignment is the user's responsibility. Physical groups in the Gmsh model
+identify the constituents to which Abaqus sections are later assigned. See
 :doc:`limitations` for the precise modeling restrictions.

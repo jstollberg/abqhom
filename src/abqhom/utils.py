@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """
 Collection of utility functions for the abqhom package.
@@ -282,27 +282,3 @@ def read_csv_file(path, dtype=None):
     """
     array = np.loadtxt(path, delimiter=",", dtype=dtype)
     return array
-
-
-def find_all_files(path, extension=None):
-    """
-    List regular files in a directory, optionally filtered by extension.
-
-    Parameters
-    ----------
-    path : str or os.PathLike
-        The location to browse.
-    extension : str, optional
-        The file type to look for. The default is None.
-
-    Returns
-    -------
-    files : list[str]
-        List of the files found in the provided location.
-
-    """
-    files = [os.path.join(path, name) for name in sorted(os.listdir(path))]
-    files = [file for file in files if os.path.isfile(file)]
-    if extension is not None:
-        files = [file for file in files if file.endswith(extension)]
-    return files

@@ -43,7 +43,7 @@ Tutorial examples
      - Effective stiffness and Voigt--Reuss bounds
    * - ``continuum_spherical_inclusion_3d``
      - Spherical inclusion in a matrix
-     - Finite-strain response with a manually supplied boundary
+     - Finite-strain response with automatic boundary classification
    * - ``mixed_embedded_beam_fibers_3d``
      - Beam fibers embedded in a continuum
      - Mixed-dimensional, nonconforming coupling

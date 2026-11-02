@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Tests for the isolated Abaqus runtime installer."""
 
@@ -28,6 +28,9 @@ TEST_REQUIREMENTS = (
 
 @unittest.skipIf(sys.version_info < (3, 9),
                  "the packaging installer requires Python 3.9 or newer")
+@unittest.skipIf("abaqus" in sys.modules,
+                 "the packaging installer requires a standard Python "
+                 "interpreter")
 class _InstallerTestCase(unittest.TestCase):
     """Provide isolated runtime fixtures for installer tests."""
 

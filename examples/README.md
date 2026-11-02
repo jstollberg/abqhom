@@ -8,11 +8,11 @@ self-contained `main.py`. Run it from its own folder with
 abaqus cae noGUI=main.py
 ```
 
-The abqhom source is located automatically relative to the example. Before
-launching Abaqus, activate the isolated runtime created with
-`abqhom-install-abaqus`. Results are written next to the script into `abq/`
-(Abaqus job files), `results/` (CSV data and, where applicable, plots) and
-`vtk_output/` (VTK files).
+Before launching Abaqus, activate the isolated runtime created with
+`abqhom-install-abaqus`. The examples import abqhom and its dependencies from
+that runtime. Results are written next to the script into `abq/` (Abaqus job
+files), `results/` (CSV data and, where applicable, plots) and `vtk_output/`
+(VTK files).
 
 For example, in PowerShell:
 
@@ -22,30 +22,30 @@ For example, in PowerShell:
 
 ## Beam / truss lattices
 
-| Example | Cell | Purpose |
+| Example | Cell | Demonstrates / exercises |
 |---|---|---|
-| [`beam_lattice_simple_cubic_3d`](beam_lattice_simple_cubic_3d) | edge struts of the cube | analytical `C11 = E*pi*r^2/L^2` |
-| [`beam_lattice_honeycomb_2d`](beam_lattice_honeycomb_2d) | regular hexagonal honeycomb | in-plane isotropy |
-| [`beam_lattice_kelvin_3d`](beam_lattice_kelvin_3d) | Kelvin (truncated octahedron) | finite-strain beam response |
-| [`beam_lattice_simple_cubic_plasticity_3d`](beam_lattice_simple_cubic_plasticity_3d) | simple cubic, cyclic perfect plasticity | hysteresis |
+| [`beam_lattice_simple_cubic_3d`](beam_lattice_simple_cubic_3d) | edge struts of the cube | periodic beam constraints, automatic boundary-element reduction and analytical axial-stiffness verification |
+| [`beam_lattice_honeycomb_2d`](beam_lattice_honeycomb_2d) | regular hexagonal honeycomb | 2D boundary classification and pairing for struts intersecting cell edges away from the corners, and in-plane isotropy |
+| [`beam_lattice_kelvin_3d`](beam_lattice_kelvin_3d) | Kelvin (truncated octahedron) | finite-strain beam homogenization for a cell whose vertices lie on faces rather than only at corners |
+| [`beam_lattice_simple_cubic_plasticity_3d`](beam_lattice_simple_cubic_plasticity_3d) | simple cubic, cyclic perfect plasticity | path-dependent beam response, cyclic loading and microscopic plastic-strain export |
 
 The simple-cubic and Kelvin cells rely on the automatic removal of redundant
 secondary element copies. No manual stiffness correction is applied.
 
 ## Continuum and mixed RVEs
 
-| Example | RVE | Purpose |
+| Example | RVE | Demonstrates / exercises |
 |---|---|---|
-| [`continuum_fiber_composite_2d`](continuum_fiber_composite_2d) | fibers in a matrix (plane strain) | Voigt / Reuss bounds |
-| [`continuum_spherical_inclusion_3d`](continuum_spherical_inclusion_3d) | spherical inclusion (manual boundary) | finite-strain two-phase response |
-| [`mixed_embedded_beam_fibers_3d`](mixed_embedded_beam_fibers_3d) | beam fibers embedded in a continuum | mixed-dimensional embedded coupling |
+| [`continuum_fiber_composite_2d`](continuum_fiber_composite_2d) | fibers in a matrix (plane strain) | affine displacement boundary conditions and verification of the effective stiffness against Voigt and Reuss bounds |
+| [`continuum_spherical_inclusion_3d`](continuum_spherical_inclusion_3d) | spherical inclusion | 3D periodic boundary conditions, automatic boundary classification and finite-strain continuum response |
+| [`mixed_embedded_beam_fibers_3d`](mixed_embedded_beam_fibers_3d) | beam fibers embedded in a continuum | mixed-dimensional embedded coupling and periodic constraints on embedded boundary nodes |
 
 ## Shell RVEs
 
-| Example | RVE | Purpose |
+| Example | RVE | Demonstrates / exercises |
 |---|---|---|
-| [`shell_honeycomb_auxetic_3d`](shell_honeycomb_auxetic_3d) | re-entrant honeycomb, shell walls | negative in-plane Poisson's ratio |
-| [`shell_gyroid_3d`](shell_gyroid_3d) | sheet-gyroid TPMS with an imported shell mesh | finite-strain shell response |
+| [`shell_honeycomb_auxetic_3d`](shell_honeycomb_auxetic_3d) | re-entrant honeycomb, shell walls | periodic shell homogenization and the negative in-plane Poisson response of a re-entrant architecture |
+| [`shell_gyroid_3d`](shell_gyroid_3d) | sheet-gyroid TPMS with an imported shell mesh | importing a pre-generated periodic mesh and computing its finite-strain shell response |
 
 The `shell_honeycomb_auxetic_3d` cell is the classic 2D re-entrant (bow-tie)
 honeycomb given a finite depth: its ribs (in the x-z plane) are extruded along
@@ -70,4 +70,4 @@ The three cases under `paper_examples` reproduce the numerical examples of
 the accompanying manuscript. They include multi-stage analyses and
 verification scripts and are therefore intentionally more detailed than the
 tutorials.
-See `paper_examples/README.md` for their execution order and purpose.
+See `paper_examples/README.md` for their execution order and details.

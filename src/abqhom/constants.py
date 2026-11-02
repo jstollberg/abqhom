@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """
 Collection of constants for the abqhom package.
@@ -34,27 +34,6 @@ PERIODIC_PAIRS = {"POINT_2": "POINT_1",
                   "FACE_2":  "FACE_1",
                   "FACE_4":  "FACE_3",
                   "FACE_6":  "FACE_5"}
-
-# Translation axes from each primary group to its secondary partner
-SECONDARY_GROUPS_OFFSET_AXES = {"POINT_2": [0],
-                                "POINT_3": [0, 1],
-                                "POINT_4": [1],
-                                "POINT_5": [2],
-                                "POINT_6": [0, 2],
-                                "POINT_7": [0, 1, 2],
-                                "POINT_8": [1, 2],
-                                "EDGE_3":  [1],
-                                "EDGE_5":  [2],
-                                "EDGE_7":  [1, 2],
-                                "EDGE_2":  [0],
-                                "EDGE_6":  [0, 2],
-                                "EDGE_8":  [2],
-                                "EDGE_10": [0],
-                                "EDGE_11": [0, 1],
-                                "EDGE_12": [1],
-                                "FACE_2":  [2],
-                                "FACE_4":  [1],
-                                "FACE_6":  [0]}
 
 # Groups forming the boundary of a higher-dimensional group
 BOUNDARY_CONNECTIVITY = {"POINT_1": [],

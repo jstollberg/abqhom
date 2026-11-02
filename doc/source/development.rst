@@ -56,5 +56,5 @@ and *incremental work*.
 License
 -------
 
-``abqhom`` is distributed under the GNU General Public License v3.0. It uses
-Gmsh for meshing and Paraqus for VTK export.
+``abqhom`` is distributed under the GNU General Public License v3.0 or later.
+It uses Gmsh for meshing and Paraqus for VTK export.
