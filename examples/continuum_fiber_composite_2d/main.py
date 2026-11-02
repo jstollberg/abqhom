@@ -1,28 +1,18 @@
 # SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Homogenize a two-phase plane-strain composite in the linear regime.
 
 The cell contains a square arrangement of stiff circular inclusions in a soft
-matrix. The example computes the effective in-plane stiffness and verifies
-the Voigt and Reuss matrix bounds.
+matrix. Affine displacement boundary conditions are applied to compute the
+effective in-plane stiffness and verify the Voigt and Reuss matrix bounds.
 """
 
-import inspect
 import os
-import sys
 
 import numpy as np
 
-# ---------------------------------------------------------------
-# Locate this example and put the shipped abqhom source first on the
-# path. Under 'abaqus cae noGUI=main.py' __file__ is undefined, so the
-# script location is obtained via inspect instead.
-here = os.path.dirname(os.path.abspath(
-    inspect.getframeinfo(inspect.currentframe()).filename))
-abqhom_path = os.path.abspath(os.path.join(here, os.pardir, os.pardir, "src"))
-if abqhom_path not in sys.path:
-    sys.path.insert(0, abqhom_path)
+here = os.getcwd()
 
 import gmsh
 
@@ -91,7 +81,7 @@ def main():
 
         # Build the model once (geometry, mesh, materials, sections, step). Only the
         # macroscopic strain changes between load cases, so the model is reused and
-        # only the periodic boundary conditions are updated in the loop.
+        # only the affine displacement boundary conditions are updated in the loop.
         create_geometry("RVE", dx, dy, fiber_fraction)
         unit_cell = GmshRVE("RVE")
         unit_cell.add_periodic_mesh_constraints()
@@ -116,10 +106,12 @@ def main():
                 return time*voigt_to_tensor(strain, "STRAIN")
 
             history = LoadHistory(np.array([0.0, 1.0]), strain_history)
-            unit_cell.apply_periodic_BC("LOAD", history)
+            unit_cell.apply_affine_displacement_BC("LOAD", history)
             unit_cell.run_analysis(field_outputs=["U", "S"])
 
-            stress = tensor_to_voigt(unit_cell.average_stress("LOAD"), "STRESS")
+            stress = tensor_to_voigt(
+                unit_cell.average_stress("LOAD"), "STRESS",
+                check_symmetry=False)
             C[:, col] = stress/strain_magnitude
 
             unit_cell.export_to_vtk(

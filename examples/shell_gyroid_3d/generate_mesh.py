@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Generate the periodic sheet-gyroid mesh used by ``main.py``.
 
@@ -9,7 +9,6 @@ verified before the mesh is written as a Gmsh discrete surface in
 ``gyroid.msh``.
 """
 
-import inspect
 import os
 
 import numpy as np
@@ -21,8 +20,7 @@ from microgen.shape.surface_functions import gyroid
 def main():
     """Generate and write the periodic sheet-gyroid mesh."""
     try:
-        here = os.path.dirname(os.path.abspath(
-            inspect.getframeinfo(inspect.currentframe()).filename))
+        here = os.getcwd()
 
         # Geometry parameters
         cell_size = 1.0      # edge length of the cubic unit cell

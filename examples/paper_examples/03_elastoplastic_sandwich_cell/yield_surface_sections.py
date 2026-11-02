@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Sample sections of the initial and evolved effective yield surfaces.
 
@@ -15,7 +15,6 @@ completed plane sections are resumed from their CSV files.
 
 import csv
 import errno
-import inspect
 import json
 import os
 import sys
@@ -24,16 +23,7 @@ import time
 
 import numpy as np
 
-# ---------------------------------------------------------------
-# Locate this example and put the shipped abqhom source first on the
-# path. Under 'abaqus cae noGUI=yield_surface_sections.py' __file__ is
-# undefined, so the script location is obtained via inspect instead.
-here = os.path.dirname(os.path.abspath(
-    inspect.getframeinfo(inspect.currentframe()).filename))
-abqhom_path = os.path.abspath(os.path.join(
-    here, os.pardir, os.pardir, os.pardir, "src"))
-if abqhom_path not in sys.path:
-    sys.path.insert(0, abqhom_path)
+here = os.getcwd()
 
 import gmsh
 from abaqusConstants import OFF

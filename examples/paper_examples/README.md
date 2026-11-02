@@ -12,5 +12,6 @@ complete multi-stage workflows.
 | [`03_elastoplastic_sandwich_cell`](03_elastoplastic_sandwich_cell) | Elastoplastic sandwich cell | Cyclic response and initial/evolved effective yield surfaces |
 
 The scripts use the isolated Abaqus runtime described in the project
-documentation. Each example directory contains a README that describes its
-execution order, generated results, and any additional dependencies.
+documentation. Run them from their respective example directories. Each
+directory contains a README that describes its execution order, generated
+results, and any additional dependencies.

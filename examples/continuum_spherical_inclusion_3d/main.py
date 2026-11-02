@@ -1,90 +1,21 @@
 # SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Homogenize a two-phase spherical-inclusion cell at finite strain.
+"""Homogenize a two-phase spherical-inclusion cell at finite strain."""
 
-Automatic boundary sampling is unsuitable for the trimmed OpenCASCADE
-geometry. The example therefore classifies the cuboidal boundary entities
-geometrically and supplies them explicitly to ``GmshRVE`` before computing a
-monotonic finite-strain response.
-"""
-
-import inspect
 import os
-import sys
 
 import numpy as np
 
-# ---------------------------------------------------------------
-# Locate this example and put the shipped abqhom source first on the
-# path. Under 'abaqus cae noGUI=main.py' __file__ is undefined, so the
-# script location is obtained via inspect instead.
-here = os.path.dirname(os.path.abspath(
-    inspect.getframeinfo(inspect.currentframe()).filename))
-abqhom_path = os.path.abspath(os.path.join(here, os.pardir, os.pardir, "src"))
-if abqhom_path not in sys.path:
-    sys.path.insert(0, abqhom_path)
+here = os.getcwd()
 
 import gmsh
 
 from abaqusConstants import ISOTROPIC, NEO_HOOKE, OFF, ON, VOLUMETRIC_DATA
 
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
-from abqhom.gmshmodel import Boundary, GmshRVE
+from abqhom.gmshmodel import GmshRVE
 from abqhom.utils import export_to_csv_file
-
-
-def _cuboidal_boundary(dx, dy, dz):
-    """Classify the cuboid entities without relying on their Gmsh tags."""
-    x_min, x_max = -0.5*dx, 0.5*dx
-    y_min, y_max = -0.5*dy, 0.5*dy
-    z_min, z_max = -0.5*dz, 0.5*dz
-    group_identifiers = {
-        "POINT_1": (x_min, y_min, z_min),
-        "POINT_2": (x_max, y_min, z_min),
-        "POINT_3": (x_max, y_max, z_min),
-        "POINT_4": (x_min, y_max, z_min),
-        "POINT_5": (x_min, y_min, z_max),
-        "POINT_6": (x_max, y_min, z_max),
-        "POINT_7": (x_max, y_max, z_max),
-        "POINT_8": (x_min, y_max, z_max),
-        "EDGE_1":  (None, y_min, z_min),
-        "EDGE_2":  (x_max, None, z_min),
-        "EDGE_3":  (None, y_max, z_min),
-        "EDGE_4":  (x_min, None, z_min),
-        "EDGE_5":  (None, y_min, z_max),
-        "EDGE_6":  (x_max, None, z_max),
-        "EDGE_7":  (None, y_max, z_max),
-        "EDGE_8":  (x_min, None, z_max),
-        "EDGE_9":  (x_min, y_min, None),
-        "EDGE_10": (x_max, y_min, None),
-        "EDGE_11": (x_max, y_max, None),
-        "EDGE_12": (x_min, y_max, None),
-        "FACE_1":  (None, None, z_min),
-        "FACE_2":  (None, None, z_max),
-        "FACE_3":  (None, y_min, None),
-        "FACE_4":  (None, y_max, None),
-        "FACE_5":  (x_min, None, None),
-        "FACE_6":  (x_max, None, None),
-    }
-
-    tolerance = gmsh.option.get_number("Geometry.Tolerance")
-    boundary = {}
-    for group_name, identifiers in group_identifiers.items():
-        dimension = identifiers.count(None)
-        boundary[group_name] = []
-        for dimtag in gmsh.model.get_entities(dimension):
-            bounding_box = gmsh.model.get_bounding_box(*dimtag)
-            lower = bounding_box[:3]
-            upper = bounding_box[3:]
-            matches = all(
-                value is None or np.allclose(
-                    (lower[index], upper[index]), value,
-                    atol=tolerance, rtol=0.0)
-                for index, value in enumerate(identifiers))
-            if matches:
-                boundary[group_name].append(dimtag)
-    return boundary
 
 
 def create_geometry(model_name, dx=1.0, dy=1.0, dz=1.0,
@@ -114,17 +45,11 @@ def create_geometry(model_name, dx=1.0, dy=1.0, dz=1.0,
         [(3, box)], [(3, inclusion)], removeTool=False)
     gmsh.model.occ.synchronize()
 
-    # Automatic boundary generation fails for the trimmed spherical surface.
-    # Classify the outer cuboid geometrically instead of using entity tags.
-    boundary = _cuboidal_boundary(dx, dy, dz)
-
     # Add physical groups
     group = gmsh.model.add_physical_group(3, [tag for _, tag in matrix])
     gmsh.model.set_physical_name(3, group, "MATRIX")
     group = gmsh.model.add_physical_group(3, [inclusion])
     gmsh.model.set_physical_name(3, group, "INCLUSION")
-
-    return boundary
 
 
 def get_frame_times(unit_cell, step_name):
@@ -155,10 +80,10 @@ def main():
         final_displacement_gradient = 0.2
 
         # ---------------------------------------------------------------
-        # Build the geometry with a manually supplied boundary and a periodic mesh.
-        boundary = create_geometry("RVE", dx=dx, dy=dy, dz=dz,
-                                   inclusion_fraction=inclusion_fraction)
-        unit_cell = GmshRVE("RVE", Boundary("RVE", boundary))
+        # Build the geometry and impose a matching periodic mesh.
+        create_geometry("RVE", dx=dx, dy=dy, dz=dz,
+                        inclusion_fraction=inclusion_fraction)
+        unit_cell = GmshRVE("RVE")
         unit_cell.add_periodic_mesh_constraints()
         unit_cell.generate_mesh(element_size=2.0)
 

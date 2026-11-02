@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Compute periodic buckling modes of the Octet cell and supercell.
 
@@ -7,23 +7,12 @@ Run this script before ``main.py``. It writes the normalized translational
 eigenmodes used to construct the geometric imperfections of both cell sizes.
 """
 
-import inspect
 import os
 import re
-import sys
 
 import numpy as np
 
-# ---------------------------------------------------------------
-# Locate this example and put the shipped abqhom source first on the
-# path. Under 'abaqus cae noGUI=buckling.py' __file__ is undefined, so the
-# script location is obtained via inspect instead.
-here = os.path.dirname(os.path.abspath(
-    inspect.getframeinfo(inspect.currentframe()).filename))
-abqhom_path = os.path.abspath(os.path.join(
-    here, os.pardir, os.pardir, os.pardir, "src"))
-if abqhom_path not in sys.path:
-    sys.path.insert(0, abqhom_path)
+here = os.getcwd()
 
 import gmsh
 from abaqusConstants import (BUCKLING_MODES, STRESS_PERTURBATION,

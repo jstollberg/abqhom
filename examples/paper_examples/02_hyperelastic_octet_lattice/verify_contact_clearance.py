@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Verify beam clearance throughout the three Octet load histories.
 
@@ -19,7 +19,7 @@ from vtk.util.numpy_support import vtk_to_numpy
 from octet import octet_topology
 
 
-here = os.path.dirname(os.path.abspath(__file__))
+here = os.getcwd()
 
 
 def segment_distances(first_start, first_end, second_start, second_end):

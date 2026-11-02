@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Sample the initial or evolved yield surface in normal-stress space.
 
@@ -15,21 +15,13 @@ surface and its triangular connectivity.
 
 import csv
 import errno
-import inspect
 import os
 import sys
 
 import gmsh
 import numpy as np
 
-# ---------------------------------------------------------------
-# Locate the neighboring planar-section script. Under
-# 'abaqus cae noGUI=yield_surface_3d.py' __file__ is undefined, so the
-# script location is obtained via inspect instead.
-here = os.path.dirname(os.path.abspath(
-    inspect.getframeinfo(inspect.currentframe()).filename))
-if here not in sys.path:
-    sys.path.insert(0, here)
+here = os.getcwd()
 
 from yield_surface_sections import (_open_csv_file, build_gmsh_cell,
                                     elastic_calibration, sample_direction,
