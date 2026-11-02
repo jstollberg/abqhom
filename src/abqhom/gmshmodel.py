@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """
 Module containing the GmshRVE class and related classes that are helpful
@@ -23,7 +23,6 @@ from abqhom.constants import (POINT_GROUPS, EDGE_GROUPS, FACE_GROUPS,
                               PERIODIC_PAIRS, ABAQUS_ELEMENT_TYPES_2D,
                               ABAQUS_ELEMENT_TYPES_3D, BOUNDARY_CONNECTIVITY,
                               ABAQUS_CONNECTIVITY_ORDER,
-                              SECONDARY_GROUPS_OFFSET_AXES,
                               ELEMENTS_NOT_SUPPORTED,
                               ELEMENTS_WARPING_DOFS)
 
@@ -32,11 +31,13 @@ class GmshRVE(object):
     """
     Gmsh representation of a periodic structural RVE.
 
-    The reference cell must be rectangular in 2D or cuboidal in 3D and aligned
-    with the global coordinate axes. Boundary entities and their periodic
-    primary--secondary relations are detected automatically unless a
-    :class:`Boundary` is supplied. Physical groups define the continuum,
-    truss, beam, and shell constituents exported to Abaqus.
+    The reference cell must be rectangular in the global X1-X2 plane with
+    X3 = 0 in 2D or cuboidal and aligned with the global coordinate axes in
+    3D. Boundary entities and their periodic primary--secondary relations are
+    detected automatically unless a :class:`Boundary` is supplied. Physical
+    groups define the continuum, truss, beam, and shell constituents exported
+    to Abaqus; those constituents may have arbitrary orientations within or
+    on the cell boundary.
 
     Parameters
     ----------
@@ -92,9 +93,7 @@ class GmshRVE(object):
             raise RuntimeError(
                 "The model must contain entities of at least dimension 1.")
 
-        # Check if the model is at least a 2D model
-        if self.model_dimension < 2:
-            raise RuntimeError("The model must be of at least dimension 2.")
+        self._validate_model_geometry()
 
         # Make sure the RVE actually has a detectable boundary
         all_boundary_groups = POINT_GROUPS + EDGE_GROUPS + FACE_GROUPS
@@ -212,14 +211,7 @@ class GmshRVE(object):
         if len(gmsh.model.get_entities()) == 0:
             return -1
 
-        # Compute the geometric dimension of the model
-        tol = gmsh.option.get_number("Geometry.Tolerance")
-        bounding_box = np.array(self.get_bounding_box_from_points())
-        bounding_box = bounding_box.reshape(2, -1)
-        delta_x, delta_y, delta_z = bounding_box[1] - bounding_box[0]
-        dim = 3 - np.isclose([delta_x, delta_y, delta_z], 0.0, atol=tol).sum()
-
-        return int(dim)
+        return self.boundary.model_dimension
 
     @property
     def mesh_dimension(self):
@@ -302,9 +294,31 @@ class GmshRVE(object):
          x_max, y_max, z_max) = self.boundary.get_bounding_box_from_points()
         return x_min, y_min, z_min, x_max, y_max, z_max
 
+    def _validate_model_geometry(self):
+        """Validate the supported RVE dimension and coordinate plane."""
+
+        model_dimension = self.model_dimension
+        if model_dimension not in {2, 3}:
+            raise RuntimeError(
+                "The RVE must be two- or three-dimensional.")
+
+        # Abaqus two-dimensional parts use the global x-y plane. Requiring
+        # the Gmsh model to use the same plane avoids an implicit coordinate
+        # transformation during export.
+        if model_dimension == 2:
+            bounding_box = np.asarray(
+                self.get_bounding_box_from_points(),
+                dtype=np.float64).reshape(2, 3)
+            tolerance = gmsh.option.get_number("Geometry.Tolerance")
+            if not np.allclose(
+                    bounding_box[:, 2], 0.0, atol=tolerance, rtol=0.0):
+                raise RuntimeError(
+                    "A two-dimensional RVE must lie in the global x-y "
+                    "plane (z = 0).")
+
     def get_nodes(self):
         """
-        Return all mesh nodes belonging to constituent physical groups.
+        Return constituent mesh nodes in the original Gmsh coordinates.
 
         Automatically generated boundary physical groups are excluded.
 
@@ -345,8 +359,6 @@ class GmshRVE(object):
         node_tags = np.concatenate(node_tags)
         node_coords = np.concatenate(node_coords)
         node_coords = np.array(node_coords).reshape(-1, 3)
-        if self.model_dimension == 2:
-            node_coords[:, 2] = 0.0
 
         # Make sure to not have duplicate nodes from physical groups
         _, unique_idx = np.unique(node_tags, return_index=True)
@@ -506,25 +518,22 @@ class GmshRVE(object):
 
         """
 
-        def translation(axes, distance):
-            """Return the affine matrix for translation along given axes."""
+        def translation(offset):
+            """Return the affine matrix for a translation vector."""
 
             transformation = np.array([1.0, 0.0, 0.0, 0.0,
                                        0.0, 1.0, 0.0, 0.0,
                                        0.0, 0.0, 1.0, 0.0,
                                        0.0, 0.0, 0.0, 1.0])
-            for a in axes:
-                transformation[a*4 + 3] = distance[a]
+            for axis, value in enumerate(offset):
+                transformation[axis*4 + 3] = value
             return transformation
 
         if not self.periodic_boundary:
             raise RuntimeError(
                 "The model does not have a periodic boundary formulation.")
 
-        # Define transformations
-        bounding_box = np.array(
-            self.get_bounding_box_from_points()).reshape(2, -1)
-        bounding_box = bounding_box[1] - bounding_box[0]
+        group_to_coords = self.boundary.get_group_coordinate_identifiers()
 
         # Define periodic mesh constraints
         for secondary, primary in PERIODIC_PAIRS.items():
@@ -537,10 +546,12 @@ class GmshRVE(object):
                 primary_tags = [j for i, j in primary_entities if i == dim]
                 secondary_tags = [j for i, j in secondary_entities
                                   if i == dim]
+                offset = np.nan_to_num(
+                    group_to_coords[secondary]
+                    - group_to_coords[primary])
                 gmsh.model.mesh.set_periodic(
                     dim, secondary_tags, primary_tags,
-                    translation(SECONDARY_GROUPS_OFFSET_AXES[secondary],
-                                bounding_box))
+                    translation(offset))
 
         self._periodic_mesh = True
 
@@ -652,9 +663,8 @@ class GmshRVE(object):
         bounding_box = np.array(
             self.get_bounding_box_from_points()).reshape(2, -1)
         bounds_min, bounds_max = bounding_box
-        delta = bounds_max - bounds_min
-        active_axes = ~np.isclose(
-            delta, 0.0, atol=gmsh.option.get_number("Geometry.Tolerance"))
+        # Supported 2D cells occupy x-y; 3D cells use all coordinate axes.
+        active_axes = np.arange(3) < self.model_dimension
 
         boundary_groups = POINT_GROUPS + EDGE_GROUPS + FACE_GROUPS
         if self.model_dimension == 2:
@@ -782,19 +792,20 @@ class GmshRVE(object):
             self._new_set_from_union(self.element_sets, set_name, *set_items)
 
         # Add a set for all elements not located entirely on the boundary
-        self._new_set_from_cut(self.element_sets, "INNER_ELEMENTS",
-                               "ALL_ELEMENTS", "BOUNDARY_ELEMENTS")
+        self.element_sets["INNER_ELEMENTS"] = np.setdiff1d(
+            self.element_sets["ALL_ELEMENTS"],
+            self.element_sets["BOUNDARY_ELEMENTS"])
 
     @classmethod
     def read_from_mesh(cls, model_name):
         """
         Build an RVE from an existing two- or three-dimensional mesh.
 
-        The nodal bounding box must be rectangular in 2D or cuboidal in 3D
-        and aligned with the global axes. Boundary nodes are classified by
-        their coordinates, and opposite groups are periodic when their free
-        coordinates and multiplicities match one to one. Named physical
-        groups must identify the constituent elements of the RVE.
+        Boundary nodes are classified from an axis-aligned nodal bounding
+        box. A 2D mesh must lie in the global X1-X2 plane with X3 = 0.
+        Opposite groups are periodic when their free coordinates and
+        multiplicities match one to one. Named physical groups must identify
+        the constituent elements.
 
         Parameters
         ----------
@@ -815,10 +826,7 @@ class GmshRVE(object):
         empty = {g: [] for g in (POINT_GROUPS + EDGE_GROUPS + FACE_GROUPS)}
         cell._boundary = Boundary(model_name, initial_data=empty,
                                   check_periodic=False)
-        if cell.model_dimension not in {2, 3}:
-            raise NotImplementedError(
-                "read_from_mesh supports rectangular two-dimensional and "
-                "box-shaped three-dimensional meshes only.")
+        cell._validate_model_geometry()
         cell._build_node_sets_from_mesh()
         cell.build_element_sets()
         return cell
@@ -924,7 +932,8 @@ class GmshRVE(object):
             group_coordinates, group_signature)
         self._add_prebuilt_mesh_node_sets(tags)
 
-    def _new_set_from_union(self, set_dictionary, set_name, *set_items):
+    @staticmethod
+    def _new_set_from_union(set_dictionary, set_name, *set_items):
         """Add the unordered union of existing node or element sets."""
 
         union = set()
@@ -932,12 +941,6 @@ class GmshRVE(object):
             union.update(set_dictionary.get(i, []))
 
         set_dictionary[set_name] = np.array(list(union), dtype=np.uint64)
-
-    def _new_set_from_cut(self, set_dictionary, set_name, item, tool):
-        """Add the unordered difference of two existing sets."""
-
-        cut = set(set_dictionary[item]) - set(set_dictionary[tool])
-        set_dictionary[set_name] = np.array(list(cut), dtype=np.uint64)
 
     def write_abaqus_input(self, custom_types=None):
         """
@@ -1037,8 +1040,7 @@ class Boundary(UserDict, object):
         the mapping is generated from the model geometry.
     sampling_density : int, optional
         The number of sampling points per spatial direction that will be
-        generated to check for periodicity and validity of the model.
-        The default is 10.
+        generated to check for periodicity. The default is 10.
     check_periodic : bool, optional
         If True, check the geometry for periodicity and establish the
         primary--secondary entity correspondence.
@@ -1053,11 +1055,14 @@ class Boundary(UserDict, object):
         A flag to mark whether the boundary is periodic.
     model_name : str
         The name of the underlying Gmsh model.
+    model_dimension : int
+        The geometric dimension of the bounded model.
     sampling_density : int
         The number of sampling points per spatial direction that will be
-        generated to check for periodicity and validity of the model.
+        generated to check for periodicity.
     data : dict[str, list[tuple[int, int]]]
         Underlying boundary-group mapping.
+
     """
 
     def __init__(self, model_name, initial_data=None, sampling_density=10,
@@ -1076,33 +1081,15 @@ class Boundary(UserDict, object):
         self.sampling_density = sampling_density
         self._periodic = periodic_default
 
-        (x_min, y_min, z_min,
-         x_max, y_max, z_max) = self.get_bounding_box_from_points()
-        tol = gmsh.option.get_number("Geometry.Tolerance")
-        model_dim = 3 - np.isclose([x_max - x_min,
-                                    y_max - y_min,
-                                    z_max - z_min], 0.0, atol=tol).sum()
-
         # Build the boundary automatically
         if not initial_data:
             try:
-                self._build_boundary(model_dim)
+                self._build_boundary()
             except Exception as error:
                 raise RuntimeError(
                     "Automatic boundary generation not possible. Please "
                     "provide the boundary manually. Original error: {}"
                     .format(error))
-
-        # Rearrange boundary map in case of a periodic geometry
-        if check_periodic:
-            try:
-                self._check_for_periodicity(model_dim)
-            except Exception as error:
-                raise RuntimeError(
-                    "Automatic periodicity check not possible. Please set "
-                    "check_periodic = False and provide information on "
-                    "periodicity through construction of initial_data and "
-                    "periodic_default. Original error: {}".format(error))
 
         # Add missing groups as empty groups
         for key in POINT_GROUPS + EDGE_GROUPS + FACE_GROUPS:
@@ -1116,6 +1103,19 @@ class Boundary(UserDict, object):
                 "The boundary contains data that cannot be associated with "
                 "boundary groups.")
 
+        self._validate_group_entities()
+
+        # Rearrange boundary map in case of a periodic geometry
+        if check_periodic:
+            try:
+                self._check_for_periodicity()
+            except Exception as error:
+                raise RuntimeError(
+                    "Automatic periodicity check not possible. Please set "
+                    "check_periodic = False and provide information on "
+                    "periodicity through construction of initial_data and "
+                    "periodic_default. Original error: {}".format(error))
+
     @property
     def periodic(self):
         """
@@ -1125,6 +1125,7 @@ class Boundary(UserDict, object):
         -------
         bool
             True if the boundary is periodic, False otherwise.
+
         """
 
         return self._periodic
@@ -1138,6 +1139,7 @@ class Boundary(UserDict, object):
         -------
         str
             The model name.
+
         """
 
         return self._model_name
@@ -1145,12 +1147,13 @@ class Boundary(UserDict, object):
     @property
     def sampling_density(self):
         """
-        Sample points per direction to use for the boundary generation.
+        Sample points per direction to use for the periodicity check.
 
         Returns
         -------
         int
             The number of sample points per spatial direction.
+
         """
 
         return self._sampling_density
@@ -1158,7 +1161,7 @@ class Boundary(UserDict, object):
     @sampling_density.setter
     def sampling_density(self, n):
         """
-        Sample points per direction to use for the boundary generation.
+        Sample points per direction to use for the periodicity check.
 
         Parameters
         ----------
@@ -1174,6 +1177,33 @@ class Boundary(UserDict, object):
         if n < 1:
             raise ValueError("The sampling density must be greater than zero.")
         self._sampling_density = int(n)
+
+    @staticmethod
+    def _active_axis_mask(bounds_min, bounds_max, tolerance):
+        """Return the non-degenerate axes of axis-aligned bounds."""
+
+        spans = np.asarray(bounds_max) - np.asarray(bounds_min)
+        return np.invert(
+            np.isclose(spans, 0.0, atol=tolerance, rtol=0.0))
+
+    @property
+    def model_dimension(self):
+        """
+        The geometric dimension of the bounded model.
+
+        Returns
+        -------
+        int
+            The number of non-degenerate coordinate axes.
+
+        """
+
+        bounding_box = np.asarray(
+            self.get_bounding_box_from_points(),
+            dtype=np.float64).reshape(2, 3)
+        tolerance = gmsh.option.get_number("Geometry.Tolerance")
+        return int(self._active_axis_mask(
+            bounding_box[0], bounding_box[1], tolerance).sum())
 
     def __setitem__(self, key, value):
         if (not isinstance(key, str) or
@@ -1217,104 +1247,150 @@ class Boundary(UserDict, object):
 
         gmsh.model.set_current(self.model_name)
 
-        # Get all point entities
+        # Prefer connected point entities. Isolated construction points do
+        # not form part of the RVE support and must not enlarge its bounds.
         points = gmsh.model.get_entities(0)
+        connected_points = []
+        for point in points:
+            upward, _ = gmsh.model.get_adjacencies(*point)
+            if len(upward) > 0:
+                connected_points.append(point)
+        if len(connected_points) > 0:
+            points = connected_points
 
-        # Fall back to the mesh nodes, e.g. for a pre-built discrete
-        # mesh that carries no CAD points
-        if len(points) == 0:
+        # Fall back to mesh nodes if no connected CAD points are available,
+        # e.g. for a pre-built discrete mesh.
+        if len(connected_points) == 0:
             _, node_coords, _ = gmsh.model.mesh.get_nodes()
-            if len(node_coords) == 0:
+            if len(node_coords) > 0:
+                node_coords = np.array(node_coords).reshape(-1, 3)
+                mn, mx = node_coords.min(axis=0), node_coords.max(axis=0)
+                return tuple(float(value) for value in list(mn) + list(mx))
+            if len(points) == 0:
                 return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
-            node_coords = np.array(node_coords).reshape(-1, 3)
-            mn, mx = node_coords.min(axis=0), node_coords.max(axis=0)
-            return tuple(float(value) for value in list(mn) + list(mx))
 
-        # Compare coordinates of points to find minimum and maximum
-        min_coords = gmsh.model.get_value(points[0][0], points[0][1], [])
-        max_coords = gmsh.model.get_value(points[0][0], points[0][1], [])
-        min_coords, max_coords = np.array(min_coords), np.array(max_coords)
-        for p in points:
-            coords = np.array(gmsh.model.get_value(p[0], p[1], []))
-            min_coords[min_coords > coords] = coords[min_coords > coords]
-            max_coords[max_coords < coords] = coords[max_coords < coords]
-
-        # Extract minimum and maximum from arrays
-        x_min, y_min, z_min = min_coords
-        x_max, y_max, z_max = max_coords
-
+        coordinates = np.asarray([
+            gmsh.model.get_value(dim, tag, []) for dim, tag in points],
+            dtype=np.float64)
+        bounds_min = coordinates.min(axis=0)
+        bounds_max = coordinates.max(axis=0)
         return tuple(float(value) for value in
-                     (x_min, y_min, z_min, x_max, y_max, z_max))
+                     np.concatenate((bounds_min, bounds_max)))
 
-    def _build_boundary(self, model_dim):
+    def _validate_group_entities(self):
+        """Validate the entity references in the boundary mapping."""
+
+        gmsh.model.set_current(self.model_name)
+        available_entities = set(gmsh.model.get_entities())
+        assigned_entities = {}
+
+        for group_name, dimtags in self.items():
+            for dimtag in dimtags:
+                if (not isinstance(dimtag, (tuple, list))
+                        or len(dimtag) != 2):
+                    raise RuntimeError(
+                        "Boundary group '{}' contains an invalid Gmsh "
+                        "dimension tag: {}."
+                        .format(group_name, dimtag))
+                entity = (int(dimtag[0]), int(dimtag[1]))
+                if entity not in available_entities:
+                    raise RuntimeError(
+                        "Boundary group '{}' references a Gmsh entity that "
+                        "does not exist: {}."
+                        .format(group_name, entity))
+                if entity in assigned_entities:
+                    raise RuntimeError(
+                        "Gmsh entity {} is assigned to both '{}' and '{}'."
+                        .format(entity, assigned_entities[entity],
+                                group_name))
+                assigned_entities[entity] = group_name
+
+    def _build_boundary(self):
         """Build the boundary-entity map from the model geometry."""
 
         # Activate the model
         gmsh.model.set_current(self.model_name)
 
-        # Get the model bounding box
-        tol = gmsh.option.get_number("Geometry.Tolerance")
-        group_to_coords = self.get_group_coordinate_identifiers()
-        (x_min, y_min, z_min,
-         x_max, y_max, z_max) = self.get_bounding_box_from_points()
+        # Get the exact cell bounds from its points. Entity bounding boxes
+        # can contain a small kernel-dependent tolerance expansion.
+        bounding_box = np.asarray(
+            self.get_bounding_box_from_points(),
+            dtype=np.float64).reshape(2, 3)
+        bounds_min, bounds_max = bounding_box
+        geometry_tol = gmsh.option.get_number("Geometry.Tolerance")
+        group_to_coords = self.group_coordinate_identifiers(
+            bounds_min, bounds_max, tolerance=geometry_tol)
+        coordinate_scale = max(
+            1.0, float(np.max(np.abs(bounding_box))))
+        roundoff = 10.0*np.finfo(np.float64).eps*coordinate_scale
+        # OpenCASCADE expands entity boxes by 1e-7 independently of the
+        # configurable Gmsh geometry tolerance.
+        box_tol = max(geometry_tol, 1.0e-7) + roundoff
+        model_dimension = self.model_dimension
 
         # Initialize boundary map
         for group_name in group_to_coords:
             self[group_name] = []
 
-        # Start looping over all model entities
-        entities = gmsh.model.get_entities()
+        # Classify an entity from the coordinates that remain constant over
+        # its complete bounding box. This avoids parametrizing irrelevant
+        # internal or trimmed entities, which can be unreliable for
+        # degenerate OpenCASCADE curves.
+        entities = [entity for entity in gmsh.model.get_entities()
+                    if entity[0] < 3]
         for dim, tag in entities:
-            if dim == 3:
-                continue
+            if dim == 0:
+                upward, downward = gmsh.model.get_adjacencies(dim, tag)
+                if len(upward) == len(downward) == 0:
+                    continue
 
-            # Generate sample points
-            coords = self._generate_sample_points_on_entity(
-                dim, tag, self.sampling_density, tol)
+            entity_box = np.asarray(
+                gmsh.model.get_bounding_box(dim, tag), dtype=np.float64)
+            entity_min, entity_max = entity_box[:3], entity_box[3:]
+            below_bounds = np.any(entity_min < bounds_min - box_tol)
+            above_bounds = np.any(entity_max > bounds_max + box_tol)
+            if below_bounds or above_bounds:
+                raise RuntimeError(
+                    "Entity ({}, {}) is outside of the computed "
+                    "bounding box.".format(dim, tag))
 
-            # Check if the entity is entirely inside the bounding box
-            x, y, z = coords[:, 0], coords[:, 1], coords[:, 2]
-            for k, k_min, k_max in zip([x, y, z],
-                                       [x_min, y_min, z_min],
-                                       [x_max, y_max, z_max]):
-                min_check = all((k > k_min) | np.isclose(k, k_min, atol=tol))
-                max_check = all((k < k_max) | np.isclose(k, k_max, atol=tol))
-                if (not min_check) or (not max_check):
-                    raise RuntimeError(
-                        "Entity ({}, {}) is outside of the computed "
-                        "bounding box.".format(dim, tag))
-
-            # Check if entities are part of a boundary group
+            # Assign the most specific matching group. Lower-dimensional
+            # structural entities may lie in a cell edge or face, so the
+            # entity dimension is not required to equal the group dimension.
             for group_name, identifiers in group_to_coords.items():
-                group_type = group_name.split("_")[0]
-                if group_type in ["FACE", "EDGE", "POINT"][:(3 - model_dim)]:
+                group_dimension = int(np.isnan(identifiers).sum())
+                if group_dimension >= model_dimension:
                     continue
 
                 mask = np.invert(np.isnan(identifiers))
-                if np.allclose(coords[:, mask], identifiers[mask], atol=tol):
+                matches_min = np.allclose(
+                    entity_min[mask], identifiers[mask],
+                    atol=box_tol, rtol=0.0)
+                matches_max = np.allclose(
+                    entity_max[mask], identifiers[mask],
+                    atol=box_tol, rtol=0.0)
+                if matches_min and matches_max:
                     self[group_name].append((dim, tag))
                     break
 
         # Cleanup of boundary groups
         for group_name, group_dimtags in self.items():
             to_remove = set()
+            group_dimtag_set = set(group_dimtags)
             for dimtag in group_dimtags:
-                upward, downward = gmsh.model.get_adjacencies(*dimtag)
+                _, downward = gmsh.model.get_adjacencies(*dimtag)
 
-                # Points such as spline control points will be removed
-                if len(upward) == len(downward) == 0:
-                    to_remove.add(dimtag)
-
-                # Entities that are on the boundary of higher order
-                # entities in the same group will be removed as well
+                # Remove entities represented through the boundary of a
+                # higher-dimensional entity in the same group.
                 downward = {(dimtag[0] - 1, tag) for tag in downward}
-                to_remove.update(downward & set(group_dimtags))
+                to_remove.update(downward & group_dimtag_set)
 
-            self[group_name] = list(set(group_dimtags) - to_remove)
+            self[group_name] = [dimtag for dimtag in group_dimtags
+                                if dimtag not in to_remove]
 
     def get_group_coordinate_identifiers(self):
         """
-        Return the fixed coordinates that identify each boundary group.
+        Return boundary-group identifiers for the current model bounds.
 
         Returns
         -------
@@ -1325,48 +1401,119 @@ class Boundary(UserDict, object):
 
         """
 
-        # Create coordinate identifiers for boundary groups
-        (x_min, y_min, z_min,
-         x_max, y_max, z_max) = self.get_bounding_box_from_points()
-        group_identifiers = np.array([[x_min, y_min, z_min],     # POINT_1
-                                      [x_max, y_min, z_min],     # POINT_2
-                                      [x_max, y_max, z_min],     # POINT_3
-                                      [x_min, y_max, z_min],     # POINT_4
-                                      [x_min, y_min, z_max],     # POINT_5
-                                      [x_max, y_min, z_max],     # POINT_6
-                                      [x_max, y_max, z_max],     # POINT_7
-                                      [x_min, y_max, z_max],     # POINT_8
-                                      [np.nan, y_min, z_min],    # EDGE_1
-                                      [x_max, np.nan, z_min],    # EDGE_2
-                                      [np.nan, y_max, z_min],    # EDGE_3
-                                      [x_min, np.nan, z_min],    # EDGE_4
-                                      [np.nan, y_min, z_max],    # EDGE_5
-                                      [x_max, np.nan, z_max],    # EDGE_6
-                                      [np.nan, y_max, z_max],    # EDGE_7
-                                      [x_min, np.nan, z_max],    # EDGE_8
-                                      [x_min, y_min, np.nan],    # EDGE_9
-                                      [x_max, y_min, np.nan],    # EDGE_10
-                                      [x_max, y_max, np.nan],    # EDGE_11
-                                      [x_min, y_max, np.nan],    # EDGE_12
-                                      [np.nan, np.nan, z_min],   # FACE_1
-                                      [np.nan, np.nan, z_max],   # FACE_2
-                                      [np.nan, y_min, np.nan],   # FACE_3
-                                      [np.nan, y_max, np.nan],   # FACE_4
-                                      [x_min, np.nan, np.nan],   # FACE_5
-                                      [x_max, np.nan, np.nan]])  # FACE_6
+        bounding_box = np.asarray(
+            self.get_bounding_box_from_points(),
+            dtype=np.float64).reshape(2, 3)
+        return self.group_coordinate_identifiers(
+            bounding_box[0], bounding_box[1],
+            tolerance=gmsh.option.get_number("Geometry.Tolerance"))
 
-        # Assign the identifiers to the groups names
+    @staticmethod
+    def group_coordinate_identifiers(bounds_min, bounds_max, tolerance=0.0):
+        """
+        Return boundary-group identifiers for supplied axis-aligned bounds.
+
+        Two-dimensional bounds use the canonical groups
+        ``POINT_1``--``POINT_4`` and ``EDGE_1``--``EDGE_4``.
+
+        Parameters
+        ----------
+        bounds_min : array_like
+            Minimum coordinates ``(x_min, y_min, z_min)``.
+        bounds_max : array_like
+            Maximum coordinates ``(x_max, y_max, z_max)``.
+        tolerance : float, optional
+            Absolute tolerance used to identify degenerate coordinate axes.
+            The default is zero.
+
+        Returns
+        -------
+        group_to_coords : OrderedDict[str, ndarray]
+            The group identifier map. Keys are the group names and values
+            are the identifier coordinates. Coordinates that are free along
+            an edge or face are marked with ``numpy.nan``.
+
+        """
+
+        try:
+            bounds_min = np.asarray(bounds_min, dtype=np.float64)
+            bounds_max = np.asarray(bounds_max, dtype=np.float64)
+            tolerance = float(tolerance)
+        except (TypeError, ValueError):
+            raise ValueError(
+                "Boundary bounds and tolerance must be numeric.")
+
+        if bounds_min.shape != (3,) or bounds_max.shape != (3,):
+            raise ValueError("Boundary bounds must have shape (3,).")
+        minimum_is_finite = np.all(np.isfinite(bounds_min))
+        maximum_is_finite = np.all(np.isfinite(bounds_max))
+        if not minimum_is_finite or not maximum_is_finite:
+            raise ValueError("Boundary bounds must be finite.")
+        if np.any(bounds_min > bounds_max):
+            raise ValueError(
+                "Each minimum boundary coordinate must not exceed its "
+                "maximum.")
+        if not np.isfinite(tolerance) or tolerance < 0.0:
+            raise ValueError("The boundary tolerance must be nonnegative.")
+
+        active_axes = np.flatnonzero(Boundary._active_axis_mask(
+            bounds_min, bounds_max, tolerance))
+        dimension = len(active_axes)
+        group_identifiers = np.full((26, 3), np.nan, dtype=np.float64)
+
+        # Signature entries -1, 0, and 1 denote a coordinate at the
+        # minimum, free along the entity, and at the maximum, respectively.
+        # Their order follows POINT_GROUPS, EDGE_GROUPS, and FACE_GROUPS.
+        signatures_3d = [
+            (-1, -1, -1), (1, -1, -1), (1, 1, -1), (-1, 1, -1),
+            (-1, -1, 1), (1, -1, 1), (1, 1, 1), (-1, 1, 1),
+            (0, -1, -1), (1, 0, -1), (0, 1, -1), (-1, 0, -1),
+            (0, -1, 1), (1, 0, 1), (0, 1, 1), (-1, 0, 1),
+            (-1, -1, 0), (1, -1, 0), (1, 1, 0), (-1, 1, 0),
+            (0, 0, -1), (0, 0, 1), (0, -1, 0), (0, 1, 0),
+            (-1, 0, 0), (1, 0, 0)]
+        signatures_2d = [(-1, -1), (1, -1), (1, 1), (-1, 1),
+                         (0, -1), (1, 0), (0, 1), (-1, 0)]
+
+        if dimension == 3:
+            rows = range(26)
+            signatures = signatures_3d
+        elif dimension == 2:
+            rows = list(range(4)) + list(range(8, 12))
+            signatures = signatures_2d
+        elif dimension == 1:
+            rows = [0, 1]
+            signatures = [(-1,), (1,)]
+        else:
+            rows = [0]
+            signatures = [()]
+
+        for row, signature in zip(rows, signatures):
+            identifiers = np.array(bounds_min, dtype=np.float64)
+            for axis, location in zip(active_axes, signature):
+                if location < 0:
+                    identifiers[axis] = bounds_min[axis]
+                elif location > 0:
+                    identifiers[axis] = bounds_max[axis]
+                else:
+                    identifiers[axis] = np.nan
+            group_identifiers[row] = identifiers
+
+        # Assign the identifiers to the group names
         group_to_coords = OrderedDict()
         for i, j in enumerate(POINT_GROUPS + EDGE_GROUPS + FACE_GROUPS):
             group_to_coords[j] = group_identifiers[i]
 
         return group_to_coords
 
-    def _generate_sample_points_on_entity(self, dim, tag, n, tol):
+    @staticmethod
+    def _generate_sample_points_on_entity(dim, tag, n, tol):
         """Sample an entity in each of its parametric directions."""
 
         (bounds_min,
          bounds_max) = gmsh.model.get_parametrization_bounds(dim, tag)
+        bounds_min = np.asarray(bounds_min, dtype=np.float64)
+        bounds_max = np.asarray(bounds_max, dtype=np.float64)
         sample_points = [np.linspace(i, j, n)
                          for i, j in zip(bounds_min + tol, bounds_max - tol)]
         sample_points = np.meshgrid(*sample_points)
@@ -1391,20 +1538,21 @@ class Boundary(UserDict, object):
 
         return coords
 
-    def _check_for_periodicity(self, model_dim):
+    def _check_for_periodicity(self):
         """Check and pair translationally periodic boundary entities."""
+
+        group_to_coords = self.get_group_coordinate_identifiers()
 
         def sort_sample_coordinates(coords, primary):
             """Sort sampled coordinates along free entity directions."""
 
-            group_to_coords = self.get_group_coordinate_identifiers()
             order = np.where(np.isnan(group_to_coords[primary]))[0][::-1]
             order = order if len(order) > 0 else [0]
             rounded_coords = np.round(coords, decimals=10)
             coords = coords[np.lexsort([rounded_coords[:, i] for i in order])]
             return coords
 
-        boundary_groups = {0: POINT_GROUPS[0],
+        boundary_groups = {0: POINT_GROUPS[0:1],
                            1: POINT_GROUPS[0:2],
                            2: POINT_GROUPS[0:4] + EDGE_GROUPS[0:4],
                            3: POINT_GROUPS + EDGE_GROUPS + FACE_GROUPS}
@@ -1414,15 +1562,24 @@ class Boundary(UserDict, object):
 
         self._periodic = True
         tol = gmsh.option.get_number("Geometry.Tolerance")
-        group_to_coords = self.get_group_coordinate_identifiers()
+        model_dimension = self.model_dimension
         for secondary, primary in PERIODIC_PAIRS.items():
             secondary_indices = []
+            used_secondary_indices = set()
             primary_entities = self[primary]
             secondary_entities = self[secondary]
 
             # Skip irrelevant secondary groups
-            if secondary not in boundary_groups[model_dim]:
+            if secondary not in boundary_groups[model_dimension]:
                 continue
+
+            # A periodic entity correspondence must be bijective. Check the
+            # original group cardinalities before replacing the secondary
+            # list with its matched order.
+            if len(primary_entities) != len(secondary_entities):
+                self._periodic = False
+                self.data = original_boundary_map
+                return
 
             for primary_dimtag in primary_entities:
                 # Generate sample points on the primary entity
@@ -1430,12 +1587,16 @@ class Boundary(UserDict, object):
                     primary_dimtag[0], primary_dimtag[1],
                     self.sampling_density,
                     tol)
+                if len(primary_coords) == 0:
+                    continue
                 primary_coords = sort_sample_coordinates(primary_coords,
                                                          primary)
 
                 # Check periodicity for all potential secondary entities
                 for secondary_index, secondary_dimtag in enumerate(
                         secondary_entities):
+                    if secondary_index in used_secondary_indices:
+                        continue
                     if primary_dimtag[0] != secondary_dimtag[0]:
                         continue
 
@@ -1444,6 +1605,8 @@ class Boundary(UserDict, object):
                     secondary_coords = self._generate_sample_points_on_entity(
                         secondary_dimtag[0], secondary_dimtag[1],
                         self.sampling_density, tol)
+                    if len(secondary_coords) == 0:
+                        continue
                     secondary_coords = sort_sample_coordinates(
                         secondary_coords, primary)
 
@@ -1459,8 +1622,10 @@ class Boundary(UserDict, object):
                         group_to_coords[secondary]
                         - group_to_coords[primary]))
 
-                    if np.allclose(delta_true, delta_expected, atol=tol):
+                    if np.allclose(delta_true, delta_expected, atol=tol,
+                                   rtol=0.0):
                         secondary_indices.append(secondary_index)
+                        used_secondary_indices.add(secondary_index)
                         break
 
             # Update the order of the secondary entities and check
