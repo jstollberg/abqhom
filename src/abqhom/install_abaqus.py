@@ -375,7 +375,35 @@ def _promote_stage(stage, prefix):
 
 
 def install(prefix, abqhom_source=None):
-    """Install and configure an isolated runtime for Abaqus."""
+    """
+    Install and configure an isolated Python runtime for Abaqus.
+
+    Parameters
+    ----------
+    prefix : str or os.PathLike
+        Destination directory of the managed runtime.
+    abqhom_source : str or os.PathLike, optional
+        Wheel, source directory, or package requirement used to install
+        abqhom. By default, the running abqhom version is installed from the
+        configured package index.
+
+    Returns
+    -------
+    package_directory : str
+        Directory to prepend to ``PYTHONPATH`` before launching Abaqus.
+    scripts : list of str
+        Paths to the generated platform-specific activation scripts.
+
+    Raises
+    ------
+    OSError
+        If the runtime directories or activation files cannot be managed.
+    RuntimeError
+        If the destination is unmanaged or the staged runtime is invalid.
+    subprocess.CalledProcessError
+        If pip cannot install the selected packages.
+
+    """
 
     prefix = _prepare_prefix(prefix)
     requirements = _runtime_requirements()
@@ -384,11 +412,13 @@ def install(prefix, abqhom_source=None):
         prefix=".{}-staging-".format(os.path.basename(prefix)), dir=parent)
 
     try:
+        # Populate and validate staging before modifying the active runtime.
         _install_packages(stage, abqhom_source, requirements)
         stage_packages = _find_site_packages(stage)
         _check_runtime_contents(stage, stage_packages)
         _check_runtime_imports(stage, stage_packages)
 
+        # Write activation data for the final location, not the staging path.
         relative_packages = os.path.relpath(stage_packages, stage)
         final_packages = os.path.join(prefix, relative_packages)
         stage_scripts = _write_activation_scripts(stage, final_packages)
@@ -398,6 +428,8 @@ def install(prefix, abqhom_source=None):
         ]
         _write_marker(
             stage, prefix, final_packages, requirements=requirements)
+
+        # Replace an existing managed runtime only after validation succeeds.
         _promote_stage(stage, prefix)
         stage = None
     finally:
