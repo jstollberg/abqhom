@@ -8,7 +8,7 @@ and an embedded ideally plastic BCC beam core.
 ## Scripts
 
 - `main.py` computes the cyclic effective response, PEEQ histories,
-  verification measures, and optional VTK output.
+  verification measures, and VTK output.
 - `yield_surface_sections.py` computes the elastic calibration and the
   initial and evolved yield-surface sections in the `sigma11-sigma22` and
   `sigma11-sigma33` planes.
@@ -17,8 +17,8 @@ and an embedded ideally plastic BCC beam core.
 - `sandwich.py` provides the shared Gmsh geometry definition.
 
 The scripts are compatible with both Python 2.7-based legacy Abaqus releases
-and current Python 3-based releases. Expose Gmsh and optional Paraqus through
-`PYTHONPATH` as described in the project documentation.
+and current Python 3-based releases. Activate the isolated Abaqus runtime as
+described in the project documentation.
 
 ## Cyclic response
 
@@ -30,8 +30,6 @@ abaqus cae noGUI=main.py
 
 The prescribed axial history contains two fully reversed cycles between
 `epsilon_11 = -0.03` and `epsilon_11 = 0.03`, followed by unloading to zero.
-Paraqus is required only for VTK export; CSV result and verification files are
-written without it.
 
 ## Yield-surface sections
 
@@ -79,7 +77,7 @@ The cyclic analysis writes:
 |---|---|
 | `abq/` | Cyclic Abaqus job |
 | `results/` | Effective response, PEEQ history, and verification measures |
-| `vtk_output/` | Optional cyclic VTK collection |
+| `vtk_output/` | Cyclic VTK collection |
 
 The cyclic `results/` directory contains:
 

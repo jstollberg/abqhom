@@ -10,8 +10,8 @@ deformation histories.
 
 ## Execution
 
-Expose Gmsh and optional Paraqus through `PYTHONPATH` as described in the
-project documentation. Run the analyses from this directory in the following
+Activate the isolated Abaqus runtime as described in the project
+documentation, then run the analyses from this directory in the following
 order:
 
 ```text
@@ -25,10 +25,9 @@ first translational mode as the geometric imperfection and runs compression,
 tension, and shear for both cell sizes. Set `include_supercell=False` in the
 final call of either script to omit the supercell analysis.
 
-Paraqus is optional for both Abaqus analyses but required to generate the VTK
-histories used by the contact-clearance check. After exporting the
-primitive-cell histories, run the check in a Python environment containing
-VTK:
+Paraqus generates the VTK histories used by the contact-clearance check.
+After exporting the primitive-cell histories, run the check in a Python
+environment containing VTK:
 
 ```text
 python verify_contact_clearance.py

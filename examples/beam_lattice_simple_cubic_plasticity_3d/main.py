@@ -28,7 +28,6 @@ if abqhom_path not in sys.path:
 import gmsh
 
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
-from abqhom.constants import PARAQUS_INSTALLED
 from abqhom.gmshmodel import GmshRVE
 from abqhom.utils import export_to_csv_file, voigt_to_tensor
 
@@ -176,12 +175,9 @@ def main():
         fig.savefig(os.path.join(result_dir, "cyclic_response.png"), dpi=150)
         plt.close(fig)
 
-        if PARAQUS_INSTALLED:
-            unit_cell.export_to_vtk(os.path.join(here, "vtk_output"),
-                                    field_outputs=["U", ("S", "MISES"), "PEEQ"],
-                                    clear=True)
-        else:
-            print("Paraqus is not installed; VTK export was skipped.")
+        unit_cell.export_to_vtk(
+            os.path.join(here, "vtk_output"),
+            field_outputs=["U", ("S", "MISES"), "PEEQ"], clear=True)
 
         print("*** Finished ***")
     finally:

@@ -26,7 +26,7 @@ Core capabilities
 * **Effective-response recovery.** The effective first Piola--Kirchhoff stress
   is evaluated from element nodal forces. Incremental microscopic work can be
   recovered independently for a discrete Hill--Mandel check.
-* **Optional visualization.** Abaqus results can be exported to VTK through
+* **Visualization.** Abaqus results can be exported to VTK through
   `Paraqus <https://github.com/InstituteOfMechanics/Paraqus>`_. Stored beam
   and truss radii can be included for visualization.
 

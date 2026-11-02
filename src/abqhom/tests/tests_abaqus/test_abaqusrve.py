@@ -114,6 +114,63 @@ class TestConstruction(AbaqusTestCase):
             else:
                 abqmodel.OdbReader = original_reader
 
+    @staticmethod
+    def _vtk_selection_fixture():
+        """Return a minimal RVE and reader for VTK frame-selection tests."""
+        class Steps(dict):
+            def keys(self):
+                return ["Initial", "LOAD_1", "LOAD_2"]
+
+        class Odb(object):
+            steps = Steps((name, object()) for name in
+                          ("Initial", "LOAD_1", "LOAD_2"))
+
+        class Reader(object):
+            frames = {"LOAD_1": [0, 1, 2], "LOAD_2": [0, 2, 3]}
+            frame_counts = {"LOAD_1": 3, "LOAD_2": 4}
+
+            def get_frame_indices(self, step_name):
+                return self.frames[step_name]
+
+            def get_number_of_frames(self, step_name):
+                return self.frame_counts[step_name]
+
+        unit = object.__new__(AbaqusRVE)
+        unit._odb = Odb()
+        return unit, Reader()
+
+    def test_vtk_selection_defaults_to_all_noninitial_frames(self):
+        """The default VTK selection retains all eligible output frames."""
+        unit, reader = self._vtk_selection_fixture()
+        selection = unit._select_vtk_frames(reader)
+        self.assertEqual(
+            selection,
+            [("LOAD_1", 0), ("LOAD_1", 1), ("LOAD_1", 2),
+             ("LOAD_2", 0), ("LOAD_2", 2), ("LOAD_2", 3)])
+
+    def test_vtk_selection_limits_step_and_frame(self):
+        """A step and frame select one VTK output state."""
+        unit, reader = self._vtk_selection_fixture()
+        selection = unit._select_vtk_frames(
+            reader, step_name="LOAD_2", frame=2)
+        self.assertEqual(selection, [("LOAD_2", 2)])
+
+    def test_vtk_selection_supports_negative_frame_indices(self):
+        """A negative VTK frame index is resolved within every step."""
+        unit, reader = self._vtk_selection_fixture()
+        selection = unit._select_vtk_frames(reader, frame=-1)
+        self.assertEqual(selection, [("LOAD_1", 2), ("LOAD_2", 3)])
+
+    def test_vtk_selection_rejects_unavailable_state(self):
+        """VTK selection rejects unknown steps and unavailable frames."""
+        unit, reader = self._vtk_selection_fixture()
+        self.assertRaises(
+            ValueError, unit._select_vtk_frames, reader, "UNKNOWN", None)
+        self.assertRaises(
+            ValueError, unit._select_vtk_frames, reader, "LOAD_2", 1)
+        self.assertRaises(
+            TypeError, unit._select_vtk_frames, reader, "LOAD_1", 1.0)
+
     def test_missing_odb_raises_io_error(self):
         """Opening a nonexistent output database raises an I/O error."""
         unit = object.__new__(AbaqusRVE)

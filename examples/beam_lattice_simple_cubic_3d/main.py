@@ -28,7 +28,6 @@ if abqhom_path not in sys.path:
 import gmsh
 
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
-from abqhom.constants import PARAQUS_INSTALLED
 from abqhom.gmshmodel import GmshRVE
 from abqhom.utils import (export_to_csv_file, tensor_to_voigt,
                           voigt_to_tensor)
@@ -118,14 +117,9 @@ def main():
             stress = tensor_to_voigt(unit_cell.average_stress("LOAD"), "STRESS")
             C[:, i] = stress/strain_magnitude
 
-            if PARAQUS_INSTALLED:
-                unit_cell.export_to_vtk(os.path.join(here, "vtk_output",
-                                                     "case_{}".format(i + 1)),
-                                        field_outputs=["U"], clear=True)
-
-
-        if not PARAQUS_INSTALLED:
-            print("Paraqus is not installed; VTK export was skipped.")
+            unit_cell.export_to_vtk(os.path.join(here, "vtk_output",
+                                                 "case_{}".format(i + 1)),
+                                    field_outputs=["U"], clear=True)
 
         # ---------------------------------------------------------------
         C11_analytical = E*np.pi*radius**2/length**2

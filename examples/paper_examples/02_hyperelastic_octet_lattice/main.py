@@ -31,7 +31,6 @@ from abaqusConstants import (ISOTROPIC, NEO_HOOKE, OFF, ON, QUASI_STATIC,
                              VOLUMETRIC_DATA)
 
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
-from abqhom.constants import PARAQUS_INSTALLED
 from abqhom.gmshmodel import GmshRVE
 from abqhom.utils import export_to_csv_file, hill_mandel_residual
 from octet import apply_eigenmode_imperfection, create_geometry
@@ -238,10 +237,9 @@ def run_case(gmsh_cell, case_name, component, final_value, parameters,
     curve, maximum_hill_mandel = export_results(
         result_directory, response, component, energies, rotation)
 
-    if PARAQUS_INSTALLED:
-        cell.export_to_vtk(
-            vtk_directory, field_outputs=["U", "UR"],
-            element_sets=["OCTET_BEAMS"], clear=True)
+    cell.export_to_vtk(
+        vtk_directory, field_outputs=["U", "UR"],
+        element_sets=["OCTET_BEAMS"], clear=True)
 
     print("\n{}:".format(case_name))
     print("  final loading measure    : {:.8e}".format(curve[-1, 0]))
@@ -339,8 +337,6 @@ def main(include_supercell=True):
                 os.path.join(
                     here, "supercell_results", buckling_tag))
 
-        if not PARAQUS_INSTALLED:
-            print("Paraqus is unavailable; skipping VTK export.")
         print("*** Finished finite-strain Octet example ***")
     finally:
         os.chdir(original_directory)

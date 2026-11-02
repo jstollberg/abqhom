@@ -29,7 +29,6 @@ if abqhom_path not in sys.path:
 import gmsh
 
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
-from abqhom.constants import PARAQUS_INSTALLED
 from abqhom.gmshmodel import GmshRVE
 from abqhom.utils import (export_to_csv_file, hill_mandel_residual,
                           tensor_to_voigt, voigt_to_tensor)
@@ -215,8 +214,6 @@ def run_stiffness_cases(cell, step_name, strain_magnitude, component_names,
 
     stiffness = np.zeros((6, 6))
     hill_mandel = np.zeros(6) if collect_diagnostics else None
-    if vtk_directory is not None and not PARAQUS_INSTALLED:
-        print("Paraqus is unavailable; VTK export skipped.")
 
     for component, component_name in enumerate(component_names):
         print("\n------------------------------")
@@ -237,7 +234,7 @@ def run_stiffness_cases(cell, step_name, strain_magnitude, component_names,
         stiffness[:, component] = (
             tensor_to_voigt(stress, "STRESS")/strain_magnitude)
 
-        if vtk_directory is not None and PARAQUS_INSTALLED:
+        if vtk_directory is not None:
             cell.export_to_vtk(
                 os.path.join(vtk_directory, component_name),
                 field_outputs=["U", "UR"],

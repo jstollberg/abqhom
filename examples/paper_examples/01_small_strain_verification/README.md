@@ -20,15 +20,12 @@ periodic cell enters only the independent ownership-weighted comparison.
 
 ## Execution
 
-Expose Gmsh and optional Paraqus through `PYTHONPATH` as described in the
-project documentation. Run the analysis from this directory:
+Activate the isolated Abaqus runtime as described in the project
+documentation, then run the analysis from this directory:
 
 ```text
 abaqus cae noGUI=main.py
 ```
-
-Paraqus is required only for VTK export. If it is unavailable, the numerical
-verification and CSV export still run.
 
 ## Generated output
 

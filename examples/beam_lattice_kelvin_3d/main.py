@@ -31,7 +31,6 @@ import gmsh
 from abaqusConstants import ISOTROPIC, NEO_HOOKE, OFF, ON, VOLUMETRIC_DATA
 
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
-from abqhom.constants import PARAQUS_INSTALLED
 from abqhom.gmshmodel import GmshRVE
 from abqhom.utils import export_to_csv_file
 
@@ -169,11 +168,9 @@ def main():
         fig.savefig(os.path.join(result_dir, "response.png"), dpi=150)
         plt.close(fig)
 
-        if PARAQUS_INSTALLED:
-            unit_cell.export_to_vtk(os.path.join(here, "vtk_output"),
-                                    field_outputs=["U", ("S", "MISES")], clear=True)
-        else:
-            print("Paraqus is not installed; VTK export was skipped.")
+        unit_cell.export_to_vtk(
+            os.path.join(here, "vtk_output"),
+            field_outputs=["U", ("S", "MISES")], clear=True)
 
         print("*** Finished ***")
     finally:

@@ -30,7 +30,6 @@ import gmsh
 from abaqusConstants import OFF
 
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
-from abqhom.constants import PARAQUS_INSTALLED
 from abqhom.gmshmodel import GmshRVE
 from abqhom.utils import hill_mandel_residual
 from sandwich import create_geometry
@@ -216,11 +215,10 @@ def run_case(gmsh_cell, reversal_times, reversal_strains, parameters,
     metrics = export_results(
         result_directory, response, peeq_history)
 
-    if PARAQUS_INSTALLED:
-        cell.export_to_vtk(
-            vtk_directory, field_outputs=["U", "PEEQ"],
-            element_sets=["CONTINUUM_MATRIX", "SHELL_FACES", "BEAM_STRUTS"],
-            clear=True)
+    cell.export_to_vtk(
+        vtk_directory, field_outputs=["U", "PEEQ"],
+        element_sets=["CONTINUUM_MATRIX", "SHELL_FACES", "BEAM_STRUTS"],
+        clear=True)
 
     frame_times = response[:, 0]
     print("\nCyclic effective response:")
@@ -304,8 +302,6 @@ def main():
             gmsh_cell, reversal_times, reversal_strains, parameters,
             output_directories)
 
-        if not PARAQUS_INSTALLED:
-            print("Paraqus is unavailable; skipping VTK export.")
         print("*** Finished cyclic sandwich example ***")
     finally:
         os.chdir(original_directory)

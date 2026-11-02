@@ -6,12 +6,6 @@ Collection of constants for the abqhom package.
 
 """
 
-try:
-    import paraqus  # noqa: F401
-    PARAQUS_INSTALLED = True
-except ImportError:
-    PARAQUS_INSTALLED = False
-
 # Physical groups on the RVE boundary
 POINT_GROUPS = ["POINT_1", "POINT_2", "POINT_3", "POINT_4",
                 "POINT_5", "POINT_6", "POINT_7", "POINT_8"]

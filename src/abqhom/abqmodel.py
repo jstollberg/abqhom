@@ -8,10 +8,11 @@ computational homogenization with Abaqus.
 """
 
 import os
+from numbers import Integral
+
 import numpy as np
 
-from abqhom.constants import (PERIODIC_PAIRS, ELEMENTS_ROTATIONAL_DOFS,
-                              PARAQUS_INSTALLED)
+from abqhom.constants import PERIODIC_PAIRS, ELEMENTS_ROTATIONAL_DOFS
 
 from abaqus import Mdb, mdb, session
 from regionToolset import Region
@@ -19,10 +20,8 @@ from mesh import MeshNodeArray, MeshElementArray
 from abaqusConstants import (THREE_D, TWO_D_PLANAR, DEFORMABLE_BODY, ON, OFF,
                              UNSET, CARTESIAN, N1_COSINES, DURING_ANALYSIS,
                              BEFORE_ANALYSIS, TOTAL, TIME, COMPLETED)
-
-if PARAQUS_INSTALLED:
-    from paraqus.abaqus import OdbReader
-    from paraqus.writers import BinaryWriter, CollectionWriter
+from paraqus.abaqus import OdbReader
+from paraqus.writers import BinaryWriter, CollectionWriter
 
 
 class AbaqusRVE(object):
@@ -1180,30 +1179,67 @@ class AbaqusRVE(object):
                                  list(element_radius.values()),
                                  "ELEMENTS", "SCALAR")
 
-    def _write_vtk_frames(self, path, clear, reader, strut_radius):
-        """Write all non-initial output frames through Paraqus."""
+    def _select_vtk_frames(self, reader, step_name=None, frame=None):
+        """Return the requested ``(step_name, frame_index)`` pairs."""
+
+        if frame is not None and (isinstance(frame, bool)
+                                  or not isinstance(frame, Integral)):
+            raise TypeError("The VTK frame index must be an integer.")
+
+        available_steps = list(self.odb.steps.keys())
+        if step_name is None:
+            step_names = [name for name in available_steps
+                          if name != "Initial"]
+        elif step_name not in available_steps:
+            raise ValueError(
+                "The output database does not contain step '{}'."
+                .format(step_name))
+        else:
+            step_names = [step_name]
+
+        selection = []
+        for name in step_names:
+            available_frames = reader.get_frame_indices(name)
+            if frame is None:
+                selection.extend((name, index)
+                                 for index in available_frames)
+                continue
+
+            frame_index = frame
+            if frame_index < 0:
+                frame_index += reader.get_number_of_frames(name)
+            if frame_index not in available_frames:
+                raise ValueError(
+                    "Frame {} of step '{}' is unavailable or does not "
+                    "contain all requested fields."
+                    .format(frame, name))
+            selection.append((name, frame_index))
+
+        return selection
+
+    def _write_vtk_frames(self, path, clear, reader, strut_radius,
+                          step_name=None, frame=None):
+        """Write the requested output frames through Paraqus."""
 
         vtu_writer = BinaryWriter(path, clear_output_dir=clear)
         with CollectionWriter(vtu_writer, self.model_name) as writer:
-            for step_name in self.odb.steps.keys():
-                if step_name == "Initial":
-                    continue
-                for frame in reader.get_frame_indices(step_name):
-                    instances = reader.read_instances(
-                        step_name=step_name, frame_index=frame)
-                    instance_model = list(instances)[0]
-                    self._add_vtk_radius_field(instance_model, strut_radius)
-                    writer.write(instance_model)
+            selection = self._select_vtk_frames(
+                reader, step_name=step_name, frame=frame)
+            for current_step, frame_index in selection:
+                instances = reader.read_instances(
+                    step_name=current_step, frame_index=frame_index)
+                instance_model = list(instances)[0]
+                self._add_vtk_radius_field(instance_model, strut_radius)
+                writer.write(instance_model)
 
     def export_to_vtk(self, path, field_outputs=None, node_sets=None,
-                      element_sets=None, radius=None, clear=False):
+                      element_sets=None, radius=None, clear=False,
+                      step_name=None, frame=None):
         """
         Export the simulation results to VTK file format.
 
-        The Python package 'Paraqus' needs to be installed to have this
-        function available:
-
-            https://github.com/InstituteOfMechanics/Paraqus/tree/main
+        Paraqus is used to read the Abaqus output database and write the VTK
+        files.
 
         Parameters
         ----------
@@ -1224,15 +1260,21 @@ class AbaqusRVE(object):
         clear : bool, optional
             If True, the output folder will be cleared if it already
             exists. The default is False.
+        step_name : str, optional
+            Name of the analysis step to export. If None, all non-initial
+            steps are exported. The default is None.
+        frame : int, optional
+            Zero-based frame index to export. Negative indices count from
+            the end of each step. If None, every frame containing all
+            requested fields is exported. When ``step_name`` is None, the
+            selected index is applied to every non-initial step. The default
+            is None.
 
         Returns
         -------
         None
 
         """
-
-        if not PARAQUS_INSTALLED:
-            raise ImportError("Paraqus is needed for the VTK export.")
 
         # Normalize the optional arguments (avoid mutable defaults)
         field_outputs = list(field_outputs) if field_outputs else []
@@ -1257,7 +1299,9 @@ class AbaqusRVE(object):
         try:
             reader = self._create_vtk_reader(
                 field_outputs, node_sets, element_sets)
-            self._write_vtk_frames(path, clear, reader, strut_radius)
+            self._write_vtk_frames(
+                path, clear, reader, strut_radius,
+                step_name=step_name, frame=frame)
         finally:
             if close_odb:
                 self.close_odb_file()

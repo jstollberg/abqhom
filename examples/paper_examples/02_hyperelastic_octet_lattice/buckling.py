@@ -30,7 +30,7 @@ from abaqusConstants import (BUCKLING_MODES, STRESS_PERTURBATION,
                              SUBSPACE, UNSET)
 
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
-from abqhom.constants import PARAQUS_INSTALLED, PERIODIC_PAIRS
+from abqhom.constants import PERIODIC_PAIRS
 from abqhom.gmshmodel import GmshRVE
 from abqhom.utils import export_to_csv_file
 from octet import create_geometry
@@ -310,12 +310,9 @@ def run_buckling(model_name, cells_per_axis, elements_per_strut,
                 "Expected {} modes, but Abaqus returned {}."
                 .format(number_of_modes, len(modes)))
 
-        if PARAQUS_INSTALLED:
-            cell.export_to_vtk(
-                vtk_directory, field_outputs=["U", "UR"],
-                element_sets=["OCTET_BEAMS"], clear=True)
-        else:
-            print("Paraqus is unavailable; skipping VTK export.")
+        cell.export_to_vtk(
+            vtk_directory, field_outputs=["U", "UR"],
+            element_sets=["OCTET_BEAMS"], clear=True)
 
         print("*** Finished periodic {} x {} x {} Octet buckling analysis "
               "***".format(
