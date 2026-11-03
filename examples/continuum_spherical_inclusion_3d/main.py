@@ -5,39 +5,35 @@
 
 import os
 
-import numpy as np
-
-here = os.getcwd()
-
 import gmsh
-
+import numpy as np
 from abaqusConstants import ISOTROPIC, NEO_HOOKE, OFF, ON, VOLUMETRIC_DATA
 
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
 from abqhom.gmshmodel import GmshRVE
 from abqhom.utils import export_to_csv_file
 
+here = os.getcwd()
+
 
 def create_geometry(model_name, dx=1.0, dy=1.0, dz=1.0,
                     inclusion_fraction=0.2):
     """Create a cuboidal matrix with a centered spherical inclusion."""
-
-    # Compute the radius of the inclusion
     radius = ((0.75*inclusion_fraction*dx*dy*dz)/np.pi)**(1.0/3.0)
     if 2*radius >= min(dx, dy, dz):
         raise ValueError("Inclusion is bigger than the RVE.")
 
-    # Initialize Gmsh and add a new model
     if not gmsh.is_initialized():
         gmsh.initialize()
+    if model_name in gmsh.model.list():
+        gmsh.model.set_current(model_name)
+        gmsh.model.remove()
     gmsh.model.add(model_name)
 
     gmsh.option.set_number("Geometry.Tolerance", 1e-5)
 
-    # Center point should be coordinate system origin
     x = y = z = 0.0
 
-    # Create the model
     box = gmsh.model.occ.add_box(
         x - dx/2.0, y - dy/2.0, z - dz/2.0, dx, dy, dz)
     inclusion = gmsh.model.occ.add_sphere(x, y, z, radius)
@@ -45,7 +41,6 @@ def create_geometry(model_name, dx=1.0, dy=1.0, dz=1.0,
         [(3, box)], [(3, inclusion)], removeTool=False)
     gmsh.model.occ.synchronize()
 
-    # Add physical groups
     group = gmsh.model.add_physical_group(3, [tag for _, tag in matrix])
     gmsh.model.set_physical_name(3, group, "MATRIX")
     group = gmsh.model.add_physical_group(3, [inclusion])
@@ -141,7 +136,8 @@ def main():
         ax.axhline(0.0, color="0.6", lw=0.6)
         ax.axvline(1.0, color="0.6", lw=0.6)
         ax.set_xlabel(r"Macroscopic deformation gradient  $\bar{F}_{11}$")
-        ax.set_ylabel(r"Effective first Piola-Kirchhoff stress  $\bar{P}_{11}$")
+        ax.set_ylabel(
+            r"Effective first Piola-Kirchhoff stress  $\bar{P}_{11}$")
         ax.set_title("Finite-strain response of a spherical-inclusion cell")
         ax.grid(True, alpha=0.3)
         fig.tight_layout()

@@ -10,16 +10,15 @@ effective in-plane stiffness and verify the Voigt and Reuss matrix bounds.
 
 import os
 
-import numpy as np
-
-here = os.getcwd()
-
 import gmsh
+import numpy as np
 
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
 from abqhom.gmshmodel import GmshRVE
 from abqhom.utils import (export_to_csv_file, reuss, tensor_to_voigt, voigt,
                           voigt_to_tensor)
+
+here = os.getcwd()
 
 
 def create_geometry(model_name, dx, dy, fiber_fraction):
@@ -30,6 +29,9 @@ def create_geometry(model_name, dx, dy, fiber_fraction):
 
     if not gmsh.is_initialized():
         gmsh.initialize()
+    if model_name in gmsh.model.list():
+        gmsh.model.set_current(model_name)
+        gmsh.model.remove()
     gmsh.model.add(model_name)
     gmsh.option.set_number("Geometry.Tolerance", 1e-5)
 
@@ -70,7 +72,7 @@ def main():
 
         # RVE and material parameters of the isotropic phases (E, nu)
         dx = dy = 10.0
-        fiber_fraction = 0.4          # change this (or loop) for other fractions
+        fiber_fraction = 0.4
         parameters = {"MATRIX": [3.5, 0.35],    # soft matrix
                       "FIBER":  [230.0, 0.2]}   # stiff inclusions
 
@@ -79,9 +81,8 @@ def main():
         components = [0, 1, 5]  # Voigt indices: xx, yy, xy(engineering)
         strain_magnitude = 0.03
 
-        # Build the model once (geometry, mesh, materials, sections, step). Only the
-        # macroscopic strain changes between load cases, so the model is reused and
-        # only the affine displacement boundary conditions are updated in the loop.
+        # Build the model once and update only the affine displacement boundary
+        # conditions between load cases.
         create_geometry("RVE", dx, dy, fiber_fraction)
         unit_cell = GmshRVE("RVE")
         unit_cell.add_periodic_mesh_constraints()

@@ -11,15 +11,14 @@ effective stiffness and reports the in-plane auxetic response.
 
 import os
 
-import numpy as np
-
-here = os.getcwd()
-
 import gmsh
+import numpy as np
 
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
 from abqhom.gmshmodel import GmshRVE
 from abqhom.utils import export_to_csv_file, tensor_to_voigt, voigt_to_tensor
+
+here = os.getcwd()
 
 
 def _clip_segment(a, b, box, tol=1e-9):
@@ -48,22 +47,23 @@ def _clip_segment(a, b, box, tol=1e-9):
     return ((x0 + t0*dx, z0 + t0*dz), (x0 + t1*dx, z0 + t1*dz))
 
 
-def create_reentrant_honeycomb(model_name, h=1.0, l=1.0, theta_deg=-18.0,
+def create_reentrant_honeycomb(model_name, h=1.0, inclined_length=1.0,
+                               theta_deg=-18.0,
                                depth=1.0, offset=(0.37, 0.29)):
     """Create a periodic re-entrant honeycomb from shell walls.
 
-    The 2D honeycomb ribs (vertical ribs of length ``h`` plus inclined ribs
-    of length ``l`` at the re-entrant angle ``theta_deg`` < 0) are laid out
-    on the node set {(i, k) : i + k even}, clipped to one in-plane period
-    (2*l*cos(theta) x 2*(h + l*sin(theta))), and each rib is extruded a
-    depth ``depth`` along y into a plate wall (physical group "WALLS").
+    The 2D ribs are laid out on the node set {(i, k) : i + k even} and
+    clipped to one in-plane period. Vertical ribs have length ``h`` and
+    inclined ribs have length ``inclined_length`` and re-entrant angle
+    ``theta_deg`` < 0. Each rib is extruded by ``depth`` along y into a plate
+    wall belonging to the physical group ``WALLS``.
     """
     if theta_deg >= 0.0:
         raise ValueError("Need theta < 0 for a re-entrant (auxetic) cell.")
 
     theta = np.radians(theta_deg)
-    p = l*np.cos(theta)
-    q = h + l*np.sin(theta)            # in-plane half-period (< h)
+    p = inclined_length*np.cos(theta)
+    q = h + inclined_length*np.sin(theta)  # in-plane half-period (< h)
 
     if not gmsh.is_initialized():
         gmsh.initialize()
@@ -151,18 +151,18 @@ def main():
 
         # Honeycomb parameters
         h = 1.0             # vertical rib length
-        l = 1.0             # inclined rib length
+        inclined_length = 1.0
         theta_deg = -18.0   # re-entrant angle (< 0)
         depth = 1.0         # extrusion depth along y (the prism axis)
         thickness = 0.05    # shell wall thickness
         element_size = 0.25  # shell element size
 
         # ---------------------------------------------------------------
-        # Build the model once (geometry, mesh, material, section, step). Only the
-        # macroscopic strain changes between load cases, so the model is reused and
-        # only the periodic boundary conditions are updated in the loop. The anchor
-        # node used to suppress rigid-body motion is picked automatically.
-        create_reentrant_honeycomb("RVE", h=h, l=l, theta_deg=theta_deg, depth=depth)
+        # Build the model once and update only the periodic boundary conditions
+        # between load cases. The anchor node is selected automatically.
+        create_reentrant_honeycomb(
+            "RVE", h=h, inclined_length=inclined_length,
+            theta_deg=theta_deg, depth=depth)
         unit_cell = GmshRVE("RVE")
         unit_cell.add_periodic_mesh_constraints()
         unit_cell.generate_mesh(element_size=element_size)
@@ -190,7 +190,8 @@ def main():
             unit_cell.apply_periodic_bc("LOAD", history)
 
             unit_cell.run_analysis(field_outputs=["U"])
-            stress = tensor_to_voigt(unit_cell.average_stress("LOAD"), "STRESS")
+            stress = tensor_to_voigt(
+                unit_cell.average_stress("LOAD"), "STRESS")
             C[:, i] = stress/strain_magnitude
 
             # Export the deformed walls to VTK
@@ -199,9 +200,9 @@ def main():
                                     field_outputs=["U"], clear=True)
 
         # ---------------------------------------------------------------
-        # Effective stiffness and engineering constants. The honeycomb lies in the
-        # x-z plane and is extruded along y, so the response is orthotropic: auxetic
-        # in the x-z plane and an ordinary (stiff) honeycomb prism along y.
+        # The honeycomb lies in the x-z plane and is extruded along y. Its
+        # response is orthotropic: auxetic in-plane and conventionally stiff
+        # along the prism axis.
         S = np.linalg.inv(C)
         Ex, Ez, Ey = 1.0/S[0, 0], 1.0/S[2, 2], 1.0/S[1, 1]
         nu_xz = -S[2, 0]/S[0, 0]     # z-strain per x-strain (in-plane)
@@ -210,7 +211,8 @@ def main():
         print("\n------------------------------")
         print("Effective constitutive matrix (Voigt):")
         print(np.array2string(C, precision=4, suppress_small=True))
-        print("  symmetry   max|C - C^T| = {:.2e}".format(np.max(np.abs(C - C.T))))
+        print("  symmetry   max|C - C^T| = {:.2e}".format(
+            np.max(np.abs(C - C.T))))
         print("\nIn-plane (x-z honeycomb) moduli and Poisson's ratios:")
         print("  E_x  = {:.4e}".format(Ex))
         print("  E_z  = {:.4e}".format(Ez))
@@ -219,7 +221,8 @@ def main():
         print("Out-of-plane (prism axis y):")
         print("  E_y  = {:.4e}   (stiff, non-auxetic)".format(Ey))
         if max(nu_xz, nu_zx) < 0.0:
-            print("  --> negative in-plane Poisson's ratio: the honeycomb is AUXETIC.")
+            print("  --> negative in-plane Poisson's ratio: "
+                  "the honeycomb is AUXETIC.")
 
         # Export the effective stiffness
         result_path = os.path.join(here, "results")

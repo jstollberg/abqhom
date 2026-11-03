@@ -10,17 +10,15 @@ periodicity, and computes the response along a monotonic loading path.
 
 import os
 
-import numpy as np
-
-here = os.getcwd()
-
 import gmsh
-
+import numpy as np
 from abaqusConstants import ISOTROPIC, NEO_HOOKE, OFF, ON, VOLUMETRIC_DATA
 
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
 from abqhom.gmshmodel import GmshRVE
 from abqhom.utils import export_to_csv_file
+
+here = os.getcwd()
 
 
 def get_frame_times(unit_cell, step_name):
@@ -53,8 +51,9 @@ def main():
         mesh_file = os.path.join(here, "gyroid.msh")
         if not os.path.isfile(mesh_file):
             raise RuntimeError(
-                "The mesh file '{}' does not exist. Generate it first by running "
-                "generate_mesh.py in an environment that has microgen installed."
+                "The mesh file '{}' does not exist. Generate it first by "
+                "running generate_mesh.py in an environment that has microgen "
+                "installed."
                 .format(mesh_file))
 
         gmsh.initialize()
@@ -69,7 +68,7 @@ def main():
             raise RuntimeError("The imported mesh is not periodic.")
 
         # ---------------------------------------------------------------
-        # Build the Abaqus model, assign the shell section and define the load step.
+        # Build the Abaqus model and assign the shell material and section.
         cell = AbaqusRVE(unit_cell)
         shear_modulus = E/(2.0*(1.0 + nu))
         bulk_modulus = E/(3.0*(1.0 - 2.0*nu))
@@ -122,7 +121,8 @@ def main():
         ax.axhline(0.0, color="0.6", lw=0.6)
         ax.axvline(1.0, color="0.6", lw=0.6)
         ax.set_xlabel(r"Macroscopic deformation gradient  $\bar{F}_{11}$")
-        ax.set_ylabel(r"Effective first Piola-Kirchhoff stress  $\bar{P}_{11}$")
+        ax.set_ylabel(
+            r"Effective first Piola-Kirchhoff stress  $\bar{P}_{11}$")
         ax.set_title("Finite-strain response of a sheet-Gyroid shell")
         ax.grid(True, alpha=0.3)
         fig.tight_layout()

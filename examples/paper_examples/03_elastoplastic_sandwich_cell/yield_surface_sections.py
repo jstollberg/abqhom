@@ -21,20 +21,19 @@ import sys
 import tempfile
 import time
 
-import numpy as np
-
-here = os.getcwd()
-
 import gmsh
+import numpy as np
 from abaqusConstants import OFF
+from sandwich import create_geometry
 
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
 from abqhom.gmshmodel import GmshRVE
 from abqhom.utils import tensor_to_voigt, voigt_to_tensor
-from sandwich import create_geometry
+
+here = os.getcwd()
 
 
-def _open_csv_file(path, mode):
+def open_csv_file(path, mode):
     """Open a CSV file correctly under Python 2.7 and Python 3."""
     if sys.version_info[0] < 3:
         return open(path, mode + "b")
@@ -53,7 +52,6 @@ def _open_csv_descriptor(descriptor):
 
 def assign_sections(cell, parameters):
     """Assign the elastic matrix and perfectly plastic constituents."""
-
     # Plasticity is confined to the shell and beam constituents. The soft
     # matrix remains elastic throughout every preparation and probing path.
     matrix = cell.model.Material(name="MATRIX")
@@ -91,10 +89,10 @@ def compute_elastic_stiffness(gmsh_cell, parameters, strain_magnitude):
         print("Elastic stiffness case {}/6".format(component + 1))
         sys.stdout.flush()
 
-        def strain_path(time, index=component):
+        def strain_path(pseudo_time, index=component):
             """Return one ramped macroscopic strain component."""
             strain = np.zeros(6)
-            strain[index] = time * strain_magnitude
+            strain[index] = pseudo_time * strain_magnitude
             return voigt_to_tensor(strain, "STRAIN")
 
         history = LoadHistory(np.asarray([0.0, 1.0]), strain_path)
@@ -325,20 +323,20 @@ def sample_direction(gmsh_cell, parameters, preload_strain, base_strain,
             strain_limit / maximum_strain_increment))
         probe_increment = 1.0 / number_of_increments
 
-        def strain_path(time, direction=strain_direction,
+        def strain_path(pseudo_time, direction=strain_direction,
                         limit=strain_limit):
             """Return preparation and proportional probing strains."""
             if not prepared_state:
-                strain = time * limit * direction
-            elif time <= 1.0:
-                strain = time * preload_strain
-            elif time <= 2.0:
+                strain = pseudo_time * limit * direction
+            elif pseudo_time <= 1.0:
+                strain = pseudo_time * preload_strain
+            elif pseudo_time <= 2.0:
                 strain = (preload_strain
-                          + (time - 1.0)
+                          + (pseudo_time - 1.0)
                           * (base_strain - preload_strain))
             else:
                 strain = (base_strain
-                          + (time - 2.0) * limit * direction)
+                          + (pseudo_time - 2.0) * limit * direction)
             return voigt_to_tensor(strain, "STRAIN")
 
         cell = AbaqusRVE(gmsh_cell, custom_types={1: "B31"})
@@ -473,7 +471,7 @@ def _validate_result_configuration(path, configuration, result_paths):
     }
 
     if os.path.isfile(path):
-        with _open_csv_file(path, "r") as csv_file:
+        with open_csv_file(path, "r") as csv_file:
             reader = csv.DictReader(csv_file)
             if reader.fieldnames != ["setting", "value"]:
                 raise RuntimeError(
@@ -539,7 +537,7 @@ def write_yield_results(path, records):
                  "max-unload-delta-peeq-beam",
                  "max-delta-peeq-shell", "max-delta-peeq-beam",
                  "controlling-constituent"])
-    with _open_csv_file(path, "w") as csv_file:
+    with open_csv_file(path, "w") as csv_file:
         writer = csv.writer(csv_file)
         writer.writerow(header)
         for record in records:
@@ -561,7 +559,7 @@ def read_yield_results(path):
         return []
 
     records = []
-    with _open_csv_file(path, "r") as csv_file:
+    with open_csv_file(path, "r") as csv_file:
         for row in csv.DictReader(csv_file):
             records.append({
                 "theta": float(row["theta"]),
@@ -758,7 +756,6 @@ def sample_plane(gmsh_cell, parameters, compliance, state_name,
 
 def main():
     """Compute initial and evolved effective yield-surface sections."""
-
     # Analysis configuration. Set selected_state to "initial", "evolved", or
     # "both". Set selected_plane to one of the names below or leave it as None.
     calibration_only = False

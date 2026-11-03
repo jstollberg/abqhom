@@ -12,25 +12,24 @@ the effective stiffness of the mixed-dimensional RVE.
 
 import os
 
-import numpy as np
-
-here = os.getcwd()
-
 import gmsh
+import numpy as np
 
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
 from abqhom.gmshmodel import GmshRVE
-from abqhom.utils import (export_to_csv_file, tensor_to_voigt,
-                          voigt_to_tensor)
+from abqhom.utils import export_to_csv_file, tensor_to_voigt, voigt_to_tensor
+
+here = os.getcwd()
 
 
 def create_geometry(model_name, edge_length=1.0, nodes_matrix=10,
                     nodes_fibers=3):
     """Create a hexahedral matrix containing two independent beam fibers."""
-
-    # Initialize Gmsh and add a new model
     if not gmsh.is_initialized():
         gmsh.initialize()
+    if model_name in gmsh.model.list():
+        gmsh.model.set_current(model_name)
+        gmsh.model.remove()
     gmsh.model.add(model_name)
 
     gmsh.option.set_number("Geometry.Tolerance", 1e-5)
@@ -38,7 +37,7 @@ def create_geometry(model_name, edge_length=1.0, nodes_matrix=10,
     x = y = z = 0.0  # Center point
     dx = dy = dz = edge_length  # Edge length
 
-    # Add a cube to the model representing the matrix
+    # Build the matrix cube.
     p1 = gmsh.model.geo.add_point(x - 0.5*dx, y - 0.5*dy, z - 0.5*dz)
     p2 = gmsh.model.geo.add_point(x - 0.5*dx, y - 0.5*dy, z + 0.5*dz)
     p3 = gmsh.model.geo.add_point(x + 0.5*dx, y - 0.5*dy, z + 0.5*dz)
@@ -67,7 +66,7 @@ def create_geometry(model_name, edge_length=1.0, nodes_matrix=10,
     loop = gmsh.model.geo.add_surface_loop(surfaces)
     volume = gmsh.model.geo.add_volume([loop])
 
-    # Add transfinite hex mesh constraints on the cube
+    # Impose a transfinite hexahedral mesh on the matrix.
     for i in lines:
         gmsh.model.geo.mesh.set_transfinite_curve(i, nodes_matrix)
 
@@ -93,10 +92,8 @@ def create_geometry(model_name, edge_length=1.0, nodes_matrix=10,
     gmsh.model.geo.mesh.set_transfinite_curve(fiber_2, nodes_fibers)
     fibers = [fiber_1, fiber_2]
 
-    # Synchronize the geo kernel to save the geometry
     gmsh.model.geo.synchronize()
 
-    # Add physical groups
     matrix = gmsh.model.add_physical_group(3, [volume])
     gmsh.model.set_physical_name(3, matrix, "MATRIX")
     fibers = gmsh.model.add_physical_group(1, fibers)
@@ -117,13 +114,10 @@ def main():
 
         # Material parameters: Young's modulus - Poisson's ratio
         parameters = {"MATRIX": [50.0, 0.35],
-                      "FIBER":  [210, 0.2]}
-
-
+                      "FIBER": [210, 0.2]}
         # ---------------------------------------------------------------
-        # Build the model once (geometry, mesh, materials, sections, embedded
-        # region, step). Only the macroscopic strain changes between load cases,
-        # so the model is reused and only the periodic BCs are updated in the loop.
+        # Build the model once and update only the periodic boundary conditions
+        # between load cases.
         create_geometry("RVE", nodes_matrix=9, nodes_fibers=5)
         unit_cell = GmshRVE("RVE")
         unit_cell.add_periodic_mesh_constraints()
@@ -136,11 +130,11 @@ def main():
         unit_cell.assign_solid_section("MATRIX", "MATRIX")
         unit_cell.assign_beam_section("FIBER", "FIBER", 0.1)
 
-        # Embed the beam fibers into the continuum matrix. This constraint is kept
-        # across load cases -- re-applying the periodic BC does not remove it.
+        # The embedded constraint remains active across all load cases.
         matrix_elements = unit_cell.instance.sets["ELSET_MATRIX"]
         fiber_elements = unit_cell.instance.sets["ELSET_FIBER"]
-        unit_cell.model.EmbeddedRegion("COUPLING", fiber_elements, matrix_elements)
+        unit_cell.model.EmbeddedRegion(
+            "COUPLING", fiber_elements, matrix_elements)
         unit_cell.model.StaticStep(name="LOAD", previous="Initial")
 
         # Run the six linear homogenization load cases.
@@ -164,7 +158,8 @@ def main():
             unit_cell.apply_periodic_bc("LOAD", history)
             unit_cell.run_analysis(field_outputs=["U", "S"])
 
-            stress = tensor_to_voigt(unit_cell.average_stress("LOAD"), "STRESS")
+            stress = tensor_to_voigt(
+                unit_cell.average_stress("LOAD"), "STRESS")
             C[:, i] = stress/strain_magnitude
 
             unit_cell.export_to_vtk(

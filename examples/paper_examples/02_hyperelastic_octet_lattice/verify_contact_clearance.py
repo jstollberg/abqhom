@@ -15,17 +15,14 @@ import xml.etree.ElementTree as ET
 
 import numpy as np
 import vtk
-from vtk.util.numpy_support import vtk_to_numpy
-
 from octet import octet_topology
-
+from vtk.util.numpy_support import vtk_to_numpy
 
 here = os.getcwd()
 
 
 def segment_distances(first_start, first_end, second_start, second_end):
     """Return exact distances between corresponding line segments."""
-
     # Solve the closest-point problem on the supporting lines and clamp both
     # parameters to cover endpoint as well as interior closest points.
     first_direction = first_end - first_start
@@ -260,11 +257,11 @@ def evaluate_clearance(case_name, vtk_root, model_name, edge_length):
 
     integer_shifts = np.asarray(
         [[0, 0, 0]] + [
-        [i, j, k]
-        for i in (-1, 0, 1)
-        for j in (-1, 0, 1)
-        for k in (-1, 0, 1)
-        if (i, j, k) != (0, 0, 0)], dtype=float)
+            [i, j, k]
+            for i in (-1, 0, 1)
+            for j in (-1, 0, 1)
+            for k in (-1, 0, 1)
+            if (i, j, k) != (0, 0, 0)], dtype=float)
     admissible_pairs = build_admissible_pair_masks(
         element_strut, strut_start, strut_end, integer_shifts,
         edge_length)

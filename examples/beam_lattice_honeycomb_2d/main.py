@@ -11,15 +11,14 @@ effective stiffness is checked for in-plane isotropy.
 
 import os
 
-import numpy as np
-
-here = os.getcwd()
-
 import gmsh
+import numpy as np
 
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
 from abqhom.gmshmodel import GmshRVE
 from abqhom.utils import export_to_csv_file, tensor_to_voigt, voigt_to_tensor
+
+here = os.getcwd()
 
 
 def _clip_segment(p, q, box, tol=1e-9):
@@ -140,10 +139,9 @@ def main():
         components = [0, 1, 5]  # Voigt indices: xx, yy, xy(engineering)
         strain_magnitude = 0.03
 
-        # Build the model once (geometry, mesh, material, section, step). Only the
-        # macroscopic strain changes between load cases, so the model is reused and
-        # only the periodic boundary conditions are updated in the loop. The anchor
-        # is picked automatically -- no corner point required.
+        # Build the model once and update only the periodic boundary
+        # conditions between load cases. The anchor is selected automatically,
+        # so no corner point is required.
         create_honeycomb("RVE", a=a)
         unit_cell = GmshRVE("RVE")
         unit_cell.add_periodic_mesh_constraints()
@@ -186,8 +184,10 @@ def main():
         print("\n------------------------------")
         print("Effective constitutive matrix (Voigt):")
         print(C)
-        print("\nChecks for the regular honeycomb (should be in-plane isotropic):")
-        print("  symmetry   max|C - C^T| = {:.2e}".format(np.max(np.abs(C - C.T))))
+        print("\nChecks for the regular honeycomb "
+              "(should be in-plane isotropic):")
+        print("  symmetry   max|C - C^T| = {:.2e}".format(
+            np.max(np.abs(C - C.T))))
         print("  C11 - C22               = {:.2e}".format(C[0, 0] - C[1, 1]))
         print("  (C11 - C12) - 2 C33     = {:.2e}".format(
             (C[0, 0] - C[0, 1]) - 2.0*C[2, 2]))

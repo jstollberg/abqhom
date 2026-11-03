@@ -11,16 +11,14 @@ coupling terms are expected to vanish.
 
 import os
 
-import numpy as np
-
-here = os.getcwd()
-
 import gmsh
+import numpy as np
 
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
 from abqhom.gmshmodel import GmshRVE
-from abqhom.utils import (export_to_csv_file, tensor_to_voigt,
-                          voigt_to_tensor)
+from abqhom.utils import export_to_csv_file, tensor_to_voigt, voigt_to_tensor
+
+here = os.getcwd()
 
 
 def create_geometry(model_name, length):
@@ -72,9 +70,8 @@ def main():
         element_size = 1.0
 
         # ---------------------------------------------------------------
-        # Build the model once (geometry, mesh, material, section, step). Only the
-        # macroscopic strain changes between load cases, so the model is reused and
-        # only the periodic boundary conditions are updated in the loop.
+        # Build the model once and update only the periodic boundary conditions
+        # between load cases.
         model_name = "RVE"
         create_geometry(model_name, length)
         unit_cell = GmshRVE(model_name)
@@ -104,7 +101,8 @@ def main():
             unit_cell.apply_periodic_bc("LOAD", history)
             unit_cell.run_analysis(field_outputs=["U"])
 
-            stress = tensor_to_voigt(unit_cell.average_stress("LOAD"), "STRESS")
+            stress = tensor_to_voigt(
+                unit_cell.average_stress("LOAD"), "STRESS")
             C[:, i] = stress/strain_magnitude
 
             unit_cell.export_to_vtk(os.path.join(here, "vtk_output",

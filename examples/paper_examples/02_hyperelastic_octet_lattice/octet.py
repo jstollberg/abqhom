@@ -157,6 +157,7 @@ def apply_eigenmode_imperfection(gmsh_cell, result_directory, amplitude,
                                  mode_number=1, tolerance=1.0e-10):
     """Perturb a periodic mesh along one normalized buckling mode."""
     import gmsh
+
     from abqhom.constants import PERIODIC_PAIRS
 
     reference_coordinates, mode = _read_mode(os.path.join(

@@ -20,13 +20,12 @@ import sys
 
 import gmsh
 import numpy as np
-
-here = os.getcwd()
-
-from yield_surface_sections import (_open_csv_file, build_gmsh_cell,
-                                    elastic_calibration, sample_direction,
+from yield_surface_sections import (build_gmsh_cell, elastic_calibration,
+                                    open_csv_file, sample_direction,
                                     state_definition,
                                     validate_result_configuration)
+
+here = os.getcwd()
 
 COMPONENT_NAMES = ("11", "22", "33", "23", "13", "12")
 CSV_HEADER = (["direction-index", "n1", "n2", "n3", "yield-time",
@@ -80,21 +79,21 @@ def icosphere(subdivisions=3):
     for _ in range(subdivisions):
         midpoint_cache = {}
 
-        def midpoint(first, second):
+        def midpoint(first, second, cache):
             """Return the cached midpoint vertex of an icosphere edge."""
             edge = tuple(sorted((first, second)))
-            if edge not in midpoint_cache:
+            if edge not in cache:
                 vertex = vertices[first] + vertices[second]
                 vertex /= np.linalg.norm(vertex)
-                midpoint_cache[edge] = len(vertices)
+                cache[edge] = len(vertices)
                 vertices.append(vertex)
-            return midpoint_cache[edge]
+            return cache[edge]
 
         refined_faces = []
         for first, second, third in faces:
-            first_second = midpoint(first, second)
-            second_third = midpoint(second, third)
-            third_first = midpoint(third, first)
+            first_second = midpoint(first, second, midpoint_cache)
+            second_third = midpoint(second, third, midpoint_cache)
+            third_first = midpoint(third, first, midpoint_cache)
             refined_faces.extend((
                 (first, first_second, third_first),
                 (second, second_third, first_second),
@@ -132,7 +131,7 @@ def read_worker_results(path):
     if not os.path.isfile(path) or os.path.getsize(path) == 0:
         return {}
 
-    with _open_csv_file(path, "r") as csv_file:
+    with open_csv_file(path, "r") as csv_file:
         reader = csv.DictReader(csv_file)
         if reader.fieldnames != CSV_HEADER:
             raise RuntimeError(
@@ -170,7 +169,7 @@ def append_worker_result(path, row):
         raise ValueError("The worker result does not match the CSV header.")
 
     has_content = os.path.isfile(path) and os.path.getsize(path) > 0
-    with _open_csv_file(path, "a") as csv_file:
+    with open_csv_file(path, "a") as csv_file:
         writer = csv.writer(csv_file)
         if not has_content:
             writer.writerow(CSV_HEADER)
@@ -224,7 +223,7 @@ def merge_worker_results(state_name, root_directory, directions, faces,
             "consistent effective stresses.")
 
     output = os.path.join(root_directory, "yield_surface.csv")
-    with _open_csv_file(output, "w") as csv_file:
+    with open_csv_file(output, "w") as csv_file:
         writer = csv.DictWriter(csv_file, fieldnames=CSV_HEADER)
         writer.writeheader()
         for index in range(len(directions)):
@@ -247,7 +246,6 @@ def merge_worker_results(state_name, root_directory, directions, faces,
 
 def main():
     """Run one sampling worker or merge all completed worker files."""
-
     # Analysis configuration. Workers are numbered from zero. After every
     # worker has completed, set merge_only to True and run the script once
     # more with the same state name and worker count.

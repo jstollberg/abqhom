@@ -11,17 +11,15 @@ is written to CSV and plotted.
 
 import os
 
-import numpy as np
-
-here = os.getcwd()
-
 import gmsh
+import numpy as np
+from abaqusConstants import OFF
 
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
 from abqhom.gmshmodel import GmshRVE
 from abqhom.utils import export_to_csv_file, voigt_to_tensor
 
-from abaqusConstants import OFF
+here = os.getcwd()
 
 
 def create_geometry(model_name, length):
@@ -78,16 +76,13 @@ def main():
         reversal_times = np.r_[
             0.0, np.cumsum(strain_jumps)/np.sum(strain_jumps)]
 
-
         def load_path(time):
             """Return the prescribed macroscopic strain at ``time``."""
             strain = np.zeros(6)
             strain[0] = np.interp(time, reversal_times, reversals)
             return voigt_to_tensor(strain, "STRAIN")
 
-
         history = LoadHistory(reversal_times, load_path)
-
 
         # ---------------------------------------------------------------
         # Create geometry and periodic mesh in Gmsh
@@ -106,7 +101,7 @@ def main():
         material.Plastic(table=[[yield_stress, 0.0]])
         unit_cell.assign_beam_section("CUBIC", "CUBIC", radius)
 
-        # Use fixed pseudo-time increments to resolve every linear path segment.
+        # Use fixed increments to resolve every linear path segment.
         step_name = "LOAD"
         increment = 0.005
         unit_cell.model.StaticStep(
@@ -134,7 +129,8 @@ def main():
         curve = np.array(curve)
 
         print("\n------------------------------")
-        print("Cyclic effective axial response ({} frames):".format(len(curve)))
+        print("Cyclic effective axial response ({} frames):".format(
+            len(curve)))
         print("  strain amplitude       = {:.4f}".format(strain_amplitude))
         print("  maximum axial stress   = {:.6e}".format(np.max(curve[:, 1])))
         print("  minimum axial stress   = {:.6e}".format(np.min(curve[:, 1])))
@@ -144,10 +140,11 @@ def main():
         result_dir = os.path.join(here, "results")
         if not os.path.isdir(result_dir):
             os.makedirs(result_dir)
-        export_to_csv_file(curve, os.path.join(result_dir, "cyclic_response.csv"))
+        export_to_csv_file(
+            curve, os.path.join(result_dir, "cyclic_response.csv"))
 
         # ---------------------------------------------------------------
-        # Plot the cyclic stress/strain response (matplotlib ships with Abaqus).
+        # Plot the cyclic response with the matplotlib bundled with Abaqus.
         # Use the non-interactive Agg backend so it works under 'noGUI'.
         import matplotlib
         matplotlib.use("Agg")

@@ -10,19 +10,18 @@ eigenmodes used to construct the geometric imperfections of both cell sizes.
 import os
 import re
 
-import numpy as np
-
-here = os.getcwd()
-
 import gmsh
-from abaqusConstants import (BUCKLING_MODES, STRESS_PERTURBATION,
-                             SUBSPACE, UNSET)
+import numpy as np
+from abaqusConstants import (BUCKLING_MODES, STRESS_PERTURBATION, SUBSPACE,
+                             UNSET)
+from octet import create_geometry
 
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
 from abqhom.constants import PERIODIC_PAIRS
 from abqhom.gmshmodel import GmshRVE
 from abqhom.utils import export_to_csv_file
-from octet import create_geometry
+
+here = os.getcwd()
 
 
 def remove_temporary_loading(cell, setup_step):

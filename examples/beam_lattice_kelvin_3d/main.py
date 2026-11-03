@@ -9,20 +9,18 @@ classification and periodic pairing for this topology and computes a
 monotonic finite-strain response.
 """
 
-from itertools import permutations, product
 import os
-
-import numpy as np
-
-here = os.getcwd()
+from itertools import permutations, product
 
 import gmsh
-
+import numpy as np
 from abaqusConstants import ISOTROPIC, NEO_HOOKE, OFF, ON, VOLUMETRIC_DATA
 
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
 from abqhom.gmshmodel import GmshRVE
 from abqhom.utils import export_to_csv_file
+
+here = os.getcwd()
 
 
 def create_kelvin(model_name, edge=4.0):
@@ -92,8 +90,8 @@ def main():
         element_size = 0.6  # beam element length
 
         # ---------------------------------------------------------------
-        # Build the model. The anchor is selected automatically; no corner point is
-        # required for this face-vertex lattice.
+        # The anchor is selected automatically, so this face-vertex lattice
+        # requires no corner node.
         create_kelvin("RVE", edge=edge)
         unit_cell = GmshRVE("RVE")
         unit_cell.add_periodic_mesh_constraints()
@@ -151,7 +149,8 @@ def main():
         ax.axhline(0.0, color="0.6", lw=0.6)
         ax.axvline(1.0, color="0.6", lw=0.6)
         ax.set_xlabel(r"Macroscopic deformation gradient  $\bar{F}_{11}$")
-        ax.set_ylabel(r"Effective first Piola-Kirchhoff stress  $\bar{P}_{11}$")
+        ax.set_ylabel(
+            r"Effective first Piola-Kirchhoff stress  $\bar{P}_{11}$")
         ax.set_title("Finite-strain response of a Kelvin lattice")
         ax.grid(True, alpha=0.3)
         fig.tight_layout()

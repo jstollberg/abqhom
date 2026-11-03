@@ -11,16 +11,15 @@ equivalence of the reduced and ownership-weighted complete cells.
 
 import os
 
-import numpy as np
-
-here = os.getcwd()
-
 import gmsh
+import numpy as np
 
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
 from abqhom.gmshmodel import GmshRVE
 from abqhom.utils import (export_to_csv_file, hill_mandel_residual,
                           tensor_to_voigt, voigt_to_tensor)
+
+here = os.getcwd()
 
 
 def create_geometry(model_name, edge_length, nodes_per_edge):

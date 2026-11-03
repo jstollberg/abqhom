@@ -11,17 +11,16 @@ hysteresis response.
 
 import os
 
-import numpy as np
-
-here = os.getcwd()
-
 import gmsh
+import numpy as np
 from abaqusConstants import OFF
+from sandwich import create_geometry
 
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
 from abqhom.gmshmodel import GmshRVE
 from abqhom.utils import hill_mandel_residual
-from sandwich import create_geometry
+
+here = os.getcwd()
 
 
 def assign_sections(cell, parameters):

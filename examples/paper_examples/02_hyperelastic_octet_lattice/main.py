@@ -11,18 +11,17 @@ using quasi-static implicit dynamics.
 
 import os
 
-import numpy as np
-
-here = os.getcwd()
-
 import gmsh
+import numpy as np
 from abaqusConstants import (ISOTROPIC, NEO_HOOKE, OFF, ON, QUASI_STATIC,
                              VOLUMETRIC_DATA)
+from octet import apply_eigenmode_imperfection, create_geometry
 
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
 from abqhom.gmshmodel import GmshRVE
 from abqhom.utils import export_to_csv_file, hill_mandel_residual
-from octet import apply_eigenmode_imperfection, create_geometry
+
+here = os.getcwd()
 
 
 def assign_section(cell, radius, youngs_modulus, poissons_ratio, density):
@@ -62,38 +61,38 @@ def energy_ratios(cell, step_name, minimum_pseudo_time=0.02):
     cell.open_odb_file()
     try:
         step = cell.odb.steps[step_name]
-        for region in step.historyRegions.values():
-            outputs = region.historyOutputs
-            if "ALLIE" not in outputs or "ALLKE" not in outputs:
-                continue
+        region_name = "Assembly ASSEMBLY"
+        if region_name not in step.historyRegions:
+            raise RuntimeError(
+                "The assembly energy-history region is unavailable.")
+        outputs = step.historyRegions[region_name].historyOutputs
+        if "ALLIE" not in outputs or "ALLKE" not in outputs:
+            raise RuntimeError("ALLIE and ALLKE are unavailable in the ODB.")
 
-            internal = dict(outputs["ALLIE"].data)
-            kinetic = dict(outputs["ALLKE"].data)
-            records = [(time, internal[time], kinetic[time])
-                       for time in sorted(set(internal) & set(kinetic))]
-            ratios = [(time, abs(ke) / max(abs(ie), 1.0e-30))
-                      for time, ie, ke in records
-                      if time >= minimum_pseudo_time]
-            if not ratios:
-                raise RuntimeError(
-                    "No energy data are available after pseudo-time {}."
-                    .format(minimum_pseudo_time))
+        internal = dict(outputs["ALLIE"].data)
+        kinetic = dict(outputs["ALLKE"].data)
+        records = [(time, internal[time], kinetic[time])
+                   for time in sorted(set(internal) & set(kinetic))]
+        ratios = [(time, abs(ke) / max(abs(ie), 1.0e-30))
+                  for time, ie, ke in records
+                  if time >= minimum_pseudo_time]
+        if not ratios:
+            raise RuntimeError(
+                "No energy data are available after pseudo-time {}."
+                .format(minimum_pseudo_time))
 
-            peak_time, peak_ratio = max(
-                ratios, key=lambda item: item[1])
-            maximum_kinetic = max(abs(ke) for _, _, ke in records)
-            maximum_internal = max(abs(ie) for _, ie, _ in records)
-            global_ratio = maximum_kinetic / maximum_internal
-            return {
-                "peak_ratio": peak_ratio,
-                "peak_time": peak_time,
-                "final_ratio": ratios[-1][1],
-                "global_ratio": global_ratio,
-            }
+        peak_time, peak_ratio = max(ratios, key=lambda item: item[1])
+        maximum_kinetic = max(abs(ke) for _, _, ke in records)
+        maximum_internal = max(abs(ie) for _, ie, _ in records)
+        ratio_of_maxima = maximum_kinetic / maximum_internal
+        return {
+            "peak_ratio": peak_ratio,
+            "peak_time": peak_time,
+            "final_ratio": ratios[-1][1],
+            "ratio_of_maxima": ratio_of_maxima,
+        }
     finally:
         cell.close_odb_file()
-
-    raise RuntimeError("ALLIE and ALLKE are unavailable in the ODB.")
 
 
 def evaluate_response(cell, step_name, load_path, component,
@@ -168,11 +167,11 @@ def export_results(result_directory, response, component, energies,
     maximum_asymmetry = np.max(response[loaded_frames, -2])
     maximum_hill_mandel = np.nanmax(response[:, -1])
 
-    # Columns: peak ratio and time, final ratio, global ratio, stress
-    # asymmetry, Hill--Mandel residual, and maximum nodal rotation
+    # Columns: peak ratio and time, final ratio, ratio of the separate energy
+    # maxima, stress asymmetry, Hill--Mandel residual, and maximum rotation.
     metrics = np.array([[
         energies["peak_ratio"], energies["peak_time"],
-        energies["final_ratio"], energies["global_ratio"],
+        energies["final_ratio"], energies["ratio_of_maxima"],
         maximum_asymmetry, maximum_hill_mandel, rotation]])
     export_to_csv_file(
         metrics, os.path.join(result_directory, "verification_metrics"))
@@ -245,7 +244,6 @@ def run_cell(model_name, cells_per_axis, elements_per_strut, edge_length,
              imperfection_amplitude, parameters, load_cases,
              output_directories, buckling_directory):
     """Build one cell size and run all prescribed load cases."""
-
     # Regenerate the same perfect mesh used by the corresponding buckling
     # analysis; the mode-file coordinates verify this compatibility.
     create_geometry(
