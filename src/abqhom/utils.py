@@ -1,10 +1,7 @@
 # SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""
-Collection of utility functions for the abqhom package.
-
-"""
+"""Numerical utilities for homogenization post-processing."""
 
 import os
 import numpy as np
@@ -85,7 +82,7 @@ def tensor_to_voigt(tensor, quantity, check_symmetry=True):
     quantity : str
         The quantity that is described by the tensor. Currently
         supported are 'STRESS' and 'STRAIN'.
-    check_symmetry : bool
+    check_symmetry : bool, optional
         If True, the input will be checked for symmetry. The default
         is True.
 
@@ -102,9 +99,9 @@ def tensor_to_voigt(tensor, quantity, check_symmetry=True):
     if len(tensor.shape) == 2:
         tensor = np.expand_dims(tensor, 0)
 
-    voigt = []
+    voigt_data = []
     for t in tensor:
-        if not np.allclose(t, t.T) and check_symmetry:
+        if check_symmetry and not np.allclose(t, t.T):
             raise ValueError("The provided tensor is not symmetric.")
 
         if t.shape == (3, 3):
@@ -114,7 +111,7 @@ def tensor_to_voigt(tensor, quantity, check_symmetry=True):
             voigt_tensor = np.array([xx, yy, zz, yz, xz, xy])
             if quantity == "STRAIN":
                 voigt_tensor[3::] *= 2
-            voigt.append(voigt_tensor)
+            voigt_data.append(voigt_tensor)
 
         elif t.shape == (2, 2):
             xx, yy = t[0, 0], t[1, 1]
@@ -123,16 +120,16 @@ def tensor_to_voigt(tensor, quantity, check_symmetry=True):
             voigt_tensor = np.array([xx, yy, xy])
             if quantity == "STRAIN":
                 voigt_tensor[2] *= 2
-            voigt.append(voigt_tensor)
+            voigt_data.append(voigt_tensor)
 
         else:
             raise ValueError("The shape of the provided tensor is invalid.")
 
-    voigt = np.array(voigt, dtype=float)
-    if voigt.shape[0] == 1:
-        voigt = voigt[0]
+    voigt_data = np.array(voigt_data, dtype=float)
+    if voigt_data.shape[0] == 1:
+        voigt_data = voigt_data[0]
 
-    return voigt
+    return voigt_data
 
 
 def hill_mandel_residual(macroscopic_power, microscopic_power,
@@ -184,23 +181,46 @@ def hill_mandel_residual(macroscopic_power, microscopic_power,
     return residual
 
 
-def reuss(volume_fraction, C1, C2):
+def _validate_constituent_data(volume_fractions, stiffnesses):
+    """Validate and return constituent fractions and stiffness matrices."""
+
+    volume_fractions = np.asarray(volume_fractions, dtype=float)
+    if volume_fractions.ndim != 1 or volume_fractions.size == 0:
+        raise ValueError("Volume fractions must be a nonempty 1D sequence.")
+    if (not np.all(np.isfinite(volume_fractions))
+            or np.any(volume_fractions < 0.0)):
+        raise ValueError("Volume fractions must be finite and nonnegative.")
+    if not np.isclose(np.sum(volume_fractions), 1.0,
+                      rtol=1.0e-12, atol=1.0e-12):
+        raise ValueError("Volume fractions must add up to one.")
+
+    stiffnesses = np.asarray(stiffnesses, dtype=float)
+    if (stiffnesses.ndim != 3
+            or stiffnesses.shape[0] != volume_fractions.size
+            or stiffnesses.shape[1] != stiffnesses.shape[2]):
+        raise ValueError(
+            "Provide one square stiffness matrix per constituent.")
+    if not np.all(np.isfinite(stiffnesses)):
+        raise ValueError("Stiffness matrices must contain finite values.")
+
+    return volume_fractions, stiffnesses
+
+
+def reuss(volume_fractions, stiffnesses):
     r"""
     Return the Reuss estimate of the effective stiffness matrix.
 
-    For the volume fraction :math:`c` of phase 1,
+    For :math:`N` constituents with volume fractions :math:`c_a`,
     :math:`\bar{\mathbb{C}}_{\mathrm{R}}^{\mathrm{V}} =
-    (c(\mathbb{C}^{\mathrm{V}}_1)^{-1}
-    +(1-c)(\mathbb{C}^{\mathrm{V}}_2)^{-1})^{-1}`.
+    \left(\sum_{a=1}^N c_a
+    (\mathbb{C}^{\mathrm{V}}_a)^{-1}\right)^{-1}`.
 
     Parameters
     ----------
-    volume_fraction : float
-        Volume fraction of phase 1.
-    C1 : ndarray
-        Stiffness matrix of phase 1 in Voigt notation.
-    C2 : ndarray
-        Stiffness matrix of phase 2 in Voigt notation.
+    volume_fractions : ArrayLike
+        Nonnegative constituent volume fractions that add up to one.
+    stiffnesses : ArrayLike
+        One square stiffness matrix per constituent in Voigt notation.
 
     Returns
     -------
@@ -208,28 +228,29 @@ def reuss(volume_fraction, C1, C2):
         Reuss estimate of the effective stiffness matrix.
 
     """
-    C_inv = (volume_fraction*np.linalg.inv(C1) +
-             (1 - volume_fraction)*np.linalg.inv(C2))
-    C = np.linalg.inv(C_inv)
-    return C
+    volume_fractions, stiffnesses = _validate_constituent_data(
+        volume_fractions, stiffnesses)
+    compliance = np.zeros_like(stiffnesses[0])
+    for volume_fraction, stiffness in zip(volume_fractions, stiffnesses):
+        if volume_fraction > 0.0:
+            compliance += volume_fraction*np.linalg.inv(stiffness)
+    return np.linalg.inv(compliance)
 
 
-def voigt(volume_fraction, C1, C2):
+def voigt(volume_fractions, stiffnesses):
     r"""
     Return the Voigt estimate of the effective stiffness matrix.
 
-    For the volume fraction :math:`c` of phase 1,
+    For :math:`N` constituents with volume fractions :math:`c_a`,
     :math:`\bar{\mathbb{C}}_{\mathrm{V}}^{\mathrm{V}} =
-    c\mathbb{C}^{\mathrm{V}}_1+(1-c)\mathbb{C}^{\mathrm{V}}_2`.
+    \sum_{a=1}^N c_a\mathbb{C}^{\mathrm{V}}_a`.
 
     Parameters
     ----------
-    volume_fraction : float
-        Volume fraction of phase 1.
-    C1 : ndarray
-        Stiffness matrix of phase 1 in Voigt notation.
-    C2 : ndarray
-        Stiffness matrix of phase 2 in Voigt notation.
+    volume_fractions : ArrayLike
+        Nonnegative constituent volume fractions that add up to one.
+    stiffnesses : ArrayLike
+        One square stiffness matrix per constituent in Voigt notation.
 
     Returns
     -------
@@ -237,8 +258,9 @@ def voigt(volume_fraction, C1, C2):
         Voigt estimate of the effective stiffness matrix.
 
     """
-    C = (volume_fraction*C1) + (1 - volume_fraction)*C2
-    return C
+    volume_fractions, stiffnesses = _validate_constituent_data(
+        volume_fractions, stiffnesses)
+    return np.tensordot(volume_fractions, stiffnesses, axes=(0, 0))
 
 
 def export_to_csv_file(C, path):
@@ -250,11 +272,7 @@ def export_to_csv_file(C, path):
     C : ArrayLike
         The array to export.
     path : str or os.PathLike
-        The file path.
-
-    Returns
-    -------
-    None
+        The file path. An existing suffix is replaced by ``.csv``.
 
     """
     path, _ = os.path.splitext(path)

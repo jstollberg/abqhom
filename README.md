@@ -88,23 +88,19 @@ Gmsh geometry or mesh
         -> effective stress and power checks
 ```
 
-## Requirements
+## Runtime requirements
 
-- **Abaqus** CAE and solver. Scripts using `AbaqusRVE` execute through, for
-  example, `abaqus cae noGUI=main.py`.
+- **Abaqus 2018 or newer** with Abaqus/CAE and the solver. Scripts using
+  `AbaqusRVE` execute through, for example, `abaqus cae noGUI=main.py`.
 - **Gmsh 4.9.4 or newer** with its Python API and shared library.
 - **NumPy**, which is included with supported Abaqus installations.
 - **backports.weakref**, installed in the Abaqus runtime for compatibility
   with legacy Python 2.7 releases.
-- **Paraqus 1.0.2 or newer**, used for VTK export. The oldest compatible
-  release currently available from PyPI is 1.0.4.
+- **Paraqus 1.0.2 or newer**, used for VTK export.
 
 The code is compatible with both the Python 3 environment of current Abaqus
 releases and legacy Abaqus installations using Python 2.7. The examples may
 require a full Abaqus license, depending on their model size.
-
-`microgen` is used only to regenerate the mesh of the gyroid tutorial. It is
-not a runtime dependency of `abqhom` or Abaqus.
 
 ## Installation
 
@@ -142,8 +138,13 @@ The generated path may instead be added to the environment setup of a job
 scheduler. Only the dedicated runtime `site-packages` directory is exposed;
 packages from the Python environment used to run the installer are not added.
 
-For a source checkout, first run `python -m pip install .` and pass the local
-source or wheel to the helper with `--abqhom-source`.
+For a source checkout, install the package and pass the local source to the
+helper explicitly:
+
+```console
+python -m pip install .
+abqhom-install-abaqus --abqhom-source .
+```
 
 ## Quick start
 

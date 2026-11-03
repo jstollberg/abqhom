@@ -27,7 +27,8 @@ final call of either script to omit the supercell analysis.
 
 Paraqus generates the VTK histories used by the contact-clearance check.
 After exporting the primitive-cell histories, run the check in a Python
-environment containing VTK:
+environment containing the optional `vtk` Python package. It is not part of
+the abqhom Abaqus runtime:
 
 ```text
 python verify_contact_clearance.py

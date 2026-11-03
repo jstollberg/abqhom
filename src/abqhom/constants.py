@@ -1,10 +1,7 @@
 # SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""
-Collection of constants for the abqhom package.
-
-"""
+"""Constants shared by the abqhom package."""
 
 # Physical groups on the RVE boundary
 POINT_GROUPS = ["POINT_1", "POINT_2", "POINT_3", "POINT_4",
@@ -105,7 +102,7 @@ ABAQUS_CONNECTIVITY_ORDER = {
          9, 16, 18, 19, 17, 10, 12, 14, 15],  # 20-node 2nd hexahedron
     18: [0, 1, 2, 3, 4, 5, 6, 9,
          7, 12, 14, 13, 8, 10, 11],           # 15-node 2nd prism
-                             }
+}
 
 # Abaqus element types with rotational degrees of freedom
 ELEMENTS_ROTATIONAL_DOFS = {
@@ -126,14 +123,14 @@ ELEMENTS_ROTATIONAL_DOFS = {
     # Shell elements
     "STRI3", "S3", "S3R", "S3RS", "STRI65", "S4", "S4R", "S4RS", "S4RSW",
     "S4R5", "S8R", "S8R5", "S9R5"
-    }
+}
 
 # Abaqus element types with warping degrees of freedom
 ELEMENTS_WARPING_DOFS = {
     "B31OS", "B31OSH", "B32OS", "B32OSH"
-    }
+}
 
 # Abaqus element types that are not supported by abqhom
 ELEMENTS_NOT_SUPPORTED = {
     "STRI65", "S4R5", "S8R5", "S9R5"
-    }
+}

@@ -167,7 +167,7 @@ def main():
                 return time*voigt_to_tensor(strain, "STRAIN")
 
             history = LoadHistory(np.array([0.0, 1.0]), strain_history)
-            unit_cell.apply_periodic_BC("LOAD", history)
+            unit_cell.apply_periodic_bc("LOAD", history)
 
             # Run the analysis and compute the average stress
             unit_cell.run_analysis(field_outputs=["U"])

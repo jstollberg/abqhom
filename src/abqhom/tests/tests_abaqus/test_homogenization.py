@@ -40,9 +40,9 @@ def _stiffness_column(build, assign_sections, comp, element_size,
     unit_cell.model.StaticStep(name="LOAD", previous="Initial")
     history = LoadHistory(np.array([0.0, 1.0]), strain_history)
     if bc == "affine":
-        unit_cell.apply_affine_displacement_BC("LOAD", history)
+        unit_cell.apply_affine_displacement_bc("LOAD", history)
     else:
-        unit_cell.apply_periodic_BC("LOAD", history)
+        unit_cell.apply_periodic_bc("LOAD", history)
     unit_cell.run_analysis(field_outputs=["U"])
     stress = tensor_to_voigt(unit_cell.average_stress("LOAD"), "STRESS")
     return stress/STRAIN
@@ -107,7 +107,7 @@ class TestBeamLattices(AbaqusTestCase):
             return voigt_to_tensor(strain, "STRAIN")
 
         history = LoadHistory(np.array([0.0, 1.0]), strain_history)
-        unit.apply_periodic_BC("LOAD", history)
+        unit.apply_periodic_bc("LOAD", history)
         unit.run_analysis()
 
         stress = unit.average_stress("LOAD")
@@ -137,7 +137,7 @@ class TestBeamLattices(AbaqusTestCase):
             return voigt_to_tensor(strain, "STRAIN")
 
         history = LoadHistory(np.array([0.0, 1.0]), strain_history)
-        unit.apply_periodic_BC("LOAD", history)
+        unit.apply_periodic_bc("LOAD", history)
         unit.run_analysis()
 
         stress = unit.average_stress("LOAD")
@@ -185,7 +185,7 @@ class TestBeamLattices(AbaqusTestCase):
                 strain[c] = STRAIN
                 return time*voigt_to_tensor(strain, "STRAIN")
 
-            unit.apply_periodic_BC("LOAD", LoadHistory(np.array([0.0, 1.0]),
+            unit.apply_periodic_bc("LOAD", LoadHistory(np.array([0.0, 1.0]),
                                                        strain_history))
             unit.run_analysis(field_outputs=["U"])
             columns.append(tensor_to_voigt(unit.average_stress("LOAD"),
@@ -306,7 +306,7 @@ class TestMixedDimensionalCell(AbaqusTestCase):
             return gradient
 
         history = LoadHistory(np.array([0.0, 1.0]), strain_history)
-        unit.apply_periodic_BC("LOAD", history)
+        unit.apply_periodic_bc("LOAD", history)
         unit.run_analysis()
 
         stress = unit.average_stress("LOAD")
@@ -347,7 +347,7 @@ class TestEmbeddedFibers(AbaqusTestCase):
             strain[2] = STRAIN            # uniaxial along the fibre axis z
             return time*voigt_to_tensor(strain, "STRAIN")
 
-        unit.apply_periodic_BC("LOAD", LoadHistory(np.array([0.0, 1.0]),
+        unit.apply_periodic_bc("LOAD", LoadHistory(np.array([0.0, 1.0]),
                                                    strain_history))
         unit.run_analysis(field_outputs=["U"])
         stress = tensor_to_voigt(unit.average_stress("LOAD"), "STRESS")

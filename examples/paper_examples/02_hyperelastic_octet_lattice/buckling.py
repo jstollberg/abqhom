@@ -270,7 +270,7 @@ def run_buckling(model_name, cells_per_axis, elements_per_strut,
             return np.zeros((3, 3))
 
         zero_history = LoadHistory(np.asarray([0.0, 1.0]), zero_gradient)
-        cell.apply_periodic_BC(setup_step, zero_history)
+        cell.apply_periodic_bc(setup_step, zero_history)
         remove_temporary_loading(cell, setup_step)
 
         # ---------------------------------------------------------------

@@ -191,7 +191,7 @@ def run_case(gmsh_cell, reversal_times, reversal_strains, parameters,
 
     # Establish periodicity before registering the embedded region. The beam
     # endpoints already share the host nodes at the eight cell corners.
-    cell.apply_periodic_BC(step_name, load_history)
+    cell.apply_periodic_bc(step_name, load_history)
     cell.model.EmbeddedRegion(
         "EMBEDDED_BEAM_CORE",
         cell.instance.sets["ELSET_BEAM_STRUTS"],

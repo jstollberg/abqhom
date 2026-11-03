@@ -4,13 +4,16 @@ Dependencies
 Required software
 -----------------
 
-**Abaqus**
+**Abaqus 2018 or newer**
    Model construction, finite element analysis, and result recovery use the
    Abaqus scripting interface. Scripts that instantiate
    :class:`~abqhom.abqmodel.AbaqusRVE` must therefore run in an Abaqus CAE
-   Python kernel, for example with ``abaqus cae noGUI=main.py``. The source is
-   compatible with both the Python 2.7 interface of legacy Abaqus releases and
-   the Python 3 interface of current releases.
+   Python kernel, for example with ``abaqus cae noGUI=main.py``. Abaqus 2018 is
+   the minimum version because the periodic constraints use ordered node sets
+   created through ``SetFromNodeLabels(..., unsorted=True)`` and set-to-set
+   equation constraints, both supported by Abaqus/CAE from that release. The
+   source is compatible with both the Python 2.7 interface of legacy Abaqus
+   releases and the Python 3 interface of current releases.
 
 **Gmsh**
    Geometry handling and meshing use Gmsh 4.9.4 or newer. The installation

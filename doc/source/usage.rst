@@ -45,7 +45,7 @@ periodic uniaxial strain, and evaluates its effective stress. Save it as
            return time*voigt_to_tensor(strain, "STRAIN")
 
        history = LoadHistory([0.0, 1.0], displacement_gradient)
-       cell.apply_periodic_BC("LOAD", history)
+       cell.apply_periodic_bc("LOAD", history)
        cell.run_analysis(field_outputs=["S"])
 
        # Recover the effective first Piola--Kirchhoff stress.
@@ -69,7 +69,7 @@ What happens in the quickstart
    macroscopic displacement gradient
    :math:`\bar{\boldsymbol{H}}=\bar{\boldsymbol{F}}-\boldsymbol{I}`. In this
    geometrically linear example it equals the prescribed infinitesimal strain.
-#. :meth:`~abqhom.abqmodel.AbaqusRVE.apply_periodic_BC` creates the periodic
+#. :meth:`~abqhom.abqmodel.AbaqusRVE.apply_periodic_bc` creates the periodic
    equations and the macroscopic loading reference points. A rigid-body anchor
    is selected automatically.
 #. :meth:`~abqhom.abqmodel.AbaqusRVE.average_stress` evaluates the effective

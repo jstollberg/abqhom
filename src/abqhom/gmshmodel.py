@@ -1,16 +1,12 @@
 # SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""
-Module containing the GmshRVE class and related classes that are helpful
-to create representative volume elements using Gmsh and to prepare the
-model for homogenization.
-
-"""
+"""Gmsh RVE geometry, boundary classification, and mesh export."""
 
 import os
-
 from collections import OrderedDict
+from numbers import Integral
+
 try:
     from collections import UserDict
 except ImportError:
@@ -85,6 +81,10 @@ class GmshRVE(object):
         # Create the boundary map
         if boundary is None:
             boundary = Boundary(model_name)
+        elif boundary.model_name != model_name:
+            raise ValueError(
+                "The supplied boundary belongs to Gmsh model '{}', not "
+                "'{}'.".format(boundary.model_name, model_name))
         self._boundary = boundary
 
         # Check if the model has entities of at least dimension 1
@@ -245,26 +245,12 @@ class GmshRVE(object):
         return self.__str__()
 
     def activate(self):
-        """
-        Set the RVE model as the current model in Gmsh.
-
-        Returns
-        -------
-        None
-
-        """
+        """Set the RVE model as the current model in Gmsh."""
 
         gmsh.model.set_current(self.model_name)
 
     def show(self):
-        """
-        Open the RVE model in the Gmsh graphical user interface.
-
-        Returns
-        -------
-        None
-
-        """
+        """Open the RVE model in the Gmsh graphical user interface."""
 
         self.activate()
         gmsh.fltk.run()
@@ -415,17 +401,21 @@ class GmshRVE(object):
                 "were found.")
 
         # Rearrange connectivity list
-        for el_type in element_tags.keys():
+        for el_type in element_tags:
             element_tags[el_type] = np.concatenate(element_tags[el_type])
             conn = np.concatenate(element_connectivity[el_type])
 
             nen = gmsh.model.mesh.getElementProperties(el_type)[3]
             conn = conn.reshape(-1, nen)
+            if el_type not in ABAQUS_CONNECTIVITY_ORDER:
+                raise NotImplementedError(
+                    "Gmsh element type {} has no supported Abaqus "
+                    "connectivity mapping.".format(el_type))
             conn = conn[:, ABAQUS_CONNECTIVITY_ORDER[el_type]]
             element_connectivity[el_type] = conn
 
         # Remove duplicate elements
-        for el_type in element_tags.keys():
+        for el_type in element_tags:
             tags = element_tags[el_type]
             conn = element_connectivity[el_type]
 
@@ -477,10 +467,6 @@ class GmshRVE(object):
             The characteristic element length. If this is None Gmsh will
             set the element size automatically. The default is None.
 
-        Returns
-        -------
-        None
-
         """
 
         self.activate()
@@ -511,10 +497,6 @@ class GmshRVE(object):
 
         Secondary entities are mapped to their primary partners by the
         appropriate primitive-cell translation.
-
-        Returns
-        -------
-        None
 
         """
 
@@ -562,10 +544,6 @@ class GmshRVE(object):
         Nodes on intersections of boundary entities are assigned to the
         lowest-dimensional group. Periodic primary and secondary sets are
         ordered so that nodes with the same list index form a pair.
-
-        Returns
-        -------
-        None
 
         """
 
@@ -618,7 +596,7 @@ class GmshRVE(object):
         # Activate the model in Gmsh
         self.activate()
 
-        # Return if there are no nodes in the mesh
+        # Reject models without mesh nodes.
         if self.mesh_dimension < 0:
             raise RuntimeError("There are no nodes in the model.")
 
@@ -629,7 +607,7 @@ class GmshRVE(object):
             self.node_sets[secondary] = paired_nodes[1]
 
         # Remove nodes being part of the boundary of a group
-        for group in self.boundary.keys():
+        for group in self.boundary:
             remove_child_nodes(group, BOUNDARY_CONNECTIVITY[group])
 
         # Add sets collecting nodes for points, edges and faces
@@ -741,16 +719,12 @@ class GmshRVE(object):
         nodal support belongs to a secondary periodic entity are collected in
         ``SECONDARY_ELEMENTS`` for the ownership-consistent reduction.
 
-        Returns
-        -------
-        None
-
         """
 
         # Activate the model in Gmsh
         self.activate()
 
-        # Return if there are no elements in the mesh
+        # Reject models without mesh elements.
         if self.mesh_dimension < 0:
             raise RuntimeError("There are no elements in the model.")
 
@@ -953,8 +927,9 @@ class GmshRVE(object):
         Parameters
         ----------
         custom_types : mapping of int to str, optional
-            Map from Gmsh element types to Abaqus element types. If None,
-            the default map is used.
+            Abaqus element names that override the defaults for supported
+            Gmsh connectivity types. The mapping does not introduce new
+            connectivity permutations. If None, the default map is used.
 
         Returns
         -------
@@ -980,7 +955,12 @@ class GmshRVE(object):
 
         # Reject element types the homogenization does not support
         used_types = set()
-        for el_type in element_tags.keys():
+        for el_type in element_tags:
+            if el_type not in el_type_map:
+                raise NotImplementedError(
+                    "No Abaqus element name is configured for Gmsh element "
+                    "type {}. Supply one through 'custom_types'."
+                    .format(el_type))
             used_types.add(el_type_map[el_type])
         warping = used_types & ELEMENTS_WARPING_DOFS
         if len(warping) > 0:
@@ -996,28 +976,29 @@ class GmshRVE(object):
 
         # Initialize Abaqus input file
         path = os.path.abspath(self.model_name + ".inp")
-        with open(path, "w") as file:
-            file.write("*PART, NAME={}\n".format(self.model_name))
+        with open(path, "w") as output:
+            output.write("*PART, NAME={}\n".format(self.model_name))
 
             # Add nodes
-            file.write("*NODE\n")
+            output.write("*NODE\n")
             for tag, coords in zip(node_tags, node_coords):
-                file.write("{}, {}, {}, {}\n".format(
+                output.write("{}, {}, {}, {}\n".format(
                     tag, coords[0], coords[1], coords[2]))
 
             # Add elements
-            for el_type in element_tags.keys():
+            for el_type in element_tags:
                 type_tags = element_tags[el_type]
                 type_conn = conn[el_type]
 
-                file.write("*ELEMENT, TYPE={}\n".format(el_type_map[el_type]))
+                output.write(
+                    "*ELEMENT, TYPE={}\n".format(el_type_map[el_type]))
                 for tag, nodes in zip(type_tags, type_conn):
-                    file.write("{}".format(tag))
-                    for i, node in enumerate(nodes):
-                        file.write(", {}".format(node))
-                    file.write("\n")
+                    output.write("{}".format(tag))
+                    for node in nodes:
+                        output.write(", {}".format(node))
+                    output.write("\n")
 
-            file.write("*END PART\n")
+            output.write("*END PART\n")
 
         return path
 
@@ -1168,14 +1149,11 @@ class Boundary(UserDict, object):
         n : int
             The number of sample points per spatial direction.
 
-        Returns
-        -------
-        None
-
         """
 
-        if n < 1:
-            raise ValueError("The sampling density must be greater than zero.")
+        if isinstance(n, bool) or not isinstance(n, Integral) or n < 1:
+            raise ValueError(
+                "The sampling density must be a positive integer.")
         self._sampling_density = int(n)
 
     @staticmethod

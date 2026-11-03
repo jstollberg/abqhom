@@ -242,7 +242,7 @@ def _check_runtime_contents(prefix, package_directory):
 
 
 def _check_runtime_imports(prefix, package_directory):
-    """Import the isolated runtime packages and validate their version."""
+    """Import isolated runtime packages and validate the abqhom version."""
 
     script = """
 import os

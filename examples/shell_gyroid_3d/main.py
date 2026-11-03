@@ -91,7 +91,7 @@ def main():
             np.array([0.0, 1.0]),
             lambda pseudo_time: np.diag(
                 [final_displacement_gradient*pseudo_time, 0.0, 0.0]))
-        cell.apply_periodic_BC(step_name, history)
+        cell.apply_periodic_bc(step_name, history)
         cell.run_analysis(field_outputs=["U", "S"])
 
         frame_times = get_frame_times(cell, step_name)

@@ -114,7 +114,7 @@ def main():
             initialInc=increment, minInc=increment, maxInc=increment)
 
         # Apply periodic boundary conditions and run the analysis
-        unit_cell.apply_periodic_BC(step_name, history)
+        unit_cell.apply_periodic_bc(step_name, history)
         unit_cell.run_analysis(field_outputs=["U", "S", "PEEQ"])
 
         # ---------------------------------------------------------------

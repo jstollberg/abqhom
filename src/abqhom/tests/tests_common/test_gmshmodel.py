@@ -15,13 +15,20 @@ import numpy as np
 import gmsh
 
 from abqhom.constants import (POINT_GROUPS, EDGE_GROUPS, FACE_GROUPS,
-                              PERIODIC_PAIRS)
-from abqhom.gmshmodel import GmshRVE
+                              PERIODIC_PAIRS, ABAQUS_CONNECTIVITY_ORDER)
+from abqhom.gmshmodel import Boundary, GmshRVE
 from abqhom.tests import fixtures
 from abqhom.tests.base import GmshTestCase
 
 
 class TestDimensions(GmshTestCase):
+
+    def test_boundary_must_belong_to_rve_model(self):
+        """A supplied boundary must describe the requested Gmsh model."""
+        fixtures.simple_cubic("BOUNDARY_MODEL", length=1.0)
+        boundary = Boundary("BOUNDARY_MODEL")
+        fixtures.simple_cubic("RVE_MODEL", length=1.0)
+        self.assertRaises(ValueError, GmshRVE, "RVE_MODEL", boundary)
 
     def test_model_dimension(self):
         """Planar and spatial models report dimensions two and three."""
@@ -89,6 +96,17 @@ class TestNodesAndElements(GmshTestCase):
         # Gmsh element type 8 is the 3-node second-order line
         self.assertIn(8, element_tags)
         self.assertEqual(connectivity[8].shape[1], 3)
+
+    def test_missing_connectivity_mapping_raises_clear_error(self):
+        """Unsupported Gmsh connectivity raises a descriptive exception."""
+        fixtures.simple_cubic("NO_CONNECTIVITY", length=2.0)
+        rve = GmshRVE("NO_CONNECTIVITY")
+        rve.generate_mesh(element_size=2.0)
+        connectivity_order = ABAQUS_CONNECTIVITY_ORDER.pop(1)
+        try:
+            self.assertRaises(NotImplementedError, rve.get_elements)
+        finally:
+            ABAQUS_CONNECTIVITY_ORDER[1] = connectivity_order
 
     def test_mesh_operations_activate_their_rve_model(self):
         """Meshing and element access do not act on another current model."""

@@ -50,29 +50,54 @@ class TestVoigtTensor(unittest.TestCase):
 class TestBounds(unittest.TestCase):
 
     def setUp(self):
-        # Two diagonal positive-definite stiffness matrices
-        self.C1 = np.diag([10.0, 10.0, 10.0, 4.0, 4.0, 4.0])
-        self.C2 = np.diag([1.0, 1.0, 1.0, 0.4, 0.4, 0.4])
-        self.fraction = 0.3
+        # Three diagonal positive-definite stiffness matrices.
+        self.stiffnesses = np.array([
+            np.diag([10.0, 10.0, 10.0, 4.0, 4.0, 4.0]),
+            np.diag([4.0, 4.0, 4.0, 1.6, 1.6, 1.6]),
+            np.diag([1.0, 1.0, 1.0, 0.4, 0.4, 0.4]),
+        ])
+        self.fractions = np.array([0.2, 0.3, 0.5])
 
     def test_voigt_is_rule_of_mixtures(self):
         """The Voigt estimate is the volume-weighted average."""
-        expected = self.fraction*self.C1 + (1 - self.fraction)*self.C2
-        self.assertTrue(np.allclose(voigt(self.fraction, self.C1, self.C2),
-                                    expected))
+        expected = sum(fraction*stiffness for fraction, stiffness in zip(
+            self.fractions, self.stiffnesses))
+        self.assertTrue(np.allclose(
+            voigt(self.fractions, self.stiffnesses), expected))
 
     def test_reuss_matches_harmonic_mixture_and_is_below_voigt(self):
         """The Reuss estimate is the harmonic mixture and a lower bound."""
-        C_voigt = voigt(self.fraction, self.C1, self.C2)
-        C_reuss = reuss(self.fraction, self.C1, self.C2)
-        expected = np.linalg.inv(
-            self.fraction*np.linalg.inv(self.C1)
-            + (1.0 - self.fraction)*np.linalg.inv(self.C2))
+        C_voigt = voigt(self.fractions, self.stiffnesses)
+        C_reuss = reuss(self.fractions, self.stiffnesses)
+        expected_compliance = sum(
+            fraction*np.linalg.inv(stiffness)
+            for fraction, stiffness in zip(
+                self.fractions, self.stiffnesses))
+        expected = np.linalg.inv(expected_compliance)
         self.assertTrue(np.allclose(C_reuss, expected))
         difference = 0.5*((C_voigt - C_reuss)
                           + (C_voigt - C_reuss).T)
         self.assertGreaterEqual(np.min(np.linalg.eigvalsh(difference)),
                                 -1.0e-12)
+
+    def test_invalid_volume_fractions_are_rejected(self):
+        """Fractions must be finite, nonnegative, and normalized."""
+        self.assertRaises(
+            ValueError, voigt, [0.2, 0.3], self.stiffnesses[:2])
+        self.assertRaises(
+            ValueError, voigt, [0.5, -0.2, 0.7], self.stiffnesses)
+        self.assertRaises(
+            ValueError, reuss, [0.5, np.inf, 0.5], self.stiffnesses)
+
+    def test_stiffness_data_must_match_constituents(self):
+        """Each constituent requires one finite square stiffness matrix."""
+        self.assertRaises(
+            ValueError, voigt, self.fractions, self.stiffnesses[:2])
+        self.assertRaises(
+            ValueError, reuss, self.fractions, np.ones((3, 2, 3)))
+        invalid = self.stiffnesses.copy()
+        invalid[0, 0, 0] = np.nan
+        self.assertRaises(ValueError, voigt, self.fractions, invalid)
 
 
 class TestHillMandelResidual(unittest.TestCase):

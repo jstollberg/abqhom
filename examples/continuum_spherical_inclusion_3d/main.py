@@ -109,7 +109,7 @@ def main():
             np.array([0.0, 1.0]),
             lambda pseudo_time: np.diag(
                 [final_displacement_gradient*pseudo_time, 0.0, 0.0]))
-        unit_cell.apply_periodic_BC(step_name, history)
+        unit_cell.apply_periodic_bc(step_name, history)
         unit_cell.run_analysis(field_outputs=["U", "S"])
 
         # Evaluate the effective first Piola--Kirchhoff stress frame by frame.

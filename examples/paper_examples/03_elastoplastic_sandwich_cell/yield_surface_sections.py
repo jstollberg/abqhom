@@ -105,7 +105,7 @@ def compute_elastic_stiffness(gmsh_cell, parameters, strain_magnitude):
             name=step_name, previous="Initial", nlgeom=OFF,
             timePeriod=1.0, maxNumInc=1,
             initialInc=1.0, minInc=1.0, maxInc=1.0)
-        cell.apply_periodic_BC(step_name, history)
+        cell.apply_periodic_bc(step_name, history)
         cell.model.EmbeddedRegion(
             "EMBEDDED_BEAM_CORE",
             cell.instance.sets["ELSET_BEAM_STRUTS"],
@@ -379,7 +379,7 @@ def sample_direction(gmsh_cell, parameters, preload_strain, base_strain,
 
         # Applying the complete history at its first step propagates the same
         # periodic macroscopic loading through all subsequent analysis steps.
-        cell.apply_periodic_BC(first_step, history)
+        cell.apply_periodic_bc(first_step, history)
         cell.model.EmbeddedRegion(
             "EMBEDDED_BEAM_CORE",
             cell.instance.sets["ELSET_BEAM_STRUTS"],

@@ -106,7 +106,7 @@ def main():
                 return time*voigt_to_tensor(strain, "STRAIN")
 
             history = LoadHistory(np.array([0.0, 1.0]), strain_history)
-            unit_cell.apply_affine_displacement_BC("LOAD", history)
+            unit_cell.apply_affine_displacement_bc("LOAD", history)
             unit_cell.run_analysis(field_outputs=["U", "S"])
 
             stress = tensor_to_voigt(
@@ -123,8 +123,10 @@ def main():
         # Voigt / Reuss bounds of the two-phase material
         C_matrix = isotropic_plane_strain_stiffness(*parameters["MATRIX"])
         C_fiber = isotropic_plane_strain_stiffness(*parameters["FIBER"])
-        C_reuss = reuss(fiber_fraction, C_fiber, C_matrix)
-        C_voigt = voigt(fiber_fraction, C_fiber, C_matrix)
+        volume_fractions = [fiber_fraction, 1.0 - fiber_fraction]
+        stiffnesses = [C_fiber, C_matrix]
+        C_reuss = reuss(volume_fractions, stiffnesses)
+        C_voigt = voigt(volume_fractions, stiffnesses)
 
         C_symmetric = 0.5*(C + C.T)
         lower_margin = np.min(np.linalg.eigvalsh(C_symmetric - C_reuss))

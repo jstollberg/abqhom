@@ -108,6 +108,10 @@ class TestBoundaryGeometry(GmshTestCase):
         fixtures.simple_cubic("DENSITY", length=2.0)
         self.assertRaises(ValueError, Boundary, "DENSITY",
                           sampling_density=0)
+        self.assertRaises(ValueError, Boundary, "DENSITY",
+                          sampling_density=1.5)
+        self.assertRaises(ValueError, Boundary, "DENSITY",
+                          sampling_density=True)
 
 
 class TestBoundaryClassification(GmshTestCase):
@@ -258,6 +262,7 @@ class TestBoundaryDict(GmshTestCase):
         self.assertRaises(KeyError, boundary.__setitem__, "NOPE", [])
         boundary["point_1"] = [(0, 123)]           # lowercase is accepted
         self.assertIn((0, 123), boundary["POINT_1"])  # and stored uppercased
+
 
 class TestGmshRVEValidation(GmshTestCase):
 

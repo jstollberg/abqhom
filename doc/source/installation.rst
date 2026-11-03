@@ -4,7 +4,8 @@ Installation
 Install ``abqhom`` in a regular Python environment and use its installation
 helper to create an isolated Abaqus runtime. The Abaqus installation remains
 unchanged, which makes the workflow suitable for workstations and compute
-clusters without administrative access.
+clusters without administrative access. Abaqus 2018 or newer must be installed
+separately.
 
 Install the package
 -------------------

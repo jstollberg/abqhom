@@ -91,6 +91,18 @@ class TestLoadHistory(unittest.TestCase):
             self.assertEqual(time, times[index])
             self.assertTrue(np.allclose(load, expected[index]))
 
+    def test_iteration_is_reentrant(self):
+        """Nested iteration does not alter another active iterator."""
+        times = np.array([0.0, 0.5, 1.0])
+        history = LoadHistory(times, self._history)
+        outer = iter(history)
+
+        first_time, _ = next(outer)
+        self.assertEqual(first_time, times[0])
+        self.assertEqual(len(list(history)), len(times))
+        second_time, _ = next(outer)
+        self.assertEqual(second_time, times[1])
+
 
 class TestConstruction(AbaqusTestCase):
 
@@ -403,7 +415,7 @@ class TestPeriodicBoundaryConditions(AbaqusTestCase):
         unit.model.StaticStep(name="LOAD", previous="Initial")
         embedded = unit.part.sets["NSET_EDGE_2"].nodes[0].label
         unit._embedded_region_nodes = lambda: {embedded}
-        self.assertRaises(RuntimeError, unit.apply_periodic_BC,
+        self.assertRaises(RuntimeError, unit.apply_periodic_bc,
                           "LOAD", _uniaxial_history())
 
 
@@ -481,7 +493,7 @@ class TestAffineBoundaryConditions(AbaqusTestCase):
         unit.assign_beam_section("STRUTS", "M", 0.05)
         unit.model.StaticStep(name="LOAD", previous="Initial")
         self.assertRaises(NotImplementedError,
-                          unit.apply_affine_displacement_BC,
+                          unit.apply_affine_displacement_bc,
                           "LOAD", _uniaxial_history())
 
     def test_warping_elements_are_rejected(self):
@@ -499,7 +511,7 @@ class TestAffineBoundaryConditions(AbaqusTestCase):
         material.Elastic(table=[[100.0, 0.3]])
         unit.assign_solid_section("SOLID", "M")
         unit.model.StaticStep(name="LOAD", previous="Initial")
-        unit.apply_affine_displacement_BC("LOAD", _uniaxial_history())
+        unit.apply_affine_displacement_bc("LOAD", _uniaxial_history())
         has_dirichlet = False
         for name in unit.model.boundaryConditions.keys():
             if name.startswith("DIRICHLET_"):

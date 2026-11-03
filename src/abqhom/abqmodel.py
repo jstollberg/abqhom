@@ -1,18 +1,12 @@
 # SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""
-Module containing the AbaqusRVE class that provides useful methods for
-computational homogenization with Abaqus.
-
-"""
+"""Abaqus model construction and homogenization post-processing."""
 
 import os
 from numbers import Integral
 
 import numpy as np
-
-from abqhom.constants import PERIODIC_PAIRS, ELEMENTS_ROTATIONAL_DOFS
 
 from abaqus import Mdb, mdb, session
 from regionToolset import Region
@@ -22,6 +16,24 @@ from abaqusConstants import (THREE_D, TWO_D_PLANAR, DEFORMABLE_BODY, ON, OFF,
                              BEFORE_ANALYSIS, TOTAL, TIME, COMPLETED)
 from paraqus.abaqus import OdbReader
 from paraqus.writers import BinaryWriter, CollectionWriter
+
+from abqhom.constants import PERIODIC_PAIRS, ELEMENTS_ROTATIONAL_DOFS
+
+
+def _as_list(value):
+    """Return an optional scalar string or iterable as a new list."""
+
+    if value is None:
+        return []
+
+    try:
+        is_string = isinstance(value, basestring)
+    except NameError:
+        is_string = isinstance(value, str)
+
+    if is_string:
+        return [value]
+    return list(value)
 
 
 class AbaqusRVE(object):
@@ -41,7 +53,7 @@ class AbaqusRVE(object):
 
     Parameters
     ----------
-    gmsh_RVE : GmshRVE
+    gmsh_rve : GmshRVE
         Gmsh representation containing the RVE mesh and boundary sets.
     custom_types : mapping of int to str, optional
         Overrides for the default Gmsh-to-Abaqus element-type map.
@@ -77,24 +89,24 @@ class AbaqusRVE(object):
 
     """
 
-    def __init__(self, gmsh_RVE, custom_types=None, remove_secondary=True):
-        if gmsh_RVE.model_dimension not in {2, 3}:
+    def __init__(self, gmsh_rve, custom_types=None, remove_secondary=True):
+        if gmsh_rve.model_dimension not in {2, 3}:
             raise RuntimeError("Only 2D and 3D models are supported.")
-        dim = THREE_D if gmsh_RVE.model_dimension == 3 else TWO_D_PLANAR
+        dim = THREE_D if gmsh_rve.model_dimension == 3 else TWO_D_PLANAR
         custom_types = {} if custom_types is None else dict(custom_types)
 
         # Write Abaqus input file
-        input_file = gmsh_RVE.write_abaqus_input(custom_types=custom_types)
+        input_file = gmsh_rve.write_abaqus_input(custom_types=custom_types)
 
         # Load the RVE into Abaqus
         Mdb()
         default_model = mdb.models.keys()[0]
-        mdb.ModelFromInputFile(name=gmsh_RVE.model_name,
+        mdb.ModelFromInputFile(name=gmsh_rve.model_name,
                                inputFileName=input_file)
         del mdb.models[default_model]
 
-        self._model_name = gmsh_RVE.model_name
-        self._periodic_mesh = gmsh_RVE.periodic_mesh
+        self._model_name = gmsh_rve.model_name
+        self._periodic_mesh = gmsh_rve.periodic_mesh
         self._model_dimension = dim
         self._bc_initialized = False
         self._has_periodic_bc = False
@@ -108,20 +120,20 @@ class AbaqusRVE(object):
 
         # Store the geometric bounding box of the RVE
         self._bounding_box = tuple(
-            float(v) for v in gmsh_RVE.get_bounding_box_from_points())
+            float(v) for v in gmsh_rve.get_bounding_box_from_points())
 
         # Set the correct modeling space
         self._part.setValues(space=dim)
 
         # Add node sets
-        if "ALL_NODES" not in gmsh_RVE.node_sets:
-            gmsh_RVE.build_node_sets()
-        self._add_node_sets(gmsh_RVE.node_sets)
+        if "ALL_NODES" not in gmsh_rve.node_sets:
+            gmsh_rve.build_node_sets()
+        self._add_node_sets(gmsh_rve.node_sets)
 
         # Add element sets
-        if "ALL_ELEMENTS" not in gmsh_RVE.element_sets:
-            gmsh_RVE.build_element_sets()
-        self._add_element_sets(gmsh_RVE.element_sets)
+        if "ALL_ELEMENTS" not in gmsh_rve.element_sets:
+            gmsh_rve.build_element_sets()
+        self._add_element_sets(gmsh_rve.element_sets)
 
         # Record the element-supported nodal DOFs before periodic element
         # copies are removed. This retains the original structural trace for
@@ -433,7 +445,7 @@ class AbaqusRVE(object):
         self._bc_initialized = False
         self._has_periodic_bc = False
 
-    def apply_affine_displacement_BC(self, initialization_step,
+    def apply_affine_displacement_bc(self, initialization_step,
                                      displacement_gradient_history):
         r"""
         Apply affine displacement boundary conditions.
@@ -450,9 +462,9 @@ class AbaqusRVE(object):
         The history uses total analysis time, not step time, because the
         boundary conditions propagate to subsequent steps.
 
-        **Elements with rotational degrees of freedom, such as beams and
+        Elements with rotational degrees of freedom, such as beams and
         shells, are not supported by the affine displacement boundary
-        conditions.**
+        conditions.
 
         Parameters
         ----------
@@ -462,10 +474,6 @@ class AbaqusRVE(object):
         displacement_gradient_history : LoadHistory
             History of the macroscopic displacement gradient
             :math:`\bar{\boldsymbol{H}}(\tau)`.
-
-        Returns
-        -------
-        None
 
         """
 
@@ -501,7 +509,7 @@ class AbaqusRVE(object):
 
         self._bc_initialized = True
 
-    def apply_periodic_BC(self, initialization_step,
+    def apply_periodic_bc(self, initialization_step,
                           displacement_gradient_history, fixed_node=None):
         r"""
         Apply periodic translational and rotational constraints.
@@ -523,7 +531,7 @@ class AbaqusRVE(object):
             \boldsymbol{\phi}_{s}(\tau)-\boldsymbol{\phi}_{p}(\tau)
             =\boldsymbol{0},
 
-        which realizes periodic microrotation with zero imposed macroscopic
+        which realizes periodic nodal rotations with zero imposed macroscopic
         curvature. The history uses total analysis time, not step time.
 
         Nodes whose translational degrees of freedom are eliminated by an
@@ -545,10 +553,6 @@ class AbaqusRVE(object):
             The name of a node set whose first admissible node is used
             as the anchor. If None, an anchor is selected automatically.
             The default is None.
-
-        Returns
-        -------
-        None
 
         """
 
@@ -574,8 +578,8 @@ class AbaqusRVE(object):
                                              dependent=ON)
 
             # Compute the +/- coordinates of the respective groups
-            x_minus = RVE_sets["NSET_" + primary].nodes[0].coordinates
-            x_plus = RVE_sets["NSET_" + secondary].nodes[0].coordinates
+            x_minus = rve_sets["NSET_" + primary].nodes[0].coordinates
+            x_plus = rve_sets["NSET_" + secondary].nodes[0].coordinates
 
             # Apply the boundary conditions
             region = self.model.rootAssembly.instances[point_name].sets[
@@ -592,8 +596,7 @@ class AbaqusRVE(object):
         if not self.periodic_mesh:
             raise RuntimeError("The mesh is not suitable for periodic BCs.")
 
-        # Define some shortcuts
-        RVE_sets = self.instance.sets
+        rve_sets = self.instance.sets
         dim = 3 if self.model_dimension == THREE_D else 2
 
         # Suppress rigid-body translation
@@ -611,59 +614,11 @@ class AbaqusRVE(object):
 
         # Add periodic coupling to edges and faces
         for secondary, primary in PERIODIC_PAIRS.items():
-            secondary_set = "NSET_" + secondary
-            primary_set = "NSET_" + primary
-            if primary_set not in RVE_sets or secondary_set not in RVE_sets:
+            pair_sets = self._independent_periodic_sets(
+                secondary, primary, embedded)
+            if pair_sets is None:
                 continue
-
-            # Restrict the equation to node pairs whose translations are not
-            # eliminated by an embedded constraint
-            if embedded:
-                secondary_labels, primary_labels = [], []
-                secondary_nodes = self.part.sets[secondary_set].nodes
-                primary_nodes = self.part.sets[primary_set].nodes
-                if len(secondary_nodes) != len(primary_nodes):
-                    raise RuntimeError(
-                        "Nodes of periodic sets '{}' and '{}' do not form "
-                        "one-to-one pairs.".format(secondary_set,
-                                                   primary_set))
-
-                # Retain independent pairs and reject inconsistent pairs
-                for secondary_node, primary_node in zip(
-                        secondary_nodes, primary_nodes):
-
-                    secondary_embedded = secondary_node.label in embedded
-                    primary_embedded = primary_node.label in embedded
-                    if secondary_embedded != primary_embedded:
-                        raise RuntimeError(
-                            "Periodic node pair ({}, {}) is embedded on only "
-                            "one side of the RVE.".format(
-                                primary_node.label, secondary_node.label))
-
-                    if not secondary_embedded:
-                        secondary_labels.append(secondary_node.label)
-                        primary_labels.append(primary_node.label)
-
-                if not secondary_labels:
-                    continue  # all pairs are embedded and handled by the host
-
-                # Create subset of nodes containing only the nodes not
-                # handled by the embedded region host
-                if (len(secondary_labels)
-                        < len(self.part.sets[secondary_set].nodes)):
-                    secondary_set = "NSET_{}_INDEPENDENT".format(secondary)
-                    primary_set = "NSET_{}_INDEPENDENT".format(primary)
-
-                    if secondary_set not in self.part.sets:
-                        self.part.SetFromNodeLabels(
-                            name=secondary_set,
-                            nodeLabels=secondary_labels,
-                            unsorted=True)
-                    if primary_set not in self.part.sets:
-                        self.part.SetFromNodeLabels(
-                            name=primary_set,
-                            nodeLabels=primary_labels,
-                            unsorted=True)
+            secondary_set, primary_set = pair_sets
 
             # Create a reference point for the right-hand side
             create_reference_point(primary, secondary)
@@ -684,6 +639,55 @@ class AbaqusRVE(object):
 
         self._bc_initialized = True
         self._has_periodic_bc = True
+
+    def _independent_periodic_sets(self, secondary, primary, embedded):
+        """Return periodic node sets whose translations remain independent."""
+
+        secondary_set = "NSET_" + secondary
+        primary_set = "NSET_" + primary
+        rve_sets = self.instance.sets
+        if primary_set not in rve_sets or secondary_set not in rve_sets:
+            return None
+        if not embedded:
+            return secondary_set, primary_set
+
+        secondary_nodes = self.part.sets[secondary_set].nodes
+        primary_nodes = self.part.sets[primary_set].nodes
+        if len(secondary_nodes) != len(primary_nodes):
+            raise RuntimeError(
+                "Nodes of periodic sets '{}' and '{}' do not form "
+                "one-to-one pairs.".format(secondary_set, primary_set))
+
+        secondary_labels, primary_labels = [], []
+        for secondary_node, primary_node in zip(secondary_nodes,
+                                                primary_nodes):
+            secondary_embedded = secondary_node.label in embedded
+            primary_embedded = primary_node.label in embedded
+            if secondary_embedded != primary_embedded:
+                raise RuntimeError(
+                    "Periodic node pair ({}, {}) is embedded on only one "
+                    "side of the RVE.".format(primary_node.label,
+                                              secondary_node.label))
+            if not secondary_embedded:
+                secondary_labels.append(secondary_node.label)
+                primary_labels.append(primary_node.label)
+
+        if not secondary_labels:
+            return None
+        if len(secondary_labels) == len(secondary_nodes):
+            return secondary_set, primary_set
+
+        secondary_set = "NSET_{}_INDEPENDENT".format(secondary)
+        primary_set = "NSET_{}_INDEPENDENT".format(primary)
+        if secondary_set not in self.part.sets:
+            self.part.SetFromNodeLabels(
+                name=secondary_set, nodeLabels=secondary_labels,
+                unsorted=True)
+        if primary_set not in self.part.sets:
+            self.part.SetFromNodeLabels(
+                name=primary_set, nodeLabels=primary_labels,
+                unsorted=True)
+        return secondary_set, primary_set
 
     def _periodic_boundary_rotations(self):
         """Couple nodal rotations periodically using unreduced connectivity."""
@@ -768,39 +772,39 @@ class AbaqusRVE(object):
 
         Returns
         -------
-        region
+        region : Region
             Abaqus region containing the selected node.
-        MeshNode
+        node : MeshNode
             Selected Abaqus mesh node.
 
         """
 
-        RVE_sets = self.instance.sets
+        rve_sets = self.instance.sets
         embedded_labels = self._embedded_region_nodes()
 
         # Collect the labels of all periodic secondary nodes
         secondary_labels = set()
-        for secondary in PERIODIC_PAIRS.keys():
+        for secondary in PERIODIC_PAIRS:
             set_name = "NSET_" + secondary
-            if set_name in RVE_sets:
+            if set_name in rve_sets:
                 secondary_labels.update(
-                    n.label for n in RVE_sets[set_name].nodes)
+                    n.label for n in rve_sets[set_name].nodes)
 
         def first_valid_node(set_name):
             """Return the first independent node in the named set."""
-            if set_name not in RVE_sets:
-                return
-            for node in RVE_sets[set_name].nodes:
+            if set_name not in rve_sets:
+                return None
+            for node in rve_sets[set_name].nodes:
                 if (node.label not in secondary_labels
                         and node.label not in embedded_labels):
                     return node
-            return
+            return None
 
         # User-defined anchor
         if fixed_node is not None:
             set_name = (fixed_node if str(fixed_node).startswith("NSET_")
                         else "NSET_" + str(fixed_node))
-            if set_name not in RVE_sets:
+            if set_name not in rve_sets:
                 raise RuntimeError(
                     "The node set '{}' selected for rigid-body suppression "
                     "does not exist.".format(set_name))
@@ -846,10 +850,6 @@ class AbaqusRVE(object):
             The name of the material that is associated with the
             section. The material should exist already.
 
-        Returns
-        -------
-        None
-
         """
 
         self.model.HomogeneousSolidSection(name=element_set_name,
@@ -877,12 +877,8 @@ class AbaqusRVE(object):
             The number of integration points through the thickness. The
             default is 5.
         pre_integrate : bool, optional
-            If True, pre-integrate the section stiffness before the analysis;
-            otherwise integrate through the thickness during the analysis.
-
-        Returns
-        -------
-        None
+            If True, pre-integrate the section stiffness before the analysis.
+            Otherwise, integrate through the thickness during the analysis.
 
         """
 
@@ -913,12 +909,8 @@ class AbaqusRVE(object):
         radius : float
             The radius of the circular cross-sectional area.
         pre_integrate : bool, optional
-            If True, pre-integrate the section stiffness before the analysis;
-            otherwise integrate over the cross-section during the analysis.
-
-        Returns
-        -------
-        None
+            If True, pre-integrate the section stiffness before the analysis.
+            Otherwise, integrate over the cross-section during the analysis.
 
         """
 
@@ -945,10 +937,6 @@ class AbaqusRVE(object):
             section. The material should exist already.
         area : float
             The cross-sectional area of the truss.
-
-        Returns
-        -------
-        None
 
         """
 
@@ -1020,20 +1008,21 @@ class AbaqusRVE(object):
 
         Parameters
         ----------
-        field_outputs : iterable of str, optional
+        field_outputs : str or iterable of str, optional
             The field outputs that shall be computed. The element nodal
             forces 'NFORC', nodal translations 'U', and nodal rotations
             'UR' needed by the homogenization post-processing are always
             requested in addition. The default is None.
-        history_outputs : iterable of str, optional
+        history_outputs : str or iterable of str, optional
             The history outputs that shall be computed. The default is None.
         **kwargs : object, optional
             Additional arguments that will be passed to the Abaqus job.
             See the documentation of the Abaqus Job class for details.
 
-        Returns
-        -------
-        None
+        Raises
+        ------
+        RuntimeError
+            If the Abaqus job does not finish successfully.
 
         """
 
@@ -1044,9 +1033,8 @@ class AbaqusRVE(object):
             del self.model.historyOutputRequests["H-Output-1"]
 
         # Do not modify containers supplied by the caller.
-        field_outputs = [] if field_outputs is None else list(field_outputs)
-        history_outputs = ([] if history_outputs is None
-                           else list(history_outputs))
+        field_outputs = _as_list(field_outputs)
+        history_outputs = _as_list(history_outputs)
 
         # Request at least the outputs needed by average_stress and
         # average_power_increment.
@@ -1104,10 +1092,6 @@ class AbaqusRVE(object):
         method and leave it open when they return. If they open the database
         themselves, they also close it before returning.
 
-        Returns
-        -------
-        None
-
         """
 
         odb_file = self.job_name + ".odb"
@@ -1120,14 +1104,7 @@ class AbaqusRVE(object):
         self._odb = session.odbs[odb_file]
 
     def close_odb_file(self):
-        """
-        Close the output database file.
-
-        Returns
-        -------
-        None
-
-        """
+        """Close the output database file."""
 
         if self._odb is not None:
             self._odb.close()
@@ -1147,7 +1124,7 @@ class AbaqusRVE(object):
                            model_name=self.model_name,
                            instance_names=[self.model_name])
         for output in field_outputs:
-            if type(output) is not str and len(output) == 2:
+            if isinstance(output, (tuple, list)) and len(output) == 2:
                 reader.add_field_export_request(
                     output[0], invariant=output[1])
             else:
@@ -1245,13 +1222,13 @@ class AbaqusRVE(object):
         ----------
         path : str or os.PathLike
             Path to the folder in which the files will be stored.
-        field_outputs : iterable of str or (str, str), optional
-            Fields to export. An invariant is requested with a
-            ``(field, invariant)`` tuple, e.g. ``("S", "MISES")``.
+        field_outputs : str or iterable, optional
+            Fields to export. Each iterable item may be a field name or a
+            ``(field, invariant)`` tuple, e.g. ``[("S", "MISES")]``.
             The default is None.
-        node_sets : iterable of str, optional
+        node_sets : str or iterable of str, optional
             The node sets that shall be exported. The default is None.
-        element_sets : iterable of str, optional
+        element_sets : str or iterable of str, optional
             The element sets that shall be exported. The default is None.
         radius : mapping of str to float, optional
             A map from element set names to the strut radius. It overrides
@@ -1270,16 +1247,12 @@ class AbaqusRVE(object):
             selected index is applied to every non-initial step. The default
             is None.
 
-        Returns
-        -------
-        None
-
         """
 
         # Normalize the optional arguments (avoid mutable defaults)
-        field_outputs = list(field_outputs) if field_outputs else []
-        node_sets = list(node_sets) if node_sets else []
-        element_sets = list(element_sets) if element_sets else []
+        field_outputs = _as_list(field_outputs)
+        node_sets = _as_list(node_sets)
+        element_sets = _as_list(element_sets)
 
         # Strut radii for the radius cell field
         strut_radius = dict(self._section_radius)
@@ -1287,7 +1260,7 @@ class AbaqusRVE(object):
             strut_radius.update(radius)
 
         # The strut element sets must be exported for the radius field
-        for set_name in strut_radius.keys():
+        for set_name in strut_radius:
             if set_name not in element_sets:
                 element_sets.append(set_name)
 
@@ -1314,6 +1287,7 @@ class AbaqusRVE(object):
         ----------
         step_name : str
             The name of the step.
+
         Returns
         -------
         n_frames : int
@@ -1462,9 +1436,11 @@ class AbaqusRVE(object):
         if name not in outputs:
             return {}
         field = outputs[name].getSubset(region=instance)
-        return {value.nodeLabel: np.atleast_1d(
-                    np.asarray(value.data, dtype=float))
-                for value in field.values}
+        return {
+            value.nodeLabel: np.atleast_1d(
+                np.asarray(value.data, dtype=float))
+            for value in field.values
+        }
 
     def _odb_rotation_field(self, outputs, instance, dim):
         """Return ODB nodal rotations as three-component vectors."""
@@ -1698,8 +1674,7 @@ class LoadHistory(object):
 
     """
 
-    def __init__(
-            self, time, history):
+    def __init__(self, time, history):
         self._time = np.asarray(time, dtype=float)
         if self._time.ndim != 1:
             raise ValueError("The time data must be one-dimensional.")
@@ -1712,10 +1687,9 @@ class LoadHistory(object):
         if not callable(history):
             raise TypeError("The history must be callable.")
         self._history = history
-        self._index = 0
 
-        # Test return value of history
-        self[self._index]
+        # Validate the tensor returned by the history function.
+        _ = self[0]
 
     @property
     def time_data(self):
@@ -1741,40 +1715,11 @@ class LoadHistory(object):
             The load data points.
 
         """
-        data = []
-        for _, v in self:
-            data.append(v)
-        data = np.array(data)
-        return data
+        return np.array([value for _, value in self])
 
     def __iter__(self):
-        self._index = 0
-        return self
-
-    def __next__(self):
-        if self._index >= len(self.time_data):
-            raise StopIteration
-
-        time, load = self[self._index]
-        self._index += 1
-
-        return time, load
-
-    def next(self):
-        """
-        Return the next time--load pair for legacy Abaqus with Python 2.7.
-
-        Returns
-        -------
-        time : float
-            Current total analysis time.
-        load : ndarray
-            Macroscopic displacement gradient at the current time.
-
-        """
-
-        time, load = self.__next__()
-        return time, load
+        for index in range(len(self.time_data)):
+            yield self[index]
 
     def __getitem__(self, i):
         time = float(self.time_data[i])
@@ -1806,8 +1751,7 @@ class LoadHistory(object):
         return self._history(time)
 
     def __str__(self):
-        descr = "LoadHistory with {} data points\n".format(len(self.time_data))
-        return descr
+        return "LoadHistory with {} data points".format(len(self.time_data))
 
     def __repr__(self):
         return self.__str__()
@@ -1824,8 +1768,4 @@ class LoadHistory(object):
 
         """
 
-        data = []
-        for t, v in self:
-            data.append((t, np.array(v)))
-        data = tuple(data)
-        return data
+        return tuple((time, np.array(value)) for time, value in self)

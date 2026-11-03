@@ -6,7 +6,8 @@
 Microgen constructs the gyroid midsurface as a triangulated PyVista mesh. A
 phase shift keeps the surface away from the cell corners, and periodicity is
 verified before the mesh is written as a Gmsh discrete surface in
-``gyroid.msh``.
+``gyroid.msh``. This optional preprocessing script requires ``microgen``.
+The included mesh allows ``main.py`` to run without it.
 """
 
 import os
@@ -16,6 +17,7 @@ import numpy as np
 import gmsh
 import microgen
 from microgen.shape.surface_functions import gyroid
+
 
 def main():
     """Generate and write the periodic sheet-gyroid mesh."""

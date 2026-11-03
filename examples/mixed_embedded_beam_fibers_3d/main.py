@@ -80,7 +80,7 @@ def create_geometry(model_name, edge_length=1.0, nodes_matrix=10,
     # Add two fibers running the full height of the cell, so their end
     # nodes lie on the z-boundary faces (and, through the periodic tiling,
     # the fibers are continuous along z). The embedded-region constraint
-    # eliminates those nodes' translational DOFs; apply_periodic_BC excludes
+    # eliminates those nodes' translational DOFs; apply_periodic_bc excludes
     # them from the translational equations, so the fibers may reach the
     # boundary.
     fiber_p1 = gmsh.model.geo.add_point(-0.25*dx, 0.25*dy, -0.5*dz)
@@ -161,7 +161,7 @@ def main():
             print("Strain = " + str(tensor_to_voigt(history(1.0), "STRAIN")
                                     .round(3).tolist()))
 
-            unit_cell.apply_periodic_BC("LOAD", history)
+            unit_cell.apply_periodic_bc("LOAD", history)
             unit_cell.run_analysis(field_outputs=["U", "S"])
 
             stress = tensor_to_voigt(unit_cell.average_stress("LOAD"), "STRESS")

@@ -216,7 +216,7 @@ def run_stiffness_cases(cell, step_name, strain_magnitude, component_names,
             return voigt_to_tensor(strain, "STRAIN")
 
         history = LoadHistory(np.array([0.0, 1.0]), strain_history)
-        cell.apply_periodic_BC(step_name, history)
+        cell.apply_periodic_bc(step_name, history)
         cell.run_analysis()
 
         stress = cell.average_stress(step_name)

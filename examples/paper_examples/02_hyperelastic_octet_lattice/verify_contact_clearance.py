@@ -6,7 +6,8 @@
 Every retained beam element in the central cell is compared with the central
 cell and its 26 periodic neighbors. Pairs belonging to the same idealized
 Octet junction are excluded. Contact is absent while all remaining
-centerline distances exceed the beam diameter.
+centerline distances exceed the beam diameter. This optional post-processing
+script requires the ``vtk`` Python package and runs outside Abaqus.
 """
 
 import os
