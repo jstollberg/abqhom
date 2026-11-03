@@ -80,7 +80,11 @@ class TestRequirementsAndCommand(_InstallerTestCase):
 
     def test_default_prefix_is_versioned(self):
         """The default prefix separates abqhom and Python versions."""
-        self.assertIn(__version__, installer._default_prefix())
+        prefix = installer._default_prefix()
+        python_tag = "py{}.{}".format(
+            sys.version_info[0], sys.version_info[1])
+        self.assertIn(__version__, prefix)
+        self.assertIn(python_tag, prefix)
 
     def test_runtime_requirements_follow_package_metadata(self):
         """Only Abaqus-facing dependencies enter the isolated runtime."""

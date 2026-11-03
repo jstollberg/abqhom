@@ -21,9 +21,7 @@ STRAIN = 1.0e-3
 
 def _stiffness_column(build, assign_sections, comp, element_size,
                       custom_types=None, bc="periodic"):
-    """Run one unit-strain load case and return the corresponding column
-    of the effective stiffness in Voigt notation. ``bc`` selects the
-    boundary conditions ('periodic' or 'affine')."""
+    """Return one effective-stiffness column from a unit-strain case."""
     name = build()
     rve = GmshRVE(name)
     rve.add_periodic_mesh_constraints()
@@ -56,6 +54,7 @@ def _elastic(unit_cell, name, E, nu):
 
 
 class TestBeamLattices(AbaqusTestCase):
+    """Test beam-lattice stiffness and incremental power."""
 
     def test_simple_cubic_axial_modulus(self):
         """C11 of a simple-cubic beam lattice matches E*pi*r**2/L**2 and
@@ -201,6 +200,7 @@ class TestBeamLattices(AbaqusTestCase):
 
 
 class TestShells(AbaqusTestCase):
+    """Test homogenization of periodic shell structures."""
 
     def test_parallel_plates_membrane_modulus(self):
         """Two parallel shell plates form a periodic stack of membranes.
@@ -224,6 +224,7 @@ class TestShells(AbaqusTestCase):
 
 
 class TestContinuum(AbaqusTestCase):
+    """Test periodic and affine homogenization of a continuum cell."""
 
     def test_homogeneous_cube_recovers_material(self):
         """A homogeneous continuum RVE homogenizes to the material itself."""
@@ -271,6 +272,7 @@ class TestContinuum(AbaqusTestCase):
 
 
 class TestMixedDimensionalCell(AbaqusTestCase):
+    """Test reduction and power equivalence of a mixed cell."""
 
     def test_reduction_and_incremental_power_equivalence(self):
         """A reduced continuum--shell--beam cell satisfies Hill--Mandel."""
@@ -321,6 +323,7 @@ class TestMixedDimensionalCell(AbaqusTestCase):
 
 
 class TestEmbeddedFibers(AbaqusTestCase):
+    """Test periodic homogenization with embedded beam fibers."""
 
     def test_boundary_fiber_excluded_from_translation_bc(self):
         """A boundary-ending embedded beam is omitted from translational
@@ -344,7 +347,7 @@ class TestEmbeddedFibers(AbaqusTestCase):
 
         def strain_history(time):
             strain = np.zeros(6)
-            strain[2] = STRAIN            # uniaxial along the fibre axis z
+            strain[2] = STRAIN
             return time*voigt_to_tensor(strain, "STRAIN")
 
         unit.apply_periodic_bc("LOAD", LoadHistory(np.array([0.0, 1.0]),

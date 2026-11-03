@@ -8,19 +8,22 @@ the removal of redundant periodic elements, the rigid-body anchor
 selection and the recorded section radii. These need the Abaqus kernel.
 
 """
+import shutil
+import tempfile
 import unittest
 
 import numpy as np
 
-import abqhom.abqmodel as abqmodel
-from abqhom.utils import voigt_to_tensor
-from abqhom.gmshmodel import GmshRVE
-from abqhom.abqmodel import AbaqusRVE, LoadHistory
-from abqhom.tests import fixtures
-from abqhom.tests.base import AbaqusTestCase
-
 from abaqusConstants import (THREE_D, TWO_D_PLANAR, ON, OFF, DURING_ANALYSIS,
                              BEFORE_ANALYSIS, TIME, FREQUENCY)
+
+import abqhom.abqmodel as abqmodel
+from abqhom.abqmodel import AbaqusRVE, LoadHistory
+from abqhom.constants import PERIODIC_PAIRS
+from abqhom.gmshmodel import GmshRVE
+from abqhom.tests import fixtures
+from abqhom.tests.base import AbaqusTestCase
+from abqhom.utils import voigt_to_tensor
 
 
 def _uniaxial_history():
@@ -42,6 +45,7 @@ def _build(builder, element_size=1.0, custom_types=None):
 
 
 class TestLoadHistory(unittest.TestCase):
+    """Test validation and iteration of prescribed load histories."""
 
     @staticmethod
     def _history(time):
@@ -105,11 +109,15 @@ class TestLoadHistory(unittest.TestCase):
 
 
 class TestConstruction(AbaqusTestCase):
+    """Test construction, output access, and VTK selection."""
 
     def test_vtk_reader_uses_current_job_name(self):
         """VTK export reads the most recently submitted repeated job."""
         class Reader(object):
+            """Record the ODB path supplied by AbaqusRVE."""
+
             def __init__(self, odb_path, **kwargs):
+                """Store the requested ODB path."""
                 self.odb_path = odb_path
 
         original_reader = getattr(abqmodel, "OdbReader", None)
@@ -130,21 +138,30 @@ class TestConstruction(AbaqusTestCase):
     def _vtk_selection_fixture():
         """Return a minimal RVE and reader for VTK frame-selection tests."""
         class Steps(dict):
+            """Mimic an Abaqus step repository with stable key order."""
+
             def keys(self):
+                """Return the available step names."""
                 return ["Initial", "LOAD_1", "LOAD_2"]
 
         class Odb(object):
+            """Provide the steps used for VTK selection."""
+
             steps = Steps((name, object()) for name in
                           ("Initial", "LOAD_1", "LOAD_2"))
 
         class Reader(object):
+            """Provide the available frames for each output step."""
+
             frames = {"LOAD_1": [0, 1, 2], "LOAD_2": [0, 2, 3]}
             frame_counts = {"LOAD_1": 3, "LOAD_2": 4}
 
             def get_frame_indices(self, step_name):
+                """Return frames containing all requested output fields."""
                 return self.frames[step_name]
 
             def get_number_of_frames(self, step_name):
+                """Return the complete frame count for a step."""
                 return self.frame_counts[step_name]
 
         unit = object.__new__(AbaqusRVE)
@@ -182,6 +199,35 @@ class TestConstruction(AbaqusTestCase):
             ValueError, unit._select_vtk_frames, reader, "LOAD_2", 1)
         self.assertRaises(
             TypeError, unit._select_vtk_frames, reader, "LOAD_1", 1.0)
+
+    def test_vtk_export_accepts_scalar_string_arguments(self):
+        """Scalar output and set names are treated as single items."""
+        captured = {}
+        unit = object.__new__(AbaqusRVE)
+        unit._section_radius = {}
+        unit._odb = object()
+        unit.open_odb_file = lambda: None
+
+        def create_reader(field_outputs, node_sets, element_sets):
+            """Record the normalized export arguments."""
+            captured["field_outputs"] = field_outputs
+            captured["node_sets"] = node_sets
+            captured["element_sets"] = element_sets
+            return object()
+
+        unit._create_vtk_reader = create_reader
+        unit._write_vtk_frames = lambda *args, **kwargs: None
+        directory = tempfile.mkdtemp(prefix="abqhom_vtk_")
+        try:
+            unit.export_to_vtk(
+                directory, field_outputs="PEEQ",
+                node_sets="BOUNDARY_NODES", element_sets="CONTINUUM")
+        finally:
+            shutil.rmtree(directory, ignore_errors=True)
+
+        self.assertEqual(captured["field_outputs"], ["PEEQ"])
+        self.assertEqual(captured["node_sets"], ["BOUNDARY_NODES"])
+        self.assertEqual(captured["element_sets"], ["CONTINUUM"])
 
     def test_missing_odb_raises_io_error(self):
         """Opening a nonexistent output database raises an I/O error."""
@@ -221,15 +267,22 @@ class TestConstruction(AbaqusTestCase):
     def test_frame_time_includes_time_accumulated_before_step(self):
         """Frame time includes the total time accumulated before its step."""
         class Frame(object):
+            """Provide a relative frame time."""
+
             def __init__(self, value):
+                """Store the relative frame time."""
                 self.frameValue = value
 
         class Step(object):
+            """Provide the time metadata and frames of one step."""
+
             domain = TIME
             totalTime = 2.0
             frames = [Frame(0.0), Frame(0.75)]
 
         class Odb(object):
+            """Provide a minimal step repository."""
+
             steps = {"LOAD": Step()}
 
         unit = object.__new__(AbaqusRVE)
@@ -243,9 +296,13 @@ class TestConstruction(AbaqusTestCase):
     def test_frame_time_rejects_non_time_domain_step(self):
         """Frequency-domain frames do not define a total analysis time."""
         class Step(object):
+            """Provide a non-time-domain analysis step."""
+
             domain = FREQUENCY
 
         class Odb(object):
+            """Provide a minimal frequency-step repository."""
+
             steps = {"FREQUENCY": Step()}
 
         unit = object.__new__(AbaqusRVE)
@@ -259,9 +316,13 @@ class TestConstruction(AbaqusTestCase):
     def test_number_of_frames_closes_odb(self):
         """A method-owned ODB is closed after reading the frame count."""
         class Step(object):
+            """Provide two output frames."""
+
             frames = [object(), object()]
 
         class Odb(object):
+            """Provide a minimal step repository."""
+
             steps = {"LOAD": Step()}
 
         unit = object.__new__(AbaqusRVE)
@@ -272,15 +333,59 @@ class TestConstruction(AbaqusTestCase):
         self.assertEqual(unit.get_number_of_frames("LOAD"), 2)
         self.assertIsNone(unit.odb)
 
+    def test_preopened_odb_remains_open_during_postprocessing(self):
+        """Post-processing does not close an ODB opened by the caller."""
+        class Frame(object):
+            """Provide time and empty field-output data."""
+
+            def __init__(self, value):
+                self.frameValue = value
+                self.fieldOutputs = {}
+
+        class Step(object):
+            """Provide a minimal time-domain analysis step."""
+
+            domain = TIME
+            totalTime = 2.0
+            frames = [Frame(0.0), Frame(0.75)]
+
+        class Odb(object):
+            """Provide the minimal step repository used by post-processing."""
+
+            steps = {"LOAD": Step()}
+
+        odb = Odb()
+        unit = object.__new__(AbaqusRVE)
+        unit._model_dimension = THREE_D
+        unit._bounding_box = (0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
+        unit._odb = odb
+        unit.open_odb_file = lambda: None
+        close_calls = []
+        unit.close_odb_file = lambda: close_calls.append(True)
+
+        self.assertEqual(unit.get_number_of_frames("LOAD"), 2)
+        self.assertAlmostEqual(unit.get_frame_time("LOAD"), 2.75)
+        self.assertRaises(RuntimeError, unit.average_stress, "LOAD")
+        self.assertRaises(
+            RuntimeError, unit.average_power_increment, "LOAD")
+        self.assertIs(unit.odb, odb)
+        self.assertEqual(close_calls, [])
+
     def test_average_stress_closes_odb_after_error(self):
         """A method-owned ODB is also closed along exceptional paths."""
         class Frame(object):
+            """Provide a frame without required force output."""
+
             fieldOutputs = {}
 
         class Step(object):
+            """Provide the incomplete output frame."""
+
             frames = [Frame()]
 
         class Odb(object):
+            """Provide a minimal step repository."""
+
             steps = {"LOAD": Step()}
 
         unit = object.__new__(AbaqusRVE)
@@ -362,11 +467,12 @@ class TestConstruction(AbaqusTestCase):
 
 
 class TestRigidBodyAnchor(AbaqusTestCase):
+    """Test automatic and user-defined rigid-body anchors."""
 
     def test_anchor_is_a_corner_for_a_cubic_cell(self):
         """Automatic rigid-body anchoring selects a primary corner."""
         unit = _build(lambda: fixtures.simple_cubic("K", 2.0))
-        region, node = unit.select_rigid_body_anchor()
+        _, node = unit.select_rigid_body_anchor()
         corner_labels = [n.label for n
                          in unit.instance.sets["NSET_POINT_1"].nodes]
         self.assertIn(node.label, corner_labels)
@@ -377,9 +483,8 @@ class TestRigidBodyAnchor(AbaqusTestCase):
         equation."""
         unit = _build(lambda: fixtures.plus_lattice_2d("L", 2.0))
         _, node = unit.select_rigid_body_anchor()
-        from abqhom.constants import PERIODIC_PAIRS
         secondary_labels = set()
-        for secondary in PERIODIC_PAIRS.keys():
+        for secondary in PERIODIC_PAIRS:
             set_name = "NSET_" + secondary
             if set_name in unit.instance.sets:
                 for n in unit.instance.sets[set_name].nodes:
@@ -408,6 +513,7 @@ class TestRigidBodyAnchor(AbaqusTestCase):
 
 
 class TestPeriodicBoundaryConditions(AbaqusTestCase):
+    """Test compatibility checks for periodic boundary conditions."""
 
     def test_one_sided_embedded_pair_is_rejected(self):
         """A periodic pair cannot contain only one eliminated translation."""
@@ -420,6 +526,7 @@ class TestPeriodicBoundaryConditions(AbaqusTestCase):
 
 
 class TestSectionRadius(AbaqusTestCase):
+    """Test beam and truss section assignment metadata."""
 
     def test_beam_section_records_the_radius(self):
         """Beam-section assignment records its circular radius."""
@@ -459,6 +566,7 @@ class TestSectionRadius(AbaqusTestCase):
 
 
 class TestShellSection(AbaqusTestCase):
+    """Test shell-section integration options."""
 
     def test_shell_section_is_integrated_during_analysis(self):
         """assign_shell_section integrates through the thickness during the
@@ -483,6 +591,7 @@ class TestShellSection(AbaqusTestCase):
 
 
 class TestAffineBoundaryConditions(AbaqusTestCase):
+    """Test applicability of affine displacement boundary conditions."""
 
     def test_beam_elements_are_rejected(self):
         """Affine displacement BCs do not support rotational DOFs; a beam

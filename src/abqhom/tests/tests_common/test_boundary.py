@@ -23,6 +23,7 @@ def _nonempty(boundary, names):
 
 
 class TestBoundaryGeometry(GmshTestCase):
+    """Test cell bounds and coordinate identifiers."""
 
     def test_bounding_box_from_points(self):
         """Boundary points recover the exact cuboidal bounding box."""
@@ -103,8 +104,8 @@ class TestBoundaryGeometry(GmshTestCase):
             ValueError, Boundary.group_coordinate_identifiers,
             [0.0, 0.0, 0.0], [1.0, 1.0, 1.0], None)
 
-    def test_constructor_rejects_nonpositive_sampling_density(self):
-        """Boundary sampling requires a strictly positive density."""
+    def test_constructor_requires_positive_integer_sampling_density(self):
+        """Boundary sampling requires a positive integer density."""
         fixtures.simple_cubic("DENSITY", length=2.0)
         self.assertRaises(ValueError, Boundary, "DENSITY",
                           sampling_density=0)
@@ -115,6 +116,7 @@ class TestBoundaryGeometry(GmshTestCase):
 
 
 class TestBoundaryClassification(GmshTestCase):
+    """Test geometric classification of boundary entities."""
 
     def test_corner_is_classified_into_the_correct_point_group(self):
         """The minimum corner is assigned to POINT_1."""
@@ -195,6 +197,7 @@ class TestBoundaryClassification(GmshTestCase):
 
 
 class TestBoundaryPeriodicity(GmshTestCase):
+    """Test matching of primary and secondary boundary entities."""
 
     def test_secondary_entities_without_primary_partner_are_rejected(self):
         """A secondary-only group cannot be discarded as periodic."""
@@ -219,6 +222,7 @@ class TestBoundaryPeriodicity(GmshTestCase):
         """Entities without valid samples cannot form a periodic pair."""
 
         class EmptySamplingBoundary(Boundary):
+            """Provide a boundary whose positive-dimensional samples fail."""
 
             @staticmethod
             def _generate_sample_points_on_entity(dim, tag, n, tol):
@@ -254,17 +258,19 @@ class TestBoundaryPeriodicity(GmshTestCase):
 
 
 class TestBoundaryDict(GmshTestCase):
+    """Test dictionary-style access to boundary groups."""
 
     def test_setitem_rejects_invalid_keys_and_uppercases(self):
         """Boundary keys are validated and normalized to uppercase."""
         fixtures.simple_cubic("KV", length=2.0)
         boundary = Boundary("KV")
         self.assertRaises(KeyError, boundary.__setitem__, "NOPE", [])
-        boundary["point_1"] = [(0, 123)]           # lowercase is accepted
-        self.assertIn((0, 123), boundary["POINT_1"])  # and stored uppercased
+        boundary["point_1"] = [(0, 123)]
+        self.assertIn((0, 123), boundary["POINT_1"])
 
 
 class TestGmshRVEValidation(GmshTestCase):
+    """Test validation of Gmsh model geometry and naming."""
 
     def test_two_dimensional_rve_must_use_xy_coordinates(self):
         """A two-dimensional RVE in the x-z plane is rejected."""

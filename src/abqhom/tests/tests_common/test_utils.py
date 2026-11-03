@@ -19,6 +19,7 @@ from abqhom.utils import (voigt_to_tensor, tensor_to_voigt, voigt, reuss,
 
 
 class TestVoigtTensor(unittest.TestCase):
+    """Test conversion between tensor and Voigt representations."""
 
     def test_roundtrip_3d_strain(self):
         """Voigt to tensor to Voigt reproduces a 3D strain vector."""
@@ -29,8 +30,7 @@ class TestVoigtTensor(unittest.TestCase):
     def test_roundtrip_2d_stress(self):
         """Voigt to tensor to Voigt reproduces a 2D stress vector."""
         v = np.array([1.0, -2.0, 0.5])
-        back = tensor_to_voigt(voigt_to_tensor(v, "STRESS"), "STRESS",
-                               check_symmetry=False)
+        back = tensor_to_voigt(voigt_to_tensor(v, "STRESS"), "STRESS")
         self.assertTrue(np.allclose(back, v))
 
     def test_strain_shear_halving(self):
@@ -46,11 +46,33 @@ class TestVoigtTensor(unittest.TestCase):
                           [0.0, 0.0, 1.0]])
         self.assertRaises(ValueError, tensor_to_voigt, unsym, "STRESS")
 
+    def test_tensor_symmetry_check_can_be_disabled(self):
+        """A caller may explicitly convert a nonsymmetric tensor."""
+        tensor = np.array([[1.0, 2.0], [3.0, 4.0]])
+        result = tensor_to_voigt(
+            tensor, "STRESS", check_symmetry=False)
+        self.assertTrue(np.array_equal(result, [1.0, 4.0, 2.0]))
+
+    def test_invalid_quantities_are_rejected(self):
+        """Both conversion directions reject unknown quantities."""
+        self.assertRaises(
+            ValueError, voigt_to_tensor, np.zeros(6), "UNKNOWN")
+        self.assertRaises(
+            ValueError, tensor_to_voigt, np.zeros((3, 3)), "UNKNOWN")
+
+    def test_invalid_shapes_are_rejected(self):
+        """Both conversion directions reject unsupported input shapes."""
+        self.assertRaises(
+            ValueError, voigt_to_tensor, np.zeros(4), "STRESS")
+        self.assertRaises(
+            ValueError, tensor_to_voigt, np.zeros((4, 4)), "STRESS")
+
 
 class TestBounds(unittest.TestCase):
+    """Test generalized Voigt and Reuss stiffness estimates."""
 
     def setUp(self):
-        # Three diagonal positive-definite stiffness matrices.
+        """Create three diagonal positive-definite stiffness matrices."""
         self.stiffnesses = np.array([
             np.diag([10.0, 10.0, 10.0, 4.0, 4.0, 4.0]),
             np.diag([4.0, 4.0, 4.0, 1.6, 1.6, 1.6]),
@@ -101,6 +123,7 @@ class TestBounds(unittest.TestCase):
 
 
 class TestHillMandelResidual(unittest.TestCase):
+    """Test normalization of the discrete Hill--Mandel residual."""
 
     def test_equal_powers_give_zero(self):
         """Equal incremental-work densities satisfy the condition."""
@@ -129,17 +152,23 @@ class TestHillMandelResidual(unittest.TestCase):
 
 
 class TestFileIO(unittest.TestCase):
+    """Test CSV export and import utilities."""
 
     def setUp(self):
+        """Create an isolated output directory."""
         self.tmp = tempfile.mkdtemp(prefix="abqhom_test_")
 
     def tearDown(self):
+        """Remove the isolated output directory."""
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_csv_roundtrip(self):
         """export_to_csv_file then read_csv_file recovers the array."""
         data = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
-        base = os.path.join(self.tmp, "stiffness")
-        export_to_csv_file(data, base)
-        back = read_csv_file(base + ".csv")
+        path = os.path.join(self.tmp, "stiffness.txt")
+        csv_path = os.path.join(self.tmp, "stiffness.csv")
+        export_to_csv_file(data, path)
+        back = read_csv_file(csv_path)
         self.assertTrue(np.allclose(back, data))
+        self.assertTrue(os.path.isfile(csv_path))
+        self.assertFalse(os.path.exists(path))

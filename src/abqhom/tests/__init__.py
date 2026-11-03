@@ -29,7 +29,6 @@ import unittest
 
 def _require_gmsh():
     """Verify that the installed Gmsh dependency can be imported."""
-
     try:
         __import__("gmsh")
     except ImportError:
@@ -89,7 +88,6 @@ def _find_tests(module):
 
 def _run_isolated(suite, report_name):
     """Run a suite in an isolated directory and retain failures."""
-
     original_directory = os.getcwd()
     report_path = os.path.join(original_directory, report_name)
     work_directory = tempfile.mkdtemp(
@@ -114,7 +112,7 @@ def _run_isolated(suite, report_name):
         tempfile.tempdir = original_tempdir
 
 
-def _remove_test_directory(path, attempts=8, delay=0.25):
+def _remove_test_directory(path, attempts=60, delay=0.5):
     """Remove test artifacts, allowing Abaqus workers time to release them."""
     for attempt in range(attempts):
         try:
@@ -131,21 +129,16 @@ def _remove_test_directory(path, attempts=8, delay=0.25):
 def _run_tests(suite, file_name):
     """Run a test suite, write a report and print a short summary."""
     print("Starting test run...")
-    logfile = open(file_name, "w")
-    try:
+    with open(file_name, "w") as logfile:
         result = unittest.TextTestRunner(logfile, verbosity=3).run(suite)
-    finally:
-        logfile.close()
 
     print("Test run finished.\n   tests run: %d\n   failures: %d\n"
-          "   errors: %d" % (result.testsRun, len(result.failures),
-                             len(result.errors)))
+          "   errors: %d\n   skipped: %d"
+          % (result.testsRun, len(result.failures), len(result.errors),
+             len(result.skipped)))
 
     if not result.wasSuccessful():
-        report = open(file_name, "r")
-        try:
+        with open(file_name, "r") as report:
             for line in report.readlines():
                 print(line.rstrip())
-        finally:
-            report.close()
         raise RuntimeError("Not all tests passed.")

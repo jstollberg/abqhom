@@ -22,6 +22,7 @@ from abqhom.tests.base import GmshTestCase
 
 
 class TestDimensions(GmshTestCase):
+    """Test geometric and mesh dimensions of Gmsh RVEs."""
 
     def test_boundary_must_belong_to_rve_model(self):
         """A supplied boundary must describe the requested Gmsh model."""
@@ -55,6 +56,7 @@ class TestDimensions(GmshTestCase):
 
 
 class TestNodesAndElements(GmshTestCase):
+    """Test retrieval of nodes, elements, and connectivity."""
 
     def test_get_nodes_are_unique_and_include_corners(self):
         """Node extraction is unique and includes every cell corner."""
@@ -124,10 +126,10 @@ class TestNodesAndElements(GmshTestCase):
 
 
 class TestPeriodicity(GmshTestCase):
+    """Test periodic mesh constraints and node correspondence."""
 
     def test_periodic_node_sets_are_offset_by_the_lattice_vector(self):
-        """A primary node and its paired secondary node differ by the lattice
-        vector, verified against the actual Gmsh node coordinates."""
+        """Paired primary and secondary nodes differ by a lattice vector."""
         length = 2.0
         fixtures.simple_cubic("PNS", length=length)
         rve = GmshRVE("PNS")
@@ -146,8 +148,7 @@ class TestPeriodicity(GmshTestCase):
         self.assertTrue(np.allclose(offset, [length, length, length]))
 
     def test_periodic_mesh_constraint_is_registered_in_gmsh(self):
-        """Periodic mesh constraints establish the Gmsh correspondence on
-        the secondary faces of a continuum cube."""
+        """Gmsh records periodic correspondence on secondary faces."""
         fixtures.solid_cube("PMC", length=2.0)
         rve = GmshRVE("PMC")
         rve.add_periodic_mesh_constraints()
@@ -170,7 +171,8 @@ class TestPeriodicity(GmshTestCase):
             coordinates, signatures))
 
 
-class TestNodeSets(GmshTestCase):
+class TestNodeAndElementSets(GmshTestCase):
+    """Test generated node and element sets."""
 
     def test_boundary_and_inner_nodes_partition_all_nodes(self):
         """Boundary and inner node sets form a disjoint partition."""
@@ -268,6 +270,7 @@ class TestNodeSets(GmshTestCase):
 
 
 class TestWriteAbaqusInput(GmshTestCase):
+    """Test Abaqus input-file generation and type validation."""
 
     def test_input_file_contains_nodes_and_beam_elements(self):
         """Abaqus export writes nodes and the default beam element type."""
@@ -287,8 +290,7 @@ class TestWriteAbaqusInput(GmshTestCase):
         self.assertIn("*ELEMENT, TYPE=B33", content)
 
     def test_custom_types_do_not_mutate_the_shared_type_map(self):
-        """Passing custom_types must not mutate the shared default element
-        type map (regression guard for the in-place update bug)."""
+        """Custom types do not mutate the shared default type map."""
         from abqhom.constants import ABAQUS_ELEMENT_TYPES_3D
         before = dict(ABAQUS_ELEMENT_TYPES_3D)
         fixtures.simple_cubic("WINP2", length=2.0)
@@ -309,8 +311,7 @@ class TestWriteAbaqusInput(GmshTestCase):
         self.assertEqual(ABAQUS_ELEMENT_TYPES_3D, before)
 
     def test_unsupported_element_type_is_rejected(self):
-        """Mapping an element to an unsupported type (a 5-DOF thin shell)
-        raises rather than writing an unusable input file."""
+        """A mapped unsupported element type is rejected."""
         fixtures.simple_cubic("WINP3", length=2.0)
         rve = GmshRVE("WINP3")
         rve.generate_mesh(element_size=2.0)
@@ -327,6 +328,7 @@ class TestWriteAbaqusInput(GmshTestCase):
 
 
 class TestReadFromMesh(GmshTestCase):
+    """Test construction from existing periodic meshes."""
 
     def test_pairs_periodic_edges_of_a_prebuilt_2d_mesh(self):
         """A periodic planar mesh has matching opposite-edge nodes."""
