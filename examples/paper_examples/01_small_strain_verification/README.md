@@ -20,10 +20,11 @@ periodic cell enters only the independent ownership-weighted comparison.
 
 ## Execution
 
-Activate the isolated Abaqus runtime as described in the project
-documentation, then run the analysis from this directory:
+Activate the isolated Abaqus runtime as described in the
+[installation guide](https://abqhom.readthedocs.io/en/latest/installation.html),
+then run the analysis from this directory:
 
-```text
+```console
 abaqus cae noGUI=main.py
 ```
 
@@ -55,6 +56,5 @@ The columns of `verification_residuals.csv` contain the normal-block error,
 major-symmetry residual, cubic-symmetry residual, reduction residual, and
 maximum Hill–Mandel residual. The CSV header records these names explicitly.
 
-All model and material parameters are defined together near the beginning of
-`main.py`. The analysis uses 25 elements per cell edge and a macroscopic
-strain magnitude of 0.01.
+The analysis uses 25 elements per cell edge and a macroscopic strain
+magnitude of 0.01.

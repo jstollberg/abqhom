@@ -10,10 +10,14 @@ separately.
 Install the package
 -------------------
 
+Until the first PyPI release, install from a source checkout:
+
 .. code-block:: console
 
-   python -m pip install abqhom
-   abqhom-install-abaqus
+   git clone https://github.com/jstollberg/abqhom.git
+   cd abqhom
+   python -m pip install .
+   abqhom-install-abaqus --abqhom-source .
 
 The helper installs only ``abqhom``, Gmsh, Paraqus, and
 ``backports.weakref`` into a versioned prefix below
@@ -44,19 +48,6 @@ packages installed in the regular Python environment are not exposed to
 Abaqus. For batch systems, the reported path can equivalently be added by the
 job scheduler environment.
 
-Install from a source checkout
-------------------------------
-
-For development, install the checkout in the regular Python environment and
-tell the helper to use the local source or a locally built wheel:
-
-.. code-block:: console
-
-   git clone https://github.com/jstollberg/abqhom.git
-   cd abqhom
-   python -m pip install .
-   abqhom-install-abaqus --abqhom-source .
-
 Verify the setup
 ----------------
 
@@ -74,9 +65,8 @@ side:
    cd examples/beam_lattice_simple_cubic_3d
    abaqus cae noGUI=main.py
 
-The bundled examples locate the repository's ``src`` directory relative to
-their own files. The activated runtime supplies Gmsh, Paraqus, and the legacy
-weak-reference backport.
+The activated runtime supplies abqhom, Gmsh, Paraqus, and the legacy
+weak-reference backport to the examples.
 
 .. tip::
 

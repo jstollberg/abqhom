@@ -16,15 +16,14 @@ and an embedded ideally plastic BCC beam core.
   in normal-stress space using independent resumable workers.
 - `sandwich.py` provides the shared Gmsh geometry definition.
 
-The scripts are compatible with both Python 2.7-based legacy Abaqus releases
-and current Python 3-based releases. Activate the isolated Abaqus runtime as
-described in the project documentation.
+Activate the isolated Abaqus runtime as described in the
+[installation guide](https://abqhom.readthedocs.io/en/latest/installation.html).
 
 ## Cyclic response
 
 Run the cyclic analysis directly from this directory:
 
-```text
+```console
 abaqus cae noGUI=main.py
 ```
 
@@ -35,7 +34,7 @@ The prescribed axial history contains two fully reversed cycles between
 
 Run the planar sampling with:
 
-```text
+```console
 abaqus cae noGUI=yield_surface_sections.py
 ```
 
@@ -47,13 +46,13 @@ or `both`, and `selected_plane` equal to `sigma11_sigma22`,
 effective stiffness and compliance needed by the 3D sampler are required.
 Completed angular prefixes are resumed from their existing CSV files.
 
-## Three-dimensional yield surfaces
+## Three-dimensional normal-stress yield surfaces
 
 The 3D sampler requires the elastic calibration produced by
 `yield_surface_sections.py`. Configure `state_name`, `worker_index`, and
 `number_of_workers` in `yield_surface_3d.py`, then run every worker with:
 
-```text
+```console
 abaqus cae noGUI=yield_surface_3d.py
 ```
 
@@ -76,7 +75,7 @@ The cyclic analysis writes:
 | Directory | Contents |
 |---|---|
 | `abq/` | Cyclic Abaqus job |
-| `results/` | Effective response, PEEQ history, and verification measures |
+| `results/` | Effective response, equivalent plastic strain (PEEQ) history, and verification measures |
 | `vtk_output/` | Cyclic VTK collection |
 
 The cyclic `results/` directory contains:
@@ -99,7 +98,7 @@ Yield-surface output is stored below `yield_surface/`:
 
 The sectional result directories contain `sigma11_sigma22.csv`,
 `sigma11_sigma33.csv`, the common base strain and stress, and their sampling
-configuration. Each merged 3D directory contains `yield_surface.csv`, the
-sampling directions in `directions.csv`, triangular connectivity in
-`faces.csv`, the common base state, and the resumable worker files below
-`parts/`.
+configuration. Each merged 3D directory contains the yield surface in the
+three-dimensional normal-stress subspace in `yield_surface.csv`, the sampling
+directions in `directions.csv`, triangular connectivity in `faces.csv`, the
+common base state, and the resumable worker files below `parts/`.

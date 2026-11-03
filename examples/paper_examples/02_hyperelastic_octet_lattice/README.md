@@ -10,35 +10,38 @@ deformation histories.
 
 ## Execution
 
-Activate the isolated Abaqus runtime as described in the project
-documentation, then run the analyses from this directory in the following
-order:
+Activate the isolated Abaqus runtime as described in the
+[installation guide](https://abqhom.readthedocs.io/en/latest/installation.html),
+then run the analyses from this directory in the following order:
 
-```text
+```console
 abaqus cae noGUI=buckling.py
 abaqus cae noGUI=main.py
 ```
 
 The first command computes two periodic buckling modes for the primitive cell
-and, by default, for the `2 x 2 x 2` supercell. The second command applies the
-first translational mode as the geometric imperfection and runs compression,
-tension, and shear for both cell sizes. Set `include_supercell=False` in the
-final call of either script to omit the supercell analysis.
+and, by default, for the `2 x 2 x 2` supercell. The first mode defines the
+geometric imperfection; the second records the neighboring buckling mode. The
+second command applies the translational part of the first mode and runs
+compression, tension, and shear for both cell sizes. Set
+`include_supercell=False` in the final call of either script to omit the
+supercell analysis.
 
 Paraqus generates the VTK histories used by the contact-clearance check.
 After exporting the primitive-cell histories, run the check in a Python
 environment containing the optional `vtk` Python package. It is not part of
 the abqhom Abaqus runtime:
 
-```text
+```console
 python verify_contact_clearance.py
 ```
 
 The check compares every retained primitive-cell beam element with the
 central cell and its 26 periodic neighbors. Members sharing an idealized
 Octet junction are excluded. The script evaluates the exact minimum distance
-between all remaining discretized centerlines and raises an error if the
-corresponding surface clearance is not positive.
+between all remaining discretized centerlines. It raises an error if contact
+occurs or a positive surface clearance cannot be resolved within the adopted
+numerical tolerance.
 
 ## Supercell check
 
@@ -64,9 +67,9 @@ Each load-case directory contains:
 
 | File | Contents |
 |---|---|
-| `full_response.csv` | Pseudo-time, loading measure, nine components of `P`, nine components of `sigma`, stress-asymmetry residual, and Hill–Mandel residual |
-| `stress_curve.csv` | Loading measure and the corresponding components of `P` and `sigma` |
-| `verification_metrics.csv` | Peak kinetic-energy ratio and its pseudo-time, final and global kinetic-energy ratios, maximum stress-asymmetry and Hill–Mandel residuals, and maximum nodal rotation over the complete history |
+| `full_response.csv` | Pseudo-time, loading measure, nine components of the first Piola–Kirchhoff stress, nine components of the Cauchy stress, stress-asymmetry residual, and Hill–Mandel residual |
+| `stress_curve.csv` | Loading measure and the corresponding first Piola–Kirchhoff and Cauchy stress components |
+| `verification_metrics.csv` | Peak kinetic-energy ratio and its pseudo-time, final kinetic-energy ratio, ratio of the separate maximum kinetic and internal energies, maximum stress-asymmetry and Hill–Mandel residuals, and maximum nodal rotation over the complete history |
 
 Tensor components in `full_response.csv` are stored in row-major order. The
 first Hill–Mandel entry is undefined because no preceding frame exists. The

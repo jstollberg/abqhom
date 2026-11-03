@@ -4,7 +4,7 @@ The examples are divided into concise user tutorials and the more extensive
 manuscript-reproduction cases in `paper_examples`. Each tutorial is a
 self-contained `main.py`. Run it from its own folder with
 
-```
+```console
 abaqus cae noGUI=main.py
 ```
 
@@ -14,13 +14,10 @@ that runtime. Results are written next to the script into `abq/` (Abaqus job
 files), `results/` (CSV data and, where applicable, plots) and `vtk_output/`
 (VTK files).
 
-For example, in PowerShell:
+See the [installation guide](https://abqhom.readthedocs.io/en/latest/installation.html)
+for runtime creation and activation on Windows and Linux.
 
-```powershell
-. "C:/Users/name/.abqhom/abaqus-runtime/.../activate_abqhom.ps1"
-```
-
-## Beam / truss lattices
+## Beam lattices
 
 | Example | Cell | Demonstrates / exercises |
 |---|---|---|
@@ -32,42 +29,30 @@ For example, in PowerShell:
 The simple-cubic and Kelvin cells rely on the automatic removal of redundant
 secondary element copies. No manual stiffness correction is applied.
 
-## Continuum and mixed RVEs
+## Continuum and mixed-dimensional cells
 
-| Example | RVE | Demonstrates / exercises |
+| Example | Cell | Demonstrates / exercises |
 |---|---|---|
 | [`continuum_fiber_composite_2d`](continuum_fiber_composite_2d) | fibers in a matrix (plane strain) | affine displacement boundary conditions and verification of the effective stiffness against Voigt and Reuss bounds |
 | [`continuum_spherical_inclusion_3d`](continuum_spherical_inclusion_3d) | spherical inclusion | 3D periodic boundary conditions, automatic boundary classification and finite-strain continuum response |
 | [`mixed_embedded_beam_fibers_3d`](mixed_embedded_beam_fibers_3d) | beam fibers embedded in a continuum | mixed-dimensional embedded coupling and periodic constraints on embedded boundary nodes |
 
-## Shell RVEs
+## Shell cells
 
-| Example | RVE | Demonstrates / exercises |
+| Example | Cell | Demonstrates / exercises |
 |---|---|---|
 | [`shell_honeycomb_auxetic_3d`](shell_honeycomb_auxetic_3d) | re-entrant honeycomb, shell walls | periodic shell homogenization and the negative in-plane Poisson response of a re-entrant architecture |
 | [`shell_gyroid_3d`](shell_gyroid_3d) | sheet-gyroid TPMS with an imported shell mesh | importing a pre-generated periodic mesh and computing its finite-strain shell response |
 
-The `shell_honeycomb_auxetic_3d` cell is the classic 2D re-entrant (bow-tie)
-honeycomb given a finite depth: its ribs (in the x-z plane) are extruded along
-y into thin plate walls. The inclined ribs point inward (re-entrant angle), so
-stretching the honeycomb in-plane swings them outward and the cell expands
-laterally—a negative Poisson's ratio in the x-z plane. Along the extrusion
-axis y the walls just stretch, so the effective stiffness is orthotropic
-(auxetic in-plane, an ordinary stiff honeycomb prism along y). The in-plane
-honeycomb is built by clipping the infinite lattice to one period before
-extrusion, like the beam honeycomb example.
-
-The gyroid is an implicit surface. Its periodic surface mesh is generated with
-the [microgen](https://github.com/3MAH/microgen) package: it is pre-computed
-and exported to `gyroid.msh` by `generate_mesh.py` (run once in an
-environment that has microgen installed), so Abaqus itself does not need
-microgen—`main.py` only reads the mesh file and hands it to abqhom via
-`GmshRVE.read_from_mesh`.
+The gyroid mesh is generated once with the optional
+[microgen](https://github.com/3MAH/microgen) package by `generate_mesh.py`.
+The Abaqus analysis reads the resulting `gyroid.msh` and does not require
+microgen.
 
 ## Manuscript-reproduction cases
 
 The three cases under `paper_examples` reproduce the numerical examples of
 the accompanying manuscript. They include multi-stage analyses and
 verification scripts and are therefore intentionally more detailed than the
-tutorials.
-See `paper_examples/README.md` for their execution order and details.
+tutorials. See the [`paper_examples` README](paper_examples/README.md) for
+their execution order and generated output.
