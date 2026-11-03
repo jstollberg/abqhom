@@ -5,7 +5,8 @@ Install ``abqhom`` in a regular Python environment and use its installation
 helper to create an isolated Abaqus runtime. The Abaqus installation remains
 unchanged, which makes the workflow suitable for workstations and compute
 clusters without administrative access. Abaqus 2018 or newer must be installed
-separately.
+separately, and the regular installation environment requires Python 3.9 or
+newer.
 
 Install the package
 -------------------
@@ -23,6 +24,9 @@ The helper installs only ``abqhom``, Gmsh, Paraqus, and
 ``backports.weakref`` into a versioned prefix below
 ``~/.abqhom/abaqus-runtime``. Dependencies are deliberately disabled during
 this step. Abaqus therefore continues to use its bundled NumPy installation.
+Use ``--prefix PATH`` to select another runtime location. Running
+``abqhom-install-abaqus --help`` lists the available options. Re-running the
+helper safely replaces an existing runtime managed at the same location.
 
 Activate the runtime
 --------------------
@@ -37,7 +41,7 @@ On Windows PowerShell:
 
    . "C:/Users/name/.abqhom/abaqus-runtime/.../activate_abqhom.ps1"
 
-On Linux or macOS:
+On Linux:
 
 .. code-block:: bash
 
@@ -55,7 +59,7 @@ The geometry layer can be checked in a regular Python interpreter:
 
 .. code-block:: console
 
-   python -c "import gmsh; from abqhom.gmshmodel import GmshRVE; print('OK')"
+   python -c "from abqhom.gmshmodel import GmshRVE"
 
 Then run one of the bundled examples from its directory to verify the Abaqus
 side:

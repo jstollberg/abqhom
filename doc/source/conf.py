@@ -15,7 +15,7 @@ from abqhom import __version__
 # -- Project information -----------------------------------------------------
 
 project = "abqhom"
-copyright = "2026, Jonathan Stollberg"
+copyright = "2023-2026, Jonathan Stollberg"
 author = "Jonathan Stollberg"
 version = ".".join(__version__.split(".")[:2])
 release = __version__

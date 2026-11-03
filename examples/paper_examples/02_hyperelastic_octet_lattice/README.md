@@ -21,7 +21,7 @@ abaqus cae noGUI=main.py
 
 The first command computes two periodic buckling modes for the primitive cell
 and, by default, for the `2 x 2 x 2` supercell. The first mode defines the
-geometric imperfection; the second records the neighboring buckling mode. The
+geometric imperfection. The second records the neighboring buckling mode. The
 second command applies the translational part of the first mode and runs
 compression, tension, and shear for both cell sizes. Set
 `include_supercell=False` in the final call of either script to omit the

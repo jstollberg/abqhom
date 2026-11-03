@@ -22,40 +22,40 @@ Tutorial examples
 
    * - Directory
      - Unit cell
-     - Main purpose
-   * - ``beam_lattice_simple_cubic_3d``
+     - Demonstrates
+   * - `beam_lattice_simple_cubic_3d <https://github.com/jstollberg/abqhom/tree/main/examples/beam_lattice_simple_cubic_3d>`_
      - Simple-cubic beam lattice
      - Linear stiffness and analytical :math:`C_{11}` check
-   * - ``beam_lattice_honeycomb_2d``
+   * - `beam_lattice_honeycomb_2d <https://github.com/jstollberg/abqhom/tree/main/examples/beam_lattice_honeycomb_2d>`_
      - Regular beam honeycomb
      - Two-dimensional effective response and in-plane isotropy
-   * - ``beam_lattice_kelvin_3d``
+   * - `beam_lattice_kelvin_3d <https://github.com/jstollberg/abqhom/tree/main/examples/beam_lattice_kelvin_3d>`_
      - Kelvin beam lattice
      - Finite-strain response of a three-dimensional lattice
-   * - ``beam_lattice_simple_cubic_plasticity_3d``
+   * - `beam_lattice_simple_cubic_plasticity_3d <https://github.com/jstollberg/abqhom/tree/main/examples/beam_lattice_simple_cubic_plasticity_3d>`_
      - Simple-cubic beam lattice
      - Hysteresis under cyclic perfect plasticity
-   * - ``shell_honeycomb_auxetic_3d``
+   * - `shell_honeycomb_auxetic_3d <https://github.com/jstollberg/abqhom/tree/main/examples/shell_honeycomb_auxetic_3d>`_
      - Re-entrant shell honeycomb
      - Negative in-plane Poisson ratio
-   * - ``continuum_fiber_composite_2d``
+   * - `continuum_fiber_composite_2d <https://github.com/jstollberg/abqhom/tree/main/examples/continuum_fiber_composite_2d>`_
      - Two-phase plane-strain composite
      - Effective stiffness and Voigt--Reuss bounds
-   * - ``continuum_spherical_inclusion_3d``
+   * - `continuum_spherical_inclusion_3d <https://github.com/jstollberg/abqhom/tree/main/examples/continuum_spherical_inclusion_3d>`_
      - Spherical inclusion in a matrix
      - Finite-strain response with automatic boundary classification
-   * - ``mixed_embedded_beam_fibers_3d``
+   * - `mixed_embedded_beam_fibers_3d <https://github.com/jstollberg/abqhom/tree/main/examples/mixed_embedded_beam_fibers_3d>`_
      - Beam fibers embedded in a continuum
      - Mixed-dimensional, nonconforming coupling
-   * - ``shell_gyroid_3d``
+   * - `shell_gyroid_3d <https://github.com/jstollberg/abqhom/tree/main/examples/shell_gyroid_3d>`_
      - Imported sheet-gyroid shell mesh
      - Finite-strain shell response and imported-mesh workflow
 
 The simple-cubic and Kelvin examples exercise the automatic reduction of
 redundant structural elements on periodic boundaries. The gyroid mesh is
 generated separately with `microgen <https://github.com/3MAH/microgen>`_ and
-then read through :meth:`~abqhom.gmshmodel.GmshRVE.read_from_mesh`; microgen is
-not a runtime dependency of ``abqhom``.
+then read through :meth:`~abqhom.gmshmodel.GmshRVE.read_from_mesh`. Microgen
+is not a runtime dependency of ``abqhom``.
 
 Output directories
 ------------------
@@ -78,4 +78,7 @@ The cases in ``examples/paper_examples`` reproduce the numerical examples of
 the accompanying publication. They contain multi-stage analyses, auxiliary
 sampling jobs, and verification scripts and are intentionally more detailed
 than the tutorials. Their ``README.md`` documents the required execution
-order and the generated data products.
+order and generated data products. Their model sizes and number of analyses
+may require a full Abaqus license. See the
+`manuscript-example instructions <https://github.com/jstollberg/abqhom/tree/main/examples/paper_examples>`_
+before running them.

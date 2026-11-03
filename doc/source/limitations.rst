@@ -25,12 +25,12 @@ Boundary conditions and kinematics
 ----------------------------------
 
 * Periodic boundary conditions require one-to-one matching nodes on opposite
-  boundaries. The Gmsh workflow creates these relations before meshing;
+  boundaries. The Gmsh workflow creates these relations before meshing.
   :meth:`~abqhom.gmshmodel.GmshRVE.read_from_mesh` checks them for an imported
   mesh.
 * Periodic rotations of beam and shell nodes are supported for zero imposed
   macroscopic curvature. The effective medium is a first-order Cauchy
-  continuum; macroscopic couple stress and curvature are not identified.
+  continuum. Macroscopic couple stress and curvature are not identified.
 * Affine displacement boundary conditions are restricted to elements without
   rotational degrees of freedom. Use periodic conditions for beam and shell
   cells.
@@ -54,5 +54,5 @@ Execution environment
 
 The Abaqus-facing API must run in the Abaqus CAE Python kernel. The package
 uses Abaqus for all element formulations, material integration, nonlinear
-solution procedures, and output databases; it is not a standalone finite
+solution procedures, and output databases. It is not a standalone finite
 element solver.

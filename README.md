@@ -46,10 +46,11 @@ before applying the framework to a new cell topology.
 
 ## Requirements
 
-- Abaqus 2018 or newer with Abaqus/CAE and the solver;
-- Gmsh 4.9.4 or newer;
-- NumPy as supplied with Abaqus;
-- Paraqus 1.0.2 or newer;
+- Python 3.9 or newer for package installation and runtime creation.
+- Abaqus 2018 or newer with Abaqus/CAE and the solver.
+- Gmsh 4.9.4 or newer.
+- NumPy as supplied with Abaqus.
+- Paraqus 1.0.2 or newer.
 - `backports.weakref` for legacy Abaqus releases using Python 2.7.
 
 The source supports both legacy Python 2.7-based Abaqus releases and current
@@ -103,7 +104,7 @@ finite-strain hyperelasticity, cyclic plasticity, and imported periodic
 meshes.
 
 The larger [`paper_examples`](examples/paper_examples) reproduce the numerical
-studies from the accompanying publication; its reference will be added upon
+studies from the accompanying publication. Its reference will be added upon
 publication.
 
 | Example | Study |

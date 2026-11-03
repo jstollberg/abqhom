@@ -8,12 +8,13 @@ Required software
    Model construction, finite element analysis, and result recovery use the
    Abaqus scripting interface. Scripts that instantiate
    :class:`~abqhom.abqmodel.AbaqusRVE` must therefore run in an Abaqus CAE
-   Python kernel, for example with ``abaqus cae noGUI=main.py``. Abaqus 2018 is
-   the minimum version because the periodic constraints use ordered node sets
-   created through ``SetFromNodeLabels(..., unsorted=True)`` and set-to-set
-   equation constraints, both supported by Abaqus/CAE from that release. The
-   source is compatible with both the Python 2.7 interface of legacy Abaqus
-   releases and the Python 3 interface of current releases.
+   Python kernel, for example with ``abaqus cae noGUI=main.py``. Both legacy
+   Python 2.7-based and current Python 3-based Abaqus releases are supported.
+
+**Python 3.9 or newer**
+   A regular Python environment is required to install ``abqhom`` and create
+   the isolated Abaqus runtime. The Abaqus interpreter itself may still use
+   Python 2.7.
 
 **Gmsh**
    Geometry handling and meshing use Gmsh 4.9.4 or newer. The installation
@@ -26,8 +27,7 @@ Required software
 **Paraqus**
    :meth:`~abqhom.abqmodel.AbaqusRVE.export_to_vtk` uses
    `Paraqus <https://github.com/InstituteOfMechanics/Paraqus>`_ to write VTK
-   files. Version 1.0.2 or newer provides the required API; the oldest
-   compatible release currently published on PyPI is 1.0.4.
+   files. Version 1.0.2 or newer provides the required API.
 
 **backports.weakref**
    The runtime includes this pure-Python backport so current Gmsh releases can

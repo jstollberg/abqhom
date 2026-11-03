@@ -39,8 +39,8 @@ The workflow has two layers:
    the cell boundary, imposes periodic mesh relations, generates or reads the
    mesh, and creates the node and element sets needed by Abaqus.
 #. :class:`~abqhom.abqmodel.AbaqusRVE` imports that representation into
-   Abaqus. It assigns sections, applies macroscopic boundary conditions, runs
-   the finite element analysis, and evaluates effective quantities from the
+   Abaqus and provides methods for section assignment, macroscopic boundary
+   conditions, analysis execution, and effective-response recovery from the
    output database.
 
 The geometry layer needs only Gmsh and NumPy. Importing or using the Abaqus

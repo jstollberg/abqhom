@@ -1,8 +1,8 @@
 abqhom
 ======
 
-``abqhom`` is a Python toolbox for the computational homogenization of
-periodic two- and three-dimensional unit cells with
+``abqhom`` is an open-source Python framework for first-order computational
+homogenization of periodic two- and three-dimensional unit cells with
 `Gmsh <https://gmsh.info/>`_ and
 `Abaqus <https://www.3ds.com/products/simulia/abaqus>`_. It supports
 continuum, truss, beam, and shell constituents, including mixed-dimensional
@@ -15,11 +15,10 @@ removes redundant copies of structural elements on periodic cell boundaries
 before the boundary-value problem is solved.
 
 Start with :doc:`installation`, then run the complete example in
-:doc:`usage`. The :doc:`examples` page provides larger tutorial problems, and
-:doc:`api` documents the public Python interface.
-
-Getting started
----------------
+:doc:`usage`. The :doc:`examples` page presents the tutorial and
+manuscript-reproduction cases, while :doc:`api` documents the public Python
+interface. Questions and bug reports can be submitted through the
+`GitHub issue tracker <https://github.com/jstollberg/abqhom/issues>`_.
 
 .. toctree::
    :maxdepth: 2
@@ -30,23 +29,19 @@ Getting started
    installation
    usage
 
-User guide
-----------
-
 .. toctree::
    :maxdepth: 2
    :caption: User guide
 
    examples
+   boundary
    limitations
-
-Reference
----------
 
 .. toctree::
    :maxdepth: 2
    :caption: Reference
 
+   citation
    api
    tests
    development

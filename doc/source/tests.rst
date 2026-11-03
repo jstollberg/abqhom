@@ -1,5 +1,5 @@
 Testing
--------
+========
 
 The tests under ``src/abqhom/tests`` are split into two groups:
 

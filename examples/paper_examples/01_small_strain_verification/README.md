@@ -8,10 +8,10 @@ reported in Section 5.1 of the accompanying manuscript.
 
 The analysis evaluates:
 
-- the complete effective stiffness from six independent strain cases;
-- the analytical normal-stiffness block;
-- major and cubic symmetry residuals;
-- the discrete Hill–Mandel residual in every strain case;
+- the complete effective stiffness from six independent strain cases.
+- the analytical normal-stiffness block.
+- major and cubic symmetry residuals.
+- the discrete Hill–Mandel residual in every strain case.
 - equivalence between the reduced cell and the complete cell with
   ownership-weighted linear-elastic properties.
 
