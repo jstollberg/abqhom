@@ -123,6 +123,8 @@ the installation guide, modeling assumptions, user workflow, examples, API
 reference, and testing instructions. Questions, bug reports, and feature
 requests can be submitted through
 [GitHub Issues](https://github.com/jstollberg/abqhom/issues).
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
+development workflow and submission guidelines.
 
 ## Citation
 

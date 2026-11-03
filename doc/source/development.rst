@@ -1,6 +1,10 @@
 Development
 ===========
 
+The `contribution guide <https://github.com/jstollberg/abqhom/blob/main/CONTRIBUTING.md>`_
+describes issue reporting, development setup, code conventions, testing, and
+pull-request expectations.
+
 Repository layout
 -----------------
 
