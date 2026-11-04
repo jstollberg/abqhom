@@ -57,6 +57,7 @@ class _InstallerTestCase(unittest.TestCase):
             output.write('__version__ = "{}"\n'.format(version))
         for path in (
                 os.path.join(package_directory, "paraqus", "__init__.py"),
+                os.path.join(package_directory, "backports", "__init__.py"),
                 os.path.join(package_directory, "gmsh.py")):
             with open(path, "w"):
                 pass
