@@ -60,6 +60,7 @@ napoleon_use_ivar = True
 html_theme = "sphinx_rtd_theme"
 html_title = "abqhom documentation"
 html_short_title = "abqhom"
+html_domain_indices = False
 
 
 # -- Options for EPUB output -------------------------------------------------
