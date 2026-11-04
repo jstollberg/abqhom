@@ -4,11 +4,12 @@
 [![Documentation Status](https://readthedocs.org/projects/abqhom/badge/?version=latest)](https://abqhom.readthedocs.io/en/latest/?badge=latest)
 
 `abqhom` is an open-source Python framework for first-order computational
-homogenization of periodic two- and three-dimensional unit cells. It connects
-geometry and periodic meshing in [Gmsh](https://gmsh.info/) with finite element
-analysis in [Abaqus](https://www.3ds.com/products/simulia/abaqus). Continuum,
-truss, beam, and shell constituents may occur separately or together in
-mixed-dimensional cells.
+homogenization of two- and three-dimensional unit cells and representative
+volume elements. It connects geometry and meshing in
+[Gmsh](https://gmsh.info/) with finite element analysis in
+[Abaqus](https://www.3ds.com/products/simulia/abaqus). Continuum, truss, beam,
+and shell constituents may occur separately or together in mixed-dimensional
+cells.
 
 The package provides the scale-transition machinery around an Abaqus
 analysis. Abaqus remains responsible for element formulations, constitutive

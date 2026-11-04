@@ -14,8 +14,8 @@ Cell geometry
   but their geometric assignment is the user's responsibility. See
   :ref:`manual-boundary` for the group convention and a construction example.
 * Constituents inside and on the cell boundary may have arbitrary
-  orientations. The restriction concerns the periodic reference-cell
-  boundary, not the material topology.
+  orientations. The restriction concerns the exterior reference-cell
+  geometry, not the material topology.
 * Two-dimensional Gmsh models are not projected from another coordinate
   plane during Abaqus export.
 * A Gmsh physical group name must not conflict with the boundary-set names

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "abqhom"
 dynamic = ["version"]
-description = "Computational homogenization of periodic unit cells with Abaqus and Gmsh"
+description = "Computational homogenization of unit cells and RVEs with Abaqus and Gmsh"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "GPL-3.0-or-later"
@@ -18,7 +18,8 @@ keywords = [
     "computational homogenization",
     "finite elements",
     "Gmsh",
-    "periodic unit cells",
+    "representative volume elements",
+    "unit cells",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",

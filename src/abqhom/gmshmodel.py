@@ -25,7 +25,7 @@ from abqhom.constants import (POINT_GROUPS, EDGE_GROUPS, FACE_GROUPS,
 
 class GmshRVE(object):
     """
-    Gmsh representation of a periodic structural RVE.
+    Gmsh representation of a structural or continuum RVE.
 
     The reference cell must be rectangular in the global X1-X2 plane with
     X3 = 0 in 2D or cuboidal and aligned with the global coordinate axes in

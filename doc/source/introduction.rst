@@ -1,10 +1,10 @@
 Overview
 ========
 
-``abqhom`` automates periodic-cell analyses without prescribing a particular
-constituent material model. The finite element response is computed by
-Abaqus, while the package supplies the scale-transition machinery around that
-analysis.
+``abqhom`` automates unit-cell and representative-volume-element analyses
+without prescribing a particular constituent material model. The finite
+element response is computed by Abaqus, while the package supplies the
+scale-transition machinery around that analysis.
 
 Core capabilities
 -----------------
@@ -36,8 +36,8 @@ Execution model
 The workflow has two layers:
 
 #. :class:`~abqhom.gmshmodel.GmshRVE` operates on a Gmsh model. It identifies
-   the cell boundary, imposes periodic mesh relations, generates or reads the
-   mesh, and creates the node and element sets needed by Abaqus.
+   the cell boundary, optionally imposes periodic mesh relations, generates
+   or reads the mesh, and creates the node and element sets needed by Abaqus.
 #. :class:`~abqhom.abqmodel.AbaqusRVE` imports that representation into
    Abaqus and provides methods for section assignment, macroscopic boundary
    conditions, analysis execution, and effective-response recovery from the

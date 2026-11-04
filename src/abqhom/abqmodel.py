@@ -38,7 +38,7 @@ def _as_list(value):
 
 class AbaqusRVE(object):
     """
-    Abaqus representation of a periodic structural RVE.
+    Abaqus representation of a structural or continuum RVE.
 
     The class imports a :class:`GmshRVE`, transfers its physical and boundary
     sets, applies macroscopic loading and periodic constraints, and recovers
