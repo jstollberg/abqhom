@@ -85,8 +85,8 @@ def add_buckling_boundary_conditions(cell, step_name,
             u1=0.0, u2=0.0, u3=0.0, buckleCase=BUCKLING_MODES)
 
 
-def periodicity_residual(cell, displacement):
-    """Return the largest normalized primary--secondary mode mismatch."""
+def translation_periodicity_residual(cell, displacement):
+    """Return the largest normalized periodic translation mismatch."""
     maximum = max(np.linalg.norm(value)
                   for value in displacement.values())
     if maximum <= 0.0:
@@ -117,8 +117,9 @@ def periodicity_residual(cell, displacement):
     return residual / maximum
 
 
-def primitive_periodicity_residual(instance, displacement, edge_length):
-    """Measure whether a supercell mode repeats after one primitive cell."""
+def primitive_translation_periodicity_residual(
+        instance, displacement, edge_length):
+    """Measure whether mode translations repeat after one primitive cell."""
     coordinates = {
         node.label: np.asarray(node.coordinates, dtype=float)
         for node in instance.nodes}
@@ -165,7 +166,7 @@ def read_eigenvalue(frame):
 
 def export_modes(cell, step_name, result_directory,
                  primitive_edge_length=None):
-    """Export normalized modes, eigenvalues, and periodicity residuals."""
+    """Export translational modes and translational periodicity residuals."""
     if not os.path.isdir(result_directory):
         os.makedirs(result_directory)
 
@@ -200,18 +201,18 @@ def export_modes(cell, step_name, result_directory,
                     result_directory, "mode_{:02d}".format(mode_number)))
 
             eigenvalue = read_eigenvalue(frame)
-            residual = periodicity_residual(cell, displacement)
+            residual = translation_periodicity_residual(cell, displacement)
             record = [mode_number, eigenvalue, residual]
-            message = ("mode {:2d}: eigenvalue = {:.8e}, outer residual = "
-                       "{:.3e}".format(
+            message = ("mode {:2d}: eigenvalue = {:.8e}, outer translation "
+                       "residual = {:.3e}".format(
                            mode_number, eigenvalue, residual))
             if primitive_edge_length is not None:
                 primitive_residual, comparisons = (
-                    primitive_periodicity_residual(
+                    primitive_translation_periodicity_residual(
                         instance, displacement, primitive_edge_length))
                 record.extend([primitive_residual, comparisons])
-                message += ", primitive residual = {:.3e}".format(
-                    primitive_residual)
+                message += (", primitive translation residual = {:.3e}"
+                            .format(primitive_residual))
             records.append(record)
             print(message)
     finally:

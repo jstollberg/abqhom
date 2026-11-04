@@ -54,11 +54,11 @@ class GmshRVE(object):
         A flag indicating whether periodic mesh constraints were prescribed
         or opposite boundary node sets were detected as matching.
     node_sets : dict[str, ndarray]
-        A map from set names to set nodes for user-defined physical
-        groups and further default node sets.
+        A map from set names to arrays of Gmsh node tags for user-defined
+        physical groups and further default node sets.
     element_sets : dict[str, ndarray]
-        A map from set names to set elements for user-defined physical
-        groups and further default element sets.
+        A map from set names to arrays of Gmsh element tags for user-defined
+        physical groups and further default element sets.
     model_dimension : int
         The geometric dimensionality of the model.
     mesh_dimension : int
@@ -166,13 +166,12 @@ class GmshRVE(object):
     @property
     def node_sets(self):
         """
-        Node sets, e.g. to group nodes of a boundary group.
+        Node-tag sets, e.g. for the nodes of a boundary group.
 
         Returns
         -------
         dict[str, ndarray]
-            The node sets. Keys are the set names and values are the
-            nodes in the respective set.
+            Keys are set names and values are arrays of Gmsh node tags.
 
         """
 
@@ -181,13 +180,12 @@ class GmshRVE(object):
     @property
     def element_sets(self):
         """
-        Element sets, e.g. to group elements of a physical group.
+        Element-tag sets, e.g. for the elements of a physical group.
 
         Returns
         -------
         dict[str, ndarray]
-            The element sets. Keys are the set names and values are the
-            elements in the respective set.
+            Keys are set names and values are arrays of Gmsh element tags.
 
         """
 

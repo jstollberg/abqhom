@@ -37,11 +37,13 @@ python verify_contact_clearance.py
 ```
 
 The check compares every retained primitive-cell beam element with the
-central cell and its 26 periodic neighbors. Members sharing an idealized
-Octet junction are excluded. The script evaluates the exact minimum distance
-between all remaining discretized centerlines. It raises an error if contact
-occurs or a positive surface clearance cannot be resolved within the adopted
-numerical tolerance.
+central cell and its 26 periodic neighbors. Only element pairs that already
+overlap within an idealized rigid joint in the reference configuration are
+excluded. Distal portions of connected struts and non-neighboring portions of
+the same strut outside this reference-overlap region remain contact
+candidates. The script raises an error if unconnected members overlap
+initially, if contact occurs during loading, or if a positive surface
+clearance cannot be resolved within the adopted numerical tolerance.
 
 ## Supercell check
 
@@ -79,6 +81,7 @@ contains pseudo-time, loading magnitude, and minimum centerline distance.
 
 Each `mode_XX.csv` contains the node label, three reference coordinates, and
 three normalized translational mode components. Primitive-cell
-`eigenvalues.csv` stores the mode number, eigenvalue, and outer-periodicity
-residual. The supercell file additionally stores the residual with respect to
-primitive-cell periodicity and the number of compared node pairs.
+`eigenvalues.csv` stores the mode number, eigenvalue, and outer translational
+periodicity residual. The supercell file additionally stores the
+translational residual with respect to primitive-cell periodicity and the
+number of compared node pairs.
