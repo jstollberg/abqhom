@@ -276,9 +276,12 @@ def run_cell(cells_per_axis, elements_per_strut, edge_length,
     gmsh_cell.add_periodic_mesh_constraints()
     gmsh_cell.generate_mesh()
     gmsh_cell.build_node_sets()
+    gmsh_cell.build_element_sets()
 
     # The selected translational eigenmode perturbs the nodal positions once
     # and the resulting imperfect mesh is shared by the requested load cases.
+    # Element sets are retained from the perfect reference mesh so that the
+    # periodic boundary-element reduction is unaffected by this perturbation.
     periodic_residual = apply_eigenmode_imperfection(
         gmsh_cell, buckling_directory, imperfection_amplitude)
     print("\n{} x {} x {} Octet imperfection:".format(
