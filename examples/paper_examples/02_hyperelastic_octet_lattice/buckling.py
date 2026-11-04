@@ -175,7 +175,8 @@ def export_modes(cell, step_name, result_directory,
         step = cell.odb.steps[step_name]
         instance = cell.odb.rootAssembly.instances[cell.model_name]
         records = []
-        for mode_number, frame in enumerate(step.frames[1:], start=1):
+        for mode_number in range(1, len(step.frames)):
+            frame = step.frames[mode_number]
             values = frame.fieldOutputs["U"].getSubset(
                 region=instance).values
             displacement = {
