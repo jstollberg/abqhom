@@ -7,6 +7,8 @@ import os
 
 import numpy as np
 
+from abqhom.utils import read_csv_file
+
 
 def _coordinate_key(coordinates):
     """Return a stable key for coincident lattice points."""
@@ -133,7 +135,8 @@ def _read_mode(path):
             "The buckling-mode file '{}' does not exist. Run buckling.py "
             "before the finite-strain analyses.".format(path))
 
-    data = np.atleast_2d(np.loadtxt(path, delimiter=","))
+    data, _ = read_csv_file(path, has_header=True)
+    data = np.atleast_2d(data)
     if data.shape[1] != 7 or not np.all(np.isfinite(data)):
         raise ValueError(
             "A mode file must contain the node tag, three reference "

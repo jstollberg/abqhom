@@ -10,6 +10,7 @@ is written to CSV and plotted.
 """
 
 import os
+import sys
 
 import gmsh
 import numpy as np
@@ -86,7 +87,7 @@ def main():
 
         # ---------------------------------------------------------------
         # Create geometry and periodic mesh in Gmsh
-        model_name = "RUC"
+        model_name = "RVE"
         create_geometry(model_name, length)
         unit_cell = GmshRVE(model_name)
         unit_cell.add_periodic_mesh_constraints()
@@ -110,22 +111,25 @@ def main():
 
         # Apply periodic boundary conditions and run the analysis
         unit_cell.apply_periodic_bc(step_name, history)
+        print("\nRun cyclic axial load path.")
+        print("  Run Abaqus analysis.")
+        sys.stdout.flush()
         unit_cell.run_analysis(field_outputs=["U", "S", "PEEQ"])
 
         # ---------------------------------------------------------------
         # Effective axial stress--strain response evaluated frame by frame
+        print("  Post-process effective response.")
+        sys.stdout.flush()
         unit_cell.open_odb_file()
         try:
-            frame_times = [frame.frameValue
-                           for frame in unit_cell.odb.steps[step_name].frames]
+            frames = unit_cell.odb.steps[step_name].frames
+            curve = []
+            for index, frame in enumerate(frames):
+                strain = load_path(frame.frameValue)[0, 0]
+                stress = unit_cell.average_stress(step_name, frame=index)
+                curve.append([strain, stress[0, 0]])
         finally:
             unit_cell.close_odb_file()
-
-        curve = []
-        for index, frame_time in enumerate(frame_times):
-            strain = load_path(frame_time)[0, 0]
-            stress = unit_cell.average_stress(step_name, frame=index)
-            curve.append([strain, stress[0, 0]])
         curve = np.array(curve)
 
         print("\n------------------------------")
@@ -141,7 +145,8 @@ def main():
         if not os.path.isdir(result_dir):
             os.makedirs(result_dir)
         export_to_csv_file(
-            curve, os.path.join(result_dir, "cyclic_response.csv"))
+            curve, os.path.join(result_dir, "cyclic_response.csv"),
+            header="epsilon_11,sigma_11")
 
         # ---------------------------------------------------------------
         # Plot the cyclic response with the matplotlib bundled with Abaqus.
@@ -162,6 +167,8 @@ def main():
         fig.savefig(os.path.join(result_dir, "cyclic_response.png"), dpi=150)
         plt.close(fig)
 
+        print("  Export VTK results.")
+        sys.stdout.flush()
         unit_cell.export_to_vtk(
             os.path.join(here, "vtk_output"),
             field_outputs=["U", ("S", "MISES"), "PEEQ"], clear=True)
@@ -173,4 +180,7 @@ def main():
 
 
 if __name__ == "__main__":
+    # Abaqus replaces stdout; restore the shell that launched the example.
+    if sys.__stdout__ is not None:
+        sys.stdout = sys.__stdout__
     main()

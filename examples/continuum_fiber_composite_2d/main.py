@@ -9,6 +9,7 @@ effective in-plane stiffness and verify the Voigt and Reuss matrix bounds.
 """
 
 import os
+import sys
 
 import gmsh
 import numpy as np
@@ -79,6 +80,7 @@ def main():
         # ---------------------------------------------------------------
         # Run the homogenization routine (three load cases in 2D: xx, yy, xy)
         components = [0, 1, 5]  # Voigt indices: xx, yy, xy(engineering)
+        component_names = ("xx", "yy", "xy")
         strain_magnitude = 0.03
 
         # Build the model once and update only the affine displacement boundary
@@ -97,8 +99,10 @@ def main():
 
         C = np.zeros((3, 3))
         for col, comp in enumerate(components):
+            component_name = component_names[col]
             print("\n------------------------------")
-            print("Run load case {}.".format(col + 1))
+            print("Run strain case {} ({}).".format(
+                col + 1, component_name))
 
             def strain_history(time, component=comp):
                 """Return the ramped macroscopic strain at ``time``."""
@@ -108,6 +112,8 @@ def main():
 
             history = LoadHistory(np.array([0.0, 1.0]), strain_history)
             unit_cell.apply_affine_displacement_bc("LOAD", history)
+            print("  Run Abaqus analysis.")
+            sys.stdout.flush()
             unit_cell.run_analysis(field_outputs=["U", "S"])
 
             stress = tensor_to_voigt(
@@ -115,8 +121,10 @@ def main():
                 check_symmetry=False)
             C[:, col] = stress/strain_magnitude
 
+            print("  Export VTK results.")
+            sys.stdout.flush()
             unit_cell.export_to_vtk(
-                os.path.join(here, "vtk_output", "case_{}".format(col + 1)),
+                os.path.join(here, "vtk_output", component_name),
                 field_outputs=["U", ("S", "MISES")],
                 element_sets=["MATRIX", "FIBER"], clear=True)
 
@@ -152,4 +160,7 @@ def main():
 
 
 if __name__ == "__main__":
+    # Abaqus replaces stdout; restore the shell that launched the example.
+    if sys.__stdout__ is not None:
+        sys.stdout = sys.__stdout__
     main()

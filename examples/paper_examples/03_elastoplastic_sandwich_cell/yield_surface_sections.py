@@ -28,9 +28,15 @@ from sandwich import create_geometry
 
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
 from abqhom.gmshmodel import GmshRVE
-from abqhom.utils import tensor_to_voigt, voigt_to_tensor
+from abqhom.utils import (export_to_csv_file, read_csv_file,
+                          tensor_to_voigt, voigt_to_tensor)
 
 here = os.getcwd()
+VOIGT_COMPONENTS = ("11", "22", "33", "23", "13", "12")
+STRAIN_HEADER = ",".join(
+    "epsilon_" + component for component in VOIGT_COMPONENTS)
+STRESS_HEADER = ",".join(
+    "sigma_" + component for component in VOIGT_COMPONENTS)
 
 
 def open_csv_file(path, mode):
@@ -83,10 +89,12 @@ def assign_sections(cell, parameters):
 def compute_elastic_stiffness(gmsh_cell, parameters, strain_magnitude):
     """Compute the complete effective elastic stiffness in Voigt notation."""
     stiffness = np.zeros((6, 6))
+    component_names = ("xx", "yy", "zz", "yz", "xz", "xy")
 
     # Each independent macroscopic strain case supplies one stiffness column.
-    for component in range(6):
-        print("Elastic stiffness case {}/6".format(component + 1))
+    for component, component_name in enumerate(component_names):
+        print("Run elastic strain case {} ({}).".format(
+            component + 1, component_name))
         sys.stdout.flush()
 
         def strain_path(pseudo_time, index=component):
@@ -108,6 +116,7 @@ def compute_elastic_stiffness(gmsh_cell, parameters, strain_magnitude):
             "EMBEDDED_BEAM_CORE",
             cell.instance.sets["ELSET_BEAM_STRUTS"],
             cell.instance.sets["ELSET_CONTINUUM_MATRIX"])
+        print("  Run Abaqus analysis.")
         cell.run_analysis(numCpus=1)
         stiffness[:, component] = (
             tensor_to_voigt(cell.average_stress(step_name), "STRESS")
@@ -588,8 +597,9 @@ def read_yield_results(path):
 # ---------------------------------------------------------------
 # Geometry, state definitions, and plane sampling
 
-def build_gmsh_cell(mesh_parameters, model_name="EXAMPLE_3_YIELD"):
+def build_gmsh_cell(mesh_parameters):
     """Build the periodic mesh shared by the yield-surface analyses."""
+    model_name = "RVE"
     edge_length = mesh_parameters["edge_length"]
     create_geometry(
         model_name, edge_length, mesh_parameters["elements_per_strut"])
@@ -646,8 +656,8 @@ def elastic_calibration(gmsh_cell, parameters, strain_magnitude,
 
     # Reuse the six elastic calibration analyses across both yield surfaces.
     if os.path.isfile(stiffness_path) and os.path.isfile(compliance_path):
-        stiffness = np.loadtxt(stiffness_path, delimiter=",")
-        compliance = np.loadtxt(compliance_path, delimiter=",")
+        stiffness = read_csv_file(stiffness_path)
+        compliance = read_csv_file(compliance_path)
         print("Reusing the existing effective elastic calibration.")
     else:
         stiffness = compute_elastic_stiffness(
@@ -669,8 +679,8 @@ def elastic_calibration(gmsh_cell, parameters, strain_magnitude,
         raise RuntimeError("The effective elastic stiffness is not positive.")
     if compliance is None:
         compliance = np.linalg.inv(stiffness_symmetric)
-        np.savetxt(stiffness_path, stiffness, delimiter=",")
-        np.savetxt(compliance_path, compliance, delimiter=",")
+        export_to_csv_file(stiffness, stiffness_path)
+        export_to_csv_file(compliance, compliance_path)
     if compliance.shape != (6, 6) or not np.all(np.isfinite(compliance)):
         raise RuntimeError(
             "The effective compliance must be a finite 6 x 6 matrix.")
@@ -878,9 +888,10 @@ def main():
                 },
                 result_paths)
             os.chdir(analysis_directory)
-            np.savetxt(
+            export_to_csv_file(
+                definition["base_strain"][None, :],
                 os.path.join(result_directory, "base_strain.csv"),
-                definition["base_strain"][None, :], delimiter=",")
+                header=STRAIN_HEADER)
 
             print("\n{} yield surface".format(state_name.capitalize()))
             print("  preload strain: {}".format(
@@ -915,9 +926,10 @@ def main():
                     raise RuntimeError(
                         "The independently reproduced base states do not "
                         "have consistent effective stresses.")
-                np.savetxt(
+                export_to_csv_file(
+                    base_stresses[:1],
                     os.path.join(result_directory, "base_stress.csv"),
-                    base_stresses[:1], delimiter=",")
+                    header=STRESS_HEADER)
 
         print("*** Yield-surface sampling finished ***")
     finally:
@@ -927,4 +939,7 @@ def main():
 
 
 if __name__ == "__main__":
+    # Abaqus replaces stdout; restore the shell that launched the example.
+    if sys.__stdout__ is not None:
+        sys.stdout = sys.__stdout__
     main()

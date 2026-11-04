@@ -10,6 +10,7 @@ hysteresis response.
 """
 
 import os
+import sys
 
 import gmsh
 import numpy as np
@@ -18,7 +19,7 @@ from sandwich import create_geometry
 
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
 from abqhom.gmshmodel import GmshRVE
-from abqhom.utils import hill_mandel_residual
+from abqhom.utils import export_to_csv_file, hill_mandel_residual
 
 here = os.getcwd()
 
@@ -116,13 +117,12 @@ def export_results(result_directory, response, peeq_history):
         "pseudo_time,epsilon_11,sigma_11,sigma_12,sigma_13,"
         "sigma_21,sigma_22,sigma_23,sigma_31,sigma_32,sigma_33,"
         "stress_asymmetry,hill_mandel_residual")
-    np.savetxt(
-        os.path.join(result_directory, "cyclic_response.csv"),
-        response, delimiter=",", header=response_header, comments="")
-    np.savetxt(
-        os.path.join(result_directory, "peeq_history.csv"),
-        peeq_history, delimiter=",",
-        header="pseudo_time,max_peeq_shell,max_peeq_beam", comments="")
+    export_to_csv_file(
+        response, os.path.join(result_directory, "cyclic_response.csv"),
+        header=response_header)
+    export_to_csv_file(
+        peeq_history, os.path.join(result_directory, "peeq_history.csv"),
+        header="pseudo_time,max_peeq_shell,max_peeq_beam")
 
     stress_norm = np.linalg.norm(response[:, 2:11], axis=1)
     maximum_stress = np.max(stress_norm)
@@ -140,12 +140,10 @@ def export_results(result_directory, response, peeq_history):
         maximum_asymmetry, maximum_hill_mandel,
         maximum_shell_peeq, maximum_beam_peeq,
     ]])
-    np.savetxt(
-        os.path.join(result_directory, "verification_metrics.csv"),
-        metrics, delimiter=",",
+    export_to_csv_file(
+        metrics, os.path.join(result_directory, "verification_metrics.csv"),
         header=("maximum_stress_asymmetry,maximum_hill_mandel_residual,"
-                "maximum_shell_peeq,maximum_beam_peeq"),
-        comments="")
+                "maximum_shell_peeq,maximum_beam_peeq"))
 
     return {
         "asymmetry": maximum_asymmetry,
@@ -195,14 +193,21 @@ def run_case(gmsh_cell, reversal_times, reversal_strains, parameters,
         "EMBEDDED_BEAM_CORE",
         cell.instance.sets["ELSET_BEAM_STRUTS"],
         cell.instance.sets["ELSET_CONTINUUM_MATRIX"])
+    print("\nRun cyclic axial load path.")
+    print("  Run Abaqus analysis.")
+    sys.stdout.flush()
     cell.run_analysis(field_outputs=["PEEQ"], numCpus=1)
 
+    print("  Post-process effective response and plastic strains.")
+    sys.stdout.flush()
     response = evaluate_response(
         cell, step_name, load_path, parameters["power_tolerance"])
     peeq_history = evaluate_peeq_history(cell, step_name)
     metrics = export_results(
         result_directory, response, peeq_history)
 
+    print("  Export VTK results.")
+    sys.stdout.flush()
     cell.export_to_vtk(
         vtk_directory, field_outputs=["U", "PEEQ"],
         element_sets=["CONTINUUM_MATRIX", "SHELL_FACES", "BEAM_STRUTS"],
@@ -269,7 +274,7 @@ def main():
 
         # ---------------------------------------------------------------
         # Build the mixed-dimensional periodic mesh once.
-        model_name = "EXAMPLE_3"
+        model_name = "RVE"
         create_geometry(
             model_name, mesh_parameters["edge_length"],
             mesh_parameters["elements_per_strut"])
@@ -298,4 +303,7 @@ def main():
 
 
 if __name__ == "__main__":
+    # Abaqus replaces stdout; restore the shell that launched the example.
+    if sys.__stdout__ is not None:
+        sys.stdout = sys.__stdout__
     main()

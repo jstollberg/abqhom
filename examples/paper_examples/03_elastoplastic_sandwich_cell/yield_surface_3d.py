@@ -20,10 +20,13 @@ import sys
 
 import gmsh
 import numpy as np
-from yield_surface_sections import (build_gmsh_cell, elastic_calibration,
+from yield_surface_sections import (STRAIN_HEADER, STRESS_HEADER,
+                                    build_gmsh_cell, elastic_calibration,
                                     open_csv_file, sample_direction,
                                     state_definition,
                                     validate_result_configuration)
+
+from abqhom.utils import export_to_csv_file
 
 here = os.getcwd()
 
@@ -231,15 +234,17 @@ def merge_worker_results(state_name, root_directory, directions, faces,
 
     # Store the sampling grid alongside the ordered surface values so the
     # triangulated surface can be reconstructed without regenerating it.
-    np.savetxt(os.path.join(root_directory, "directions.csv"),
-               np.column_stack((np.arange(len(directions)), directions)),
-               delimiter=",", header="direction-index,n1,n2,n3",
-               comments="", fmt=["%d", "%.17e", "%.17e", "%.17e"])
-    np.savetxt(os.path.join(root_directory, "faces.csv"), faces,
-               delimiter=",", header="vertex-1,vertex-2,vertex-3",
-               comments="", fmt="%d")
-    np.savetxt(os.path.join(root_directory, "base_stress.csv"),
-               base_stresses[:1], delimiter=",")
+    export_to_csv_file(
+        np.column_stack((np.arange(len(directions)), directions)),
+        os.path.join(root_directory, "directions.csv"),
+        header="direction_index,n_1,n_2,n_3",
+        fmt=["%d", "%.17e", "%.17e", "%.17e"])
+    export_to_csv_file(
+        faces, os.path.join(root_directory, "faces.csv"),
+        header="vertex_1,vertex_2,vertex_3", fmt="%d")
+    export_to_csv_file(
+        base_stresses[:1], os.path.join(root_directory, "base_stress.csv"),
+        header=STRESS_HEADER)
     print("Wrote {} complete directions and {} faces to {}.".format(
         len(directions), len(faces), output))
 
@@ -352,8 +357,10 @@ def main():
         merge_worker_results(
             state_name, root_directory, directions, faces,
             number_of_workers)
-        np.savetxt(os.path.join(root_directory, "base_strain.csv"),
-                   definition["base_strain"][None, :], delimiter=",")
+        export_to_csv_file(
+            definition["base_strain"][None, :],
+            os.path.join(root_directory, "base_strain.csv"),
+            header=STRAIN_HEADER)
         return
 
     analysis_directory = os.path.join(
@@ -375,10 +382,7 @@ def main():
     original_directory = os.getcwd()
     try:
         os.chdir(analysis_directory)
-        gmsh_cell = build_gmsh_cell(
-            mesh_parameters,
-            "EXAMPLE_3_YIELD3D_{}_{:02d}".format(
-                state_name.upper(), worker_index))
+        gmsh_cell = build_gmsh_cell(mesh_parameters)
 
         completed_count = len(set(selected).intersection(completed))
         print("{} worker {}/{}: {} assigned directions, {} complete."
@@ -434,4 +438,7 @@ def main():
 
 
 if __name__ == "__main__":
+    # Abaqus replaces stdout; restore the shell that launched the example.
+    if sys.__stdout__ is not None:
+        sys.stdout = sys.__stdout__
     main()

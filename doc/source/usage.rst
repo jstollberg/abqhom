@@ -109,4 +109,23 @@ The following methods support nonlinear post-processing:
 * :func:`~abqhom.utils.hill_mandel_residual` compares independently evaluated
   macroscopic and microscopic incremental-work densities.
 
+Efficient ODB post-processing
+-----------------------------
+
+Post-processing methods open and close the output database automatically for
+individual calls. For repeated operations, open it once around the complete
+loop. Methods then reuse the open database and leave it open until the caller
+closes it:
+
+.. code-block:: python
+
+   cell.open_odb_file()
+   try:
+       stresses = [
+           cell.average_stress("LOAD", frame=index)
+           for index in range(cell.get_number_of_frames("LOAD"))
+       ]
+   finally:
+       cell.close_odb_file()
+
 See :doc:`examples` for complete finite-strain and path-dependent workflows.

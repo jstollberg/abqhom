@@ -19,6 +19,8 @@ import vtk
 from octet import octet_topology
 from vtk.util.numpy_support import vtk_to_numpy
 
+from abqhom.utils import export_to_csv_file
+
 here = os.getcwd()
 
 
@@ -452,7 +454,7 @@ def main():
     edge_length = 1.0
     beam_radius = 0.04
     diameter = 2.0 * beam_radius
-    model_name = "EXAMPLE_2_OCTET"
+    model_name = "RVE"
     cases = ("compression", "tension", "shear_12")
     vtk_root = os.path.join(here, "vtk_output")
     result_root = os.path.join(here, "results")
@@ -463,9 +465,11 @@ def main():
         result_directory = os.path.join(result_root, case_name)
         if not os.path.isdir(result_directory):
             os.makedirs(result_directory)
-        np.savetxt(
+        export_to_csv_file(
+            result,
             os.path.join(result_directory, "contact_clearance.csv"),
-            result, delimiter=",")
+            header=("pseudo_time,loading_measure,"
+                    "minimum_centerline_distance"))
         report_case(case_name, result, closest_pair, diameter)
         assert_no_contact(
             case_name, result, closest_pair, diameter, edge_length)

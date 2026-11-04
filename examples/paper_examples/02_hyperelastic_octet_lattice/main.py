@@ -10,6 +10,7 @@ using quasi-static implicit dynamics.
 """
 
 import os
+import sys
 
 import gmsh
 import numpy as np
@@ -148,15 +149,23 @@ def export_results(result_directory, response, component, energies,
 
     # Columns: pseudo-time, loading measure, P (9), sigma (9), asymmetry,
     # and Hill--Mandel residual
+    components = ("11", "12", "13", "21", "22", "23", "31", "32", "33")
+    response_header = ",".join(
+        ("pseudo_time", "loading_measure")
+        + tuple("P_" + name for name in components)
+        + tuple("sigma_" + name for name in components)
+        + ("stress_asymmetry", "hill_mandel_residual"))
     export_to_csv_file(
-        response, os.path.join(result_directory, "full_response"))
+        response, os.path.join(result_directory, "full_response"),
+        header=response_header)
 
     stress_index = 3 * component[0] + component[1]
     curve = np.column_stack((
         response[:, 1], response[:, 2 + stress_index],
         response[:, 11 + stress_index]))
     export_to_csv_file(
-        curve, os.path.join(result_directory, "stress_curve"))
+        curve, os.path.join(result_directory, "stress_curve"),
+        header="loading_measure,nominal_stress,cauchy_stress")
 
     cauchy_norm = np.linalg.norm(response[:, 11:20], axis=1)
     maximum_cauchy_norm = np.max(cauchy_norm)
@@ -174,7 +183,11 @@ def export_results(result_directory, response, component, energies,
         energies["final_ratio"], energies["ratio_of_maxima"],
         maximum_asymmetry, maximum_hill_mandel, rotation]])
     export_to_csv_file(
-        metrics, os.path.join(result_directory, "verification_metrics"))
+        metrics, os.path.join(result_directory, "verification_metrics"),
+        header=("peak_kinetic_internal_ratio,peak_ratio_pseudo_time,"
+                "final_kinetic_internal_ratio,ratio_of_energy_maxima,"
+                "maximum_stress_asymmetry,"
+                "maximum_hill_mandel_residual,maximum_nodal_rotation"))
 
     return curve, maximum_hill_mandel
 
@@ -182,6 +195,7 @@ def export_results(result_directory, response, component, energies,
 def run_case(gmsh_cell, case_name, component, final_value, parameters,
              output_directories):
     """Build, solve, and post-process one macroscopic load path."""
+    print("\nRun {} load case.".format(case_name))
     analysis_root, result_root, vtk_root = output_directories
     analysis_directory = os.path.join(analysis_root, case_name)
     result_directory = os.path.join(result_root, case_name)
@@ -210,8 +224,12 @@ def run_case(gmsh_cell, case_name, component, final_value, parameters,
 
     load_history = LoadHistory(np.asarray([0.0, 1.0]), load_path)
     cell.apply_periodic_bc(step_name, load_history)
+    print("  Run Abaqus analysis.")
+    sys.stdout.flush()
     cell.run_analysis(history_outputs=["ALLIE", "ALLKE"])
 
+    print("  Post-process effective response.")
+    sys.stdout.flush()
     response = evaluate_response(
         cell, step_name, load_path, component,
         parameters["power_tolerance"])
@@ -225,11 +243,13 @@ def run_case(gmsh_cell, case_name, component, final_value, parameters,
     curve, maximum_hill_mandel = export_results(
         result_directory, response, component, energies, rotation)
 
+    print("  Export VTK results.")
+    sys.stdout.flush()
     cell.export_to_vtk(
         vtk_directory, field_outputs=["U", "UR"],
         element_sets=["OCTET_BEAMS"], clear=True)
 
-    print("\n{}:".format(case_name))
+    print("  Results:")
     print("  final loading measure    : {:.8e}".format(curve[-1, 0]))
     print("  final nominal stress     : {:.8e}".format(curve[-1, 1]))
     print("  final Cauchy stress      : {:.8e}".format(curve[-1, 2]))
@@ -240,10 +260,11 @@ def run_case(gmsh_cell, case_name, component, final_value, parameters,
     print("  maximum nodal rotation   : {:.8e}".format(rotation))
 
 
-def run_cell(model_name, cells_per_axis, elements_per_strut, edge_length,
+def run_cell(cells_per_axis, elements_per_strut, edge_length,
              imperfection_amplitude, parameters, load_cases,
              output_directories, buckling_directory):
     """Build one cell size and run all prescribed load cases."""
+    model_name = "RVE"
     # Regenerate the same perfect mesh used by the corresponding buckling
     # analysis; the mode-file coordinates verify this compatibility.
     create_geometry(
@@ -303,7 +324,7 @@ def main(include_supercell=True):
             os.path.join(here, "vtk_output"),
         )
         run_cell(
-            "EXAMPLE_2_OCTET", 1, elements_per_strut, edge_length,
+            1, elements_per_strut, edge_length,
             imperfection_amplitude, parameters, load_cases,
             primitive_outputs,
             os.path.join(here, "results", "buckling"))
@@ -318,7 +339,7 @@ def main(include_supercell=True):
             buckling_tag = "buckling_2x2x2_n{}".format(
                 elements_per_strut)
             run_cell(
-                "EXAMPLE_2_OCTET_SUPERCELL", 2, elements_per_strut,
+                2, elements_per_strut,
                 edge_length, imperfection_amplitude, parameters, load_cases,
                 supercell_outputs,
                 os.path.join(
@@ -332,4 +353,7 @@ def main(include_supercell=True):
 
 
 if __name__ == "__main__":
+    # Abaqus replaces stdout; restore the shell that launched the example.
+    if sys.__stdout__ is not None:
+        sys.stdout = sys.__stdout__
     main(include_supercell=True)

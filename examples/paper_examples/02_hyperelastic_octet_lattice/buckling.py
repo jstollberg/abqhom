@@ -9,6 +9,7 @@ eigenmodes used to construct the geometric imperfections of both cell sizes.
 
 import os
 import re
+import sys
 
 import gmsh
 import numpy as np
@@ -199,7 +200,9 @@ def export_modes(cell, step_name, result_directory,
                 for label, value in sorted(displacement.items())])
             export_to_csv_file(
                 mode_data, os.path.join(
-                    result_directory, "mode_{:02d}".format(mode_number)))
+                    result_directory, "mode_{:02d}".format(mode_number)),
+                header="node_label,X_1,X_2,X_3,u_1,u_2,u_3",
+                fmt=["%d"] + ["%.18e"] * 6)
 
             eigenvalue = read_eigenvalue(frame)
             residual = translation_periodicity_residual(cell, displacement)
@@ -220,15 +223,26 @@ def export_modes(cell, step_name, result_directory,
         cell.close_odb_file()
 
     records = np.asarray(records)
+    header = ("mode_number,eigenvalue,"
+              "outer_translation_periodicity_residual")
+    fmt = ["%d", "%.18e", "%.18e"]
+    if primitive_edge_length is not None:
+        header += (",primitive_translation_periodicity_residual,"
+                   "primitive_comparison_count")
+        fmt.extend(["%.18e", "%d"])
     export_to_csv_file(
-        records, os.path.join(result_directory, "eigenvalues"))
+        records, os.path.join(result_directory, "eigenvalues"),
+        header=header, fmt=fmt)
     return records
 
 
-def run_buckling(model_name, cells_per_axis, elements_per_strut,
-                 number_of_modes, analysis_directory, result_directory,
+def run_buckling(cells_per_axis, elements_per_strut, number_of_modes,
+                 analysis_directory, result_directory,
                  vtk_directory, max_iterations=None):
     """Run one periodic Octet eigenvalue-buckling analysis."""
+    print("\nRun {} x {} x {} Octet buckling analysis.".format(
+        cells_per_axis, cells_per_axis, cells_per_axis))
+    model_name = "RVE"
     original_directory = os.getcwd()
     try:
         # Material and geometry (all quantities are nondimensional)
@@ -289,8 +303,12 @@ def run_buckling(model_name, cells_per_axis, elements_per_strut,
         compression_gradient[0, 0] = -1.0
         add_buckling_boundary_conditions(
             cell, step_name, compression_gradient)
+        print("  Run Abaqus eigenvalue analysis.")
+        sys.stdout.flush()
         cell.run_analysis(scratch=analysis_directory)
 
+        print("  Export eigenmodes.")
+        sys.stdout.flush()
         primitive_edge_length = (
             edge_length if cells_per_axis > 1 else None)
         modes = export_modes(
@@ -300,6 +318,8 @@ def run_buckling(model_name, cells_per_axis, elements_per_strut,
                 "Expected {} modes, but Abaqus returned {}."
                 .format(number_of_modes, len(modes)))
 
+        print("  Export VTK results.")
+        sys.stdout.flush()
         cell.export_to_vtk(
             vtk_directory, field_outputs=["U", "UR"],
             element_sets=["OCTET_BEAMS"], clear=True)
@@ -317,7 +337,6 @@ def main(include_supercell=True):
     """Run the primitive-cell and optional supercell analyses."""
     elements_per_strut = 16
     run_buckling(
-        model_name="EXAMPLE_2_OCTET_BUCKLING",
         cells_per_axis=1,
         elements_per_strut=elements_per_strut,
         number_of_modes=2,
@@ -328,7 +347,6 @@ def main(include_supercell=True):
     if include_supercell:
         result_tag = "buckling_2x2x2_n{}".format(elements_per_strut)
         run_buckling(
-            model_name="SC2_BUCKLING",
             cells_per_axis=2,
             elements_per_strut=elements_per_strut,
             number_of_modes=2,
@@ -345,4 +363,7 @@ def main(include_supercell=True):
 
 
 if __name__ == "__main__":
+    # Abaqus replaces stdout; restore the shell that launched the example.
+    if sys.__stdout__ is not None:
+        sys.stdout = sys.__stdout__
     main(include_supercell=True)

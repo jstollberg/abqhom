@@ -10,9 +10,12 @@ abaqus cae noGUI=main.py
 
 Before launching Abaqus, activate the isolated runtime created with
 `abqhom-install-abaqus`. The examples import abqhom and its dependencies from
-that runtime. Results are written next to the script into `abq/` (Abaqus job
-files), `results/` (CSV data and, where applicable, plots) and `vtk_output/`
-(VTK files).
+that runtime. Generated files are kept next to the script in `abq/` (Abaqus
+job files), `results/` (CSV data and, where applicable, plots) and, when VTK
+export is part of the example, `vtk_output/`.
+
+All examples use `RVE` as the internal Gmsh and Abaqus model name. Descriptive
+names are reserved for constituents, load cases and result directories.
 
 See the [installation guide](https://abqhom.readthedocs.io/en/latest/installation.html)
 for runtime creation and activation on Windows and Linux.

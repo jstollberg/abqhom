@@ -9,6 +9,7 @@ periodicity, and computes the response along a monotonic loading path.
 """
 
 import os
+import sys
 
 import gmsh
 import numpy as np
@@ -19,16 +20,6 @@ from abqhom.gmshmodel import GmshRVE
 from abqhom.utils import export_to_csv_file
 
 here = os.getcwd()
-
-
-def get_frame_times(unit_cell, step_name):
-    """Return the output-frame times and close the ODB."""
-    unit_cell.open_odb_file()
-    try:
-        return [frame.frameValue
-                for frame in unit_cell.odb.steps[step_name].frames]
-    finally:
-        unit_cell.close_odb_file()
 
 
 def main():
@@ -58,9 +49,8 @@ def main():
 
         gmsh.initialize()
 
-        # Merge the mesh into an explicitly named model (Abaqus uppercases the
-        # part name, so the model name must match that case).
-        model_name = "GYROID"
+        # Merge the mesh into the common model name used by all examples.
+        model_name = "RVE"
         gmsh.model.add(model_name)
         gmsh.merge(mesh_file)
         unit_cell = GmshRVE.read_from_mesh(model_name)
@@ -91,15 +81,24 @@ def main():
             lambda pseudo_time: np.diag(
                 [final_displacement_gradient*pseudo_time, 0.0, 0.0]))
         cell.apply_periodic_bc(step_name, history)
-        cell.run_analysis(field_outputs=["U", "S"])
+        print("\nRun finite-strain axial load path.")
+        print("  Run Abaqus analysis.")
+        sys.stdout.flush()
+        cell.run_analysis()
 
-        frame_times = get_frame_times(cell, step_name)
-
-        curve = []
-        for index, frame_time in enumerate(frame_times):
-            F11 = 1.0 + final_displacement_gradient*frame_time
-            stress = cell.average_stress(step_name, frame=index)
-            curve.append([F11, stress[0, 0]])
+        # Keep the ODB open while evaluating every output frame.
+        print("  Post-process effective response.")
+        sys.stdout.flush()
+        cell.open_odb_file()
+        try:
+            frames = cell.odb.steps[step_name].frames
+            curve = []
+            for index, frame in enumerate(frames):
+                F11 = 1.0 + final_displacement_gradient*frame.frameValue
+                stress = cell.average_stress(step_name, frame=index)
+                curve.append([F11, stress[0, 0]])
+        finally:
+            cell.close_odb_file()
         curve = np.asarray(curve)
 
         print("\n------------------------------")
@@ -110,7 +109,9 @@ def main():
         result_dir = os.path.join(here, "results")
         if not os.path.isdir(result_dir):
             os.makedirs(result_dir)
-        export_to_csv_file(curve, os.path.join(result_dir, "response.csv"))
+        export_to_csv_file(
+            curve, os.path.join(result_dir, "response.csv"),
+            header="F_11,P_11")
 
         import matplotlib
         matplotlib.use("Agg")
@@ -129,10 +130,6 @@ def main():
         fig.savefig(os.path.join(result_dir, "response.png"), dpi=150)
         plt.close(fig)
 
-        cell.export_to_vtk(
-            os.path.join(here, "vtk_output"),
-            field_outputs=["U", ("S", "MISES")], clear=True)
-
         print("*** Finished ***")
     finally:
         if gmsh.is_initialized():
@@ -140,4 +137,7 @@ def main():
 
 
 if __name__ == "__main__":
+    # Abaqus replaces stdout; restore the shell that launched the example.
+    if sys.__stdout__ is not None:
+        sys.stdout = sys.__stdout__
     main()

@@ -10,6 +10,7 @@ equivalence of the reduced and ownership-weighted complete cells.
 """
 
 import os
+import sys
 
 import gmsh
 import numpy as np
@@ -216,27 +217,37 @@ def run_stiffness_cases(cell, step_name, strain_magnitude, component_names,
 
         history = LoadHistory(np.array([0.0, 1.0]), strain_history)
         cell.apply_periodic_bc(step_name, history)
+        print("  Run Abaqus analysis.")
+        sys.stdout.flush()
         cell.run_analysis()
 
-        stress = cell.average_stress(step_name)
-        stiffness[:, component] = (
-            tensor_to_voigt(stress, "STRESS")/strain_magnitude)
+        print("  Post-process effective stress.")
+        sys.stdout.flush()
+        cell.open_odb_file()
+        try:
+            stress = cell.average_stress(step_name)
+            stiffness[:, component] = (
+                tensor_to_voigt(stress, "STRESS")/strain_magnitude)
+
+            if collect_diagnostics:
+                current_time = cell.get_frame_time(step_name, -1)
+                previous_time = cell.get_frame_time(step_name, -2)
+                strain_increment = (strain_history(current_time)
+                                    - strain_history(previous_time))
+                macroscopic_work = float(np.sum(stress*strain_increment))
+                microscopic_work = cell.average_power_increment(step_name)
+                hill_mandel[component] = hill_mandel_residual(
+                    macroscopic_work, microscopic_work, power_tolerance)
+        finally:
+            cell.close_odb_file()
 
         if vtk_directory is not None:
+            print("  Export VTK results.")
+            sys.stdout.flush()
             cell.export_to_vtk(
                 os.path.join(vtk_directory, component_name),
                 field_outputs=["U", "UR"],
                 element_sets=vtk_element_sets, clear=True)
-
-        if collect_diagnostics:
-            current_time = cell.get_frame_time(step_name, -1)
-            previous_time = cell.get_frame_time(step_name, -2)
-            strain_increment = (strain_history(current_time)
-                                - strain_history(previous_time))
-            macroscopic_work = float(np.sum(stress*strain_increment))
-            microscopic_work = cell.average_power_increment(step_name)
-            hill_mandel[component] = hill_mandel_residual(
-                macroscopic_work, microscopic_work, power_tolerance)
 
     return stiffness, hill_mandel
 
@@ -259,7 +270,8 @@ def export_results(result_directory, reduced_stiffness,
         os.path.join(result_directory, "normal_stiffness_analytical"))
     export_to_csv_file(
         hill_mandel,
-        os.path.join(result_directory, "hill_mandel_residuals"))
+        os.path.join(result_directory, "hill_mandel_residuals"),
+        header="hill_mandel_residual")
     export_to_csv_file(
         weighted_stiffness,
         os.path.join(result_directory, "effective_stiffness_weighted"))
@@ -267,10 +279,10 @@ def export_results(result_directory, reduced_stiffness,
     residual_names, residuals = compute_residuals(
         reduced_stiffness, analytical_stiffness, hill_mandel,
         weighted_stiffness)
-    np.savetxt(
+    export_to_csv_file(
+        residuals[np.newaxis, :],
         os.path.join(result_directory, "verification_residuals.csv"),
-        residuals[np.newaxis, :], delimiter=",",
-        header=",".join(residual_names), comments="")
+        header=",".join(residual_names))
 
 
 def main():
@@ -312,7 +324,7 @@ def main():
 
         # ---------------------------------------------------------------
         # Build the conforming mixed-dimensional mesh once
-        model_name = "EXAMPLE_1"
+        model_name = "RVE"
         create_geometry(model_name, edge_length, nodes_per_edge)
         gmsh_cell = GmshRVE(model_name)
         gmsh_cell.add_periodic_mesh_constraints()
@@ -329,6 +341,7 @@ def main():
             reduced_cell, properties, shell_thickness, beam_radius)
         reduced_cell.model.StaticStep(name=step_name, previous="Initial")
 
+        print("\nHomogenize the reduced cell.")
         reduced_stiffness, hill_mandel = run_stiffness_cases(
             reduced_cell, step_name, strain_magnitude, component_names,
             collect_diagnostics=True, power_tolerance=power_tolerance,
@@ -354,6 +367,7 @@ def main():
             weighted_cell, weighted_properties, shell_thickness, beam_radius)
         weighted_cell.model.StaticStep(name=step_name, previous="Initial")
 
+        print("\nHomogenize the ownership-weighted complete cell.")
         weighted_stiffness, _ = run_stiffness_cases(
             weighted_cell, step_name, strain_magnitude, component_names,
             vtk_directory=os.path.join(vtk_directory, "weighted"),
@@ -364,6 +378,7 @@ def main():
         analytical_stiffness = analytical_normal_stiffness(
             edge_length, properties["CONTINUUM"], properties["SHELL"],
             properties["BEAM"], shell_thickness, beam_radius)
+        print("\nExport verification results.")
         export_results(
             result_directory, reduced_stiffness, analytical_stiffness,
             hill_mandel, weighted_stiffness)
@@ -374,4 +389,7 @@ def main():
 
 
 if __name__ == "__main__":
+    # Abaqus replaces stdout; restore the shell that launched the example.
+    if sys.__stdout__ is not None:
+        sys.stdout = sys.__stdout__
     main()

@@ -11,6 +11,7 @@ the effective stiffness of the mixed-dimensional RVE.
 """
 
 import os
+import sys
 
 import gmsh
 import numpy as np
@@ -140,9 +141,10 @@ def main():
         # Run the six linear homogenization load cases.
         C = np.empty((6, 6))
         strain_magnitude = 0.03
-        for i in range(6):
+        component_names = ("xx", "yy", "zz", "yz", "xz", "xy")
+        for i, component_name in enumerate(component_names):
             print("\n------------------------------")
-            print("Run case {}.".format(i + 1))
+            print("Run strain case {} ({}).".format(i + 1, component_name))
 
             def strain_history(time, component=i, magnitude=strain_magnitude):
                 """Return the ramped macroscopic strain at ``time``."""
@@ -152,18 +154,20 @@ def main():
                 return time*strain
 
             history = LoadHistory(np.array([0.0, 1.0]), strain_history)
-            print("Strain = " + str(tensor_to_voigt(history(1.0), "STRAIN")
-                                    .round(3).tolist()))
 
             unit_cell.apply_periodic_bc("LOAD", history)
+            print("  Run Abaqus analysis.")
+            sys.stdout.flush()
             unit_cell.run_analysis(field_outputs=["U", "S"])
 
             stress = tensor_to_voigt(
                 unit_cell.average_stress("LOAD"), "STRESS")
             C[:, i] = stress/strain_magnitude
 
+            print("  Export VTK results.")
+            sys.stdout.flush()
             unit_cell.export_to_vtk(
-                os.path.join(vtk_path, "case_{}".format(i + 1)),
+                os.path.join(vtk_path, component_name),
                 field_outputs=["U", ("S", "MISES")],
                 element_sets=["MATRIX", "FIBER"], clear=True)
 
@@ -182,4 +186,7 @@ def main():
 
 
 if __name__ == "__main__":
+    # Abaqus replaces stdout; restore the shell that launched the example.
+    if sys.__stdout__ is not None:
+        sys.stdout = sys.__stdout__
     main()

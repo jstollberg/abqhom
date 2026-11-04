@@ -10,6 +10,7 @@ monotonic finite-strain response.
 """
 
 import os
+import sys
 from itertools import permutations, product
 
 import gmsh
@@ -57,16 +58,6 @@ def create_kelvin(model_name, edge=4.0):
     g.synchronize()
     grp = gmsh.model.add_physical_group(1, lines)
     gmsh.model.set_physical_name(1, grp, "STRUTS")
-
-
-def get_frame_times(unit_cell, step_name):
-    """Return the output-frame times and close the ODB."""
-    unit_cell.open_odb_file()
-    try:
-        return [frame.frameValue
-                for frame in unit_cell.odb.steps[step_name].frames]
-    finally:
-        unit_cell.close_odb_file()
 
 
 def main():
@@ -119,15 +110,24 @@ def main():
             lambda pseudo_time: np.diag(
                 [final_displacement_gradient*pseudo_time, 0.0, 0.0]))
         unit_cell.apply_periodic_bc(step_name, history)
+        print("\nRun finite-strain axial load path.")
+        print("  Run Abaqus analysis.")
+        sys.stdout.flush()
         unit_cell.run_analysis(field_outputs=["U", "S"])
 
-        frame_times = get_frame_times(unit_cell, step_name)
-
-        curve = []
-        for index, frame_time in enumerate(frame_times):
-            F11 = 1.0 + final_displacement_gradient*frame_time
-            stress = unit_cell.average_stress(step_name, frame=index)
-            curve.append([F11, stress[0, 0]])
+        # Keep the ODB open while evaluating every output frame.
+        print("  Post-process effective response.")
+        sys.stdout.flush()
+        unit_cell.open_odb_file()
+        try:
+            frames = unit_cell.odb.steps[step_name].frames
+            curve = []
+            for index, frame in enumerate(frames):
+                F11 = 1.0 + final_displacement_gradient*frame.frameValue
+                stress = unit_cell.average_stress(step_name, frame=index)
+                curve.append([F11, stress[0, 0]])
+        finally:
+            unit_cell.close_odb_file()
         curve = np.asarray(curve)
 
         print("\n------------------------------")
@@ -138,7 +138,9 @@ def main():
         result_dir = os.path.join(here, "results")
         if not os.path.isdir(result_dir):
             os.makedirs(result_dir)
-        export_to_csv_file(curve, os.path.join(result_dir, "response.csv"))
+        export_to_csv_file(
+            curve, os.path.join(result_dir, "response.csv"),
+            header="F_11,P_11")
 
         import matplotlib
         matplotlib.use("Agg")
@@ -157,6 +159,8 @@ def main():
         fig.savefig(os.path.join(result_dir, "response.png"), dpi=150)
         plt.close(fig)
 
+        print("  Export VTK results.")
+        sys.stdout.flush()
         unit_cell.export_to_vtk(
             os.path.join(here, "vtk_output"),
             field_outputs=["U", ("S", "MISES")], clear=True)
@@ -168,4 +172,7 @@ def main():
 
 
 if __name__ == "__main__":
+    # Abaqus replaces stdout; restore the shell that launched the example.
+    if sys.__stdout__ is not None:
+        sys.stdout = sys.__stdout__
     main()

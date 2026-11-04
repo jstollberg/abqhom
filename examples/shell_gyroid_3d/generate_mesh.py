@@ -22,6 +22,7 @@ def main():
     """Generate and write the periodic sheet-gyroid mesh."""
     try:
         here = os.getcwd()
+        print("Generate sheet-gyroid surface mesh.")
 
         # Geometry parameters
         cell_size = 1.0      # edge length of the cubic unit cell
@@ -45,7 +46,7 @@ def main():
 
         # Write the surface as a Gmsh discrete surface with a physical group
         gmsh.initialize()
-        gmsh.model.add("GYROID")
+        gmsh.model.add("RVE")
         entity = gmsh.model.add_discrete_entity(2)
         gmsh.model.mesh.add_nodes(2, entity, list(range(1, len(points) + 1)),
                                   points.flatten().tolist())

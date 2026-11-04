@@ -10,6 +10,7 @@ coupling terms are expected to vanish.
 """
 
 import os
+import sys
 
 import gmsh
 import numpy as np
@@ -86,10 +87,11 @@ def main():
 
         # Run the homogenization routine (six load cases in 3D)
         strain_magnitude = 0.03
+        component_names = ("xx", "yy", "zz", "yz", "xz", "xy")
         C = np.zeros((6, 6))
-        for i in range(6):
+        for i, component_name in enumerate(component_names):
             print("\n------------------------------")
-            print("Run load case {}.".format(i + 1))
+            print("Run strain case {} ({}).".format(i + 1, component_name))
 
             def strain_history(time, component=i):
                 """Return the ramped macroscopic strain at ``time``."""
@@ -99,14 +101,18 @@ def main():
 
             history = LoadHistory(np.array([0.0, 1.0]), strain_history)
             unit_cell.apply_periodic_bc("LOAD", history)
+            print("  Run Abaqus analysis.")
+            sys.stdout.flush()
             unit_cell.run_analysis(field_outputs=["U"])
 
             stress = tensor_to_voigt(
                 unit_cell.average_stress("LOAD"), "STRESS")
             C[:, i] = stress/strain_magnitude
 
+            print("  Export VTK results.")
+            sys.stdout.flush()
             unit_cell.export_to_vtk(os.path.join(here, "vtk_output",
-                                                 "case_{}".format(i + 1)),
+                                                 component_name),
                                     field_outputs=["U"], clear=True)
 
         # ---------------------------------------------------------------
@@ -133,4 +139,7 @@ def main():
 
 
 if __name__ == "__main__":
+    # Abaqus replaces stdout; restore the shell that launched the example.
+    if sys.__stdout__ is not None:
+        sys.stdout = sys.__stdout__
     main()
