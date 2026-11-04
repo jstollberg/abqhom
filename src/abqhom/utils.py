@@ -263,24 +263,33 @@ def voigt(volume_fractions, stiffnesses):
     return np.tensordot(volume_fractions, stiffnesses, axes=(0, 0))
 
 
-def export_to_csv_file(C, path):
+def export_to_csv_file(array, path, header=None, fmt="%.18e"):
     """
     Write an array to a CSV file.
 
     Parameters
     ----------
-    C : ArrayLike
+    array : ArrayLike
         The array to export.
     path : str or os.PathLike
         The file path. An existing suffix is replaced by ``.csv``.
+    header : str, optional
+        Comma-separated column names written as the first row. The default
+        is None.
+    fmt : str or sequence of str, optional
+        Numeric format accepted by ``numpy.savetxt``. The default is
+        ``"%.18e"``.
 
     """
     path, _ = os.path.splitext(path)
     path += ".csv"
-    np.savetxt(path, C, delimiter=",")
+    options = {"delimiter": ",", "fmt": fmt}
+    if header is not None:
+        options.update(header=header, comments="")
+    np.savetxt(path, array, **options)
 
 
-def read_csv_file(path, dtype=None):
+def read_csv_file(path, dtype=None, has_header=False):
     """
     Read a CSV file into an array.
 
@@ -291,12 +300,30 @@ def read_csv_file(path, dtype=None):
     dtype : data-type, optional
         Any data-type specification accepted by ``numpy.loadtxt``. The
         default is None.
+    has_header : bool, optional
+        If True, parse the first row as comma-separated column names and
+        return it together with the array. The default is False.
 
     Returns
     -------
     array : ndarray
         The array containing the values from the CSV file.
+    header : tuple of str
+        Column names. Returned only if ``has_header`` is True.
 
     """
-    array = np.loadtxt(path, delimiter=",", dtype=dtype)
-    return array
+    skiprows = 0
+    header = None
+    if has_header:
+        with open(path, "r") as csv_file:
+            first_row = csv_file.readline()
+        if not first_row:
+            raise ValueError("A CSV header was requested from an empty file.")
+        header = tuple(
+            name.strip()
+            for name in first_row.lstrip("# ").strip().split(","))
+        skiprows = 1
+
+    array = np.loadtxt(
+        path, delimiter=",", dtype=dtype, skiprows=skiprows)
+    return (array, header) if has_header else array

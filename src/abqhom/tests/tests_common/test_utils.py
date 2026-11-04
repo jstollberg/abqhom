@@ -172,3 +172,24 @@ class TestFileIO(unittest.TestCase):
         self.assertTrue(np.allclose(back, data))
         self.assertTrue(os.path.isfile(csv_path))
         self.assertFalse(os.path.exists(path))
+
+    def test_csv_roundtrip_with_header(self):
+        """CSV headers and custom formats survive a numeric roundtrip."""
+        data = np.array([[1.0, 2.5], [3.0, 4.5]])
+        path = os.path.join(self.tmp, "values.csv")
+        export_to_csv_file(
+            data, path, header="first,second", fmt=["%d", "%.1f"])
+
+        back, header = read_csv_file(path, has_header=True)
+
+        self.assertTrue(np.array_equal(back, data))
+        self.assertEqual(header, ("first", "second"))
+
+    def test_empty_csv_header_is_rejected(self):
+        """Reading a header from an empty CSV file raises a clear error."""
+        path = os.path.join(self.tmp, "empty.csv")
+        with open(path, "w"):
+            pass
+
+        self.assertRaises(
+            ValueError, read_csv_file, path, has_header=True)
