@@ -23,7 +23,8 @@ The first command computes two periodic buckling modes for the primitive cell
 and, by default, for the `2 x 2 x 2` supercell. The first mode defines the
 geometric imperfection. The second records the neighboring buckling mode. The
 second command applies the translational part of the first mode and runs
-compression, tension, and shear for both cell sizes. Set
+compression, tension, and shear for the primitive cell. Only compression is
+repeated for the supercell verification. Set
 `include_supercell=False` in the final call of either script to omit the
 supercell analysis.
 
@@ -50,9 +51,8 @@ clearance cannot be resolved within the adopted numerical tolerance.
 The shared functions in `octet.py` construct a conforming supercell in which
 points and struts on internal cell interfaces occur only once. Periodic
 equations and ownership reduction therefore act only on its outer boundary.
-Both cell sizes use 16 B31 elements per strut. Their compression, tension,
-and shear responses can be compared directly through the respective
-`stress_curve.csv` files.
+Both cell sizes use 16 B31 elements per strut. Their compression responses
+can be compared directly through the respective `stress_curve.csv` files.
 
 ## Generated output
 
@@ -63,7 +63,6 @@ and shear responses can be compared directly through the respective
 | `vtk_output/` | Primitive-cell VTK collections |
 | `supercell_abq/` | Supercell Abaqus jobs |
 | `supercell_results/` | Supercell modes, responses, and diagnostics |
-| `supercell_vtk_output/` | Supercell VTK collections |
 
 Each load-case directory contains:
 

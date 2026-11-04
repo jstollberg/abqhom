@@ -318,11 +318,12 @@ def run_buckling(cells_per_axis, elements_per_strut, number_of_modes,
                 "Expected {} modes, but Abaqus returned {}."
                 .format(number_of_modes, len(modes)))
 
-        print("  Export VTK results.")
-        sys.stdout.flush()
-        cell.export_to_vtk(
-            vtk_directory, field_outputs=["U", "UR"],
-            element_sets=["OCTET_BEAMS"], clear=True)
+        if vtk_directory is not None:
+            print("  Export VTK results.")
+            sys.stdout.flush()
+            cell.export_to_vtk(
+                vtk_directory, field_outputs=["U", "UR"],
+                element_sets=["OCTET_BEAMS"], clear=True)
 
         print("*** Finished periodic {} x {} x {} Octet buckling analysis "
               "***".format(
@@ -355,8 +356,7 @@ def main(include_supercell=True):
                 "n{}".format(elements_per_strut)),
             result_directory=os.path.join(
                 here, "supercell_results", result_tag),
-            vtk_directory=os.path.join(
-                here, "supercell_vtk_output", result_tag),
+            vtk_directory=None,
             # The nearly degenerate lowest eigenspace can require more
             # subspace iterations than the primitive-cell problem.
             max_iterations=100)
