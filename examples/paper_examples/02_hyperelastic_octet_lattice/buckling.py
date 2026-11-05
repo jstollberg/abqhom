@@ -340,7 +340,7 @@ def main(include_supercell=True):
     run_buckling(
         cells_per_axis=1,
         elements_per_strut=elements_per_strut,
-        number_of_modes=2,
+        number_of_modes=8,
         analysis_directory=os.path.join(here, "abq", "buckling"),
         result_directory=os.path.join(here, "results", "buckling"),
         vtk_directory=os.path.join(here, "vtk_output", "buckling"))
@@ -350,13 +350,14 @@ def main(include_supercell=True):
         run_buckling(
             cells_per_axis=2,
             elements_per_strut=elements_per_strut,
-            number_of_modes=2,
+            number_of_modes=8,
             analysis_directory=os.path.join(
                 here, "supercell_abq",
                 "n{}".format(elements_per_strut)),
             result_directory=os.path.join(
                 here, "supercell_results", result_tag),
-            vtk_directory=None,
+            vtk_directory=os.path.join(
+                here, "supercell_vtk_output", "buckling"),
             # The nearly degenerate lowest eigenspace can require more
             # subspace iterations than the primitive-cell problem.
             max_iterations=100)

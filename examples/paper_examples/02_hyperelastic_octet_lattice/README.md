@@ -66,6 +66,7 @@ can be compared directly through the respective `stress_curve.csv` files.
 | `vtk_output/` | Primitive-cell VTK collections |
 | `supercell_abq/` | Supercell Abaqus jobs |
 | `supercell_results/` | Supercell modes, responses, and diagnostics |
+| `supercell_vtk_output/` | Supercell buckling-mode VTK collection |
 
 Each load-case directory contains:
 
