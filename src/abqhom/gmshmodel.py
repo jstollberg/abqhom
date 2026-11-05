@@ -1196,6 +1196,11 @@ class Boundary(UserDict, object):
             raise KeyError("Key must be a group identifier string.")
         return super(Boundary, self).__getitem__(key.upper())
 
+    def __iter__(self):
+        """Iterate over boundary group identifiers."""
+
+        return iter(self.data)
+
     def get_bounding_box_from_points(self):
         """
         Return the model bounding box from CAD points or mesh nodes.

@@ -266,6 +266,12 @@ class TestBoundaryDict(GmshTestCase):
         boundary["point_1"] = [(0, 123)]
         self.assertIn((0, 123), boundary["POINT_1"])
 
+    def test_iteration_returns_group_identifiers(self):
+        """Iteration returns group identifiers on supported Python versions."""
+        fixtures.simple_cubic("ITER", length=2.0)
+        boundary = Boundary("ITER")
+        self.assertEqual(set(boundary), set(boundary.data))
+
 
 class TestGmshRVEValidation(GmshTestCase):
     """Test validation of Gmsh model geometry and naming."""

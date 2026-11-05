@@ -15,8 +15,13 @@ try:
 except ImportError:
     from StringIO import StringIO
 
-import abqhom.install_abaqus as installer
 from abqhom import __version__
+
+
+if sys.version_info >= (3, 9) and "abaqus" not in sys.modules:
+    import abqhom.install_abaqus as installer
+else:
+    installer = None
 
 
 TEST_REQUIREMENTS = (
