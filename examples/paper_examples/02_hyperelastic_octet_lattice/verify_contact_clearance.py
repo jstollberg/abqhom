@@ -4,9 +4,11 @@
 """Verify beam clearance throughout the three Octet load histories.
 
 Every retained beam element in the central cell is compared with the central
-cell and its 26 periodic neighbors. Only pairs that overlap within an
-idealized Octet joint in the reference configuration are excluded. Contact is
-absent while all remaining centerline distances exceed the beam diameter.
+cell and its 26 periodic neighbors. Portions of connected members inside a
+geometry-based spherical neighborhood of their reference idealized joint are
+excluded. These material portions remain excluded throughout the history.
+All other portions remain contact candidates. Contact is absent while all
+remaining centerline distances exceed the beam diameter.
 This optional post-processing script requires the ``vtk`` Python package and
 runs outside Abaqus.
 """
@@ -65,6 +67,67 @@ def segment_distances(first_start, first_end, second_start, second_end):
                   + first_parameter[:, None] * first_direction
                   - second_parameter[:, None] * second_direction)
     return np.linalg.norm(separation, axis=1)
+
+
+def segment_intervals_outside_sphere(
+        start, end, center, radius, tolerance):
+    """Return segment-parameter intervals outside a reference sphere."""
+    direction = end - start
+    length_squared = np.dot(direction, direction)
+    if length_squared <= tolerance * tolerance:
+        raise RuntimeError("A zero-length beam segment was encountered.")
+
+    relative = start - center
+    linear = 2.0 * np.dot(relative, direction)
+    constant = np.dot(relative, relative) - radius * radius
+    discriminant = linear * linear - 4.0 * length_squared * constant
+
+    parameters = [0.0, 1.0]
+    if discriminant > tolerance * tolerance:
+        root = np.sqrt(discriminant)
+        for value in ((-linear - root) / (2.0 * length_squared),
+                      (-linear + root) / (2.0 * length_squared)):
+            if 0.0 < value < 1.0:
+                parameters.append(value)
+    parameters = sorted(parameters)
+
+    intervals = []
+    parameter_tolerance = tolerance / np.sqrt(length_squared)
+    for lower, upper in zip(parameters[:-1], parameters[1:]):
+        if upper - lower <= parameter_tolerance:
+            continue
+        midpoint = start + 0.5 * (lower + upper) * direction
+        if np.linalg.norm(midpoint - center) <= radius + tolerance:
+            continue
+        intervals.append((lower, upper))
+    return intervals
+
+
+def connected_segment_distance(first_start, first_end, second_start,
+                               second_end, first_intervals,
+                               second_intervals):
+    """Return segment distance outside their common idealized joint."""
+    if not first_intervals or not second_intervals:
+        return np.inf
+
+    first_direction = first_end - first_start
+    second_direction = second_end - second_start
+    first = []
+    second = []
+    for first_lower, first_upper in first_intervals:
+        first_portion = (
+            first_start + first_lower * first_direction,
+            first_start + first_upper * first_direction)
+        for second_lower, second_upper in second_intervals:
+            second_portion = (
+                second_start + second_lower * second_direction,
+                second_start + second_upper * second_direction)
+            first.append(first_portion)
+            second.append(second_portion)
+    first = np.asarray(first)
+    second = np.asarray(second)
+    return np.min(segment_distances(
+        first[:, 0], first[:, 1], second[:, 0], second[:, 1]))
 
 
 def read_collection(vtk_root, case_name, model_name):
@@ -155,127 +218,174 @@ def assign_elements_to_struts(reference_start, reference_end, edge_length):
     return assignment, strut_start, strut_end
 
 
-def build_admissible_pair_masks(
+def octet_joint_radius(edge_length, diameter):
+    """Return a joint radius enclosing nominal connected-beam overlap."""
+    points, connectivity = octet_topology(edge_length)
+    maximum_extent = diameter
+    for point_index, point in enumerate(points):
+        directions = []
+        for first, second in connectivity:
+            if first == point_index:
+                directions.append(points[second] - point)
+            elif second == point_index:
+                directions.append(points[first] - point)
+        directions = np.asarray(directions, dtype=float)
+        directions /= np.linalg.norm(directions, axis=1)[:, None]
+
+        for first in range(len(directions)):
+            for second in range(first + 1, len(directions)):
+                cosine = np.clip(
+                    np.dot(directions[first], directions[second]),
+                    -1.0, 1.0)
+                angle = np.arccos(cosine)
+                effective_angle = min(angle, 0.5 * np.pi)
+                sine = np.sin(effective_angle)
+                if sine <= 1.0e-12:
+                    raise RuntimeError(
+                        "The Octet topology contains coincident incident "
+                        "struts at one joint.")
+                maximum_extent = max(maximum_extent, diameter / sine)
+    return maximum_extent
+
+
+def map_strut_endpoints(reference_start, reference_end, element_strut,
+                        strut_start, strut_end, edge_length):
+    """Map active parent-strut endpoints to element endpoint indices."""
+    number_of_struts = len(strut_start)
+    element_index = -np.ones((number_of_struts, 2), dtype=int)
+    endpoint_index = -np.ones((number_of_struts, 2), dtype=int)
+    element_points = np.stack((reference_start, reference_end), axis=1)
+    parent_points = np.stack((strut_start, strut_end), axis=1)
+    tolerance = 2.0e-3 * edge_length
+
+    for strut in np.unique(element_strut):
+        candidates = np.flatnonzero(element_strut == strut)
+        candidate_points = element_points[candidates]
+        for endpoint in (0, 1):
+            distance = np.linalg.norm(
+                candidate_points - parent_points[strut, endpoint], axis=2)
+            local = int(np.argmin(distance))
+            candidate, side = np.unravel_index(local, distance.shape)
+            if distance[candidate, side] > tolerance:
+                raise RuntimeError(
+                    "Could not locate an active endpoint of parent strut "
+                    "{}.".format(strut))
+            element_index[strut, endpoint] = candidates[candidate]
+            endpoint_index[strut, endpoint] = side
+    return element_index, endpoint_index
+
+
+def strut_endpoint_coordinates(start, end, element_index, endpoint_index):
+    """Return endpoint coordinates of all active parent struts."""
+    endpoints = np.full(element_index.shape + (3,), np.nan)
+    for strut in range(len(element_index)):
+        for endpoint in (0, 1):
+            element = element_index[strut, endpoint]
+            side = endpoint_index[strut, endpoint]
+            if element < 0:
+                continue
+            endpoints[strut, endpoint] = (
+                start[element] if side == 0 else end[element])
+    return endpoints
+
+
+def build_joint_exterior_intervals(
+        reference_start, reference_end, element_strut,
+        reference_strut_endpoints, joint_radius, tolerance):
+    """Identify each element's material portions outside either joint."""
+    intervals = []
+    for element, strut in enumerate(element_strut):
+        element_intervals = []
+        for endpoint in (0, 1):
+            center = reference_strut_endpoints[strut, endpoint]
+            if not np.all(np.isfinite(center)):
+                raise RuntimeError(
+                    "Could not locate a reference idealized joint.")
+            element_intervals.append(segment_intervals_outside_sphere(
+                reference_start[element], reference_end[element], center,
+                joint_radius, tolerance))
+        intervals.append(element_intervals)
+    return intervals
+
+
+def build_pair_topology(
         reference_start, reference_end, element_strut, strut_start,
         strut_end, integer_shifts, edge_length, diameter):
-    """Exclude only reference overlap inherited from ideal joints."""
-    element_start = strut_start[element_strut]
-    element_end = strut_end[element_strut]
+    """Build masks and common-joint endpoints for periodic segment pairs."""
     number_of_elements = len(element_strut)
+    number_of_struts = len(strut_start)
     masks = np.ones(
         (len(integer_shifts), number_of_elements, number_of_elements),
         dtype=bool)
-
-    reference_midpoint = 0.5 * (reference_start + reference_end)
-    reference_length = np.linalg.norm(
-        reference_end - reference_start, axis=1)
-    half_length_sum = 0.5 * (
-        reference_length[:, None] + reference_length[None, :])
+    first_joint = -np.ones(masks.shape, dtype=np.int8)
+    second_joint = -np.ones(masks.shape, dtype=np.int8)
+    parent_points = np.stack((strut_start, strut_end), axis=1)
     topology_tolerance = 1.0e-8 * edge_length
     contact_tolerance = 1.0e-10 * edge_length
 
-    # Project the imperfect element endpoints onto their perfect parent
-    # struts. These projected segments distinguish the overlap inherent to
-    # an ideal joint from contact already introduced by the imperfection.
-    parent_direction = element_end - element_start
-    parent_length_squared = np.einsum(
-        "ij,ij->i", parent_direction, parent_direction)
-    if np.any(parent_length_squared <= 0.0):
-        raise RuntimeError("The Octet topology contains a zero-length strut.")
-
-    start_parameter = np.einsum(
-        "ij,ij->i", reference_start - element_start, parent_direction)
-    start_parameter /= parent_length_squared
-    end_parameter = np.einsum(
-        "ij,ij->i", reference_end - element_start, parent_direction)
-    end_parameter /= parent_length_squared
-    start_parameter = np.clip(start_parameter, 0.0, 1.0)
-    end_parameter = np.clip(end_parameter, 0.0, 1.0)
-    ideal_start = (
-        element_start + start_parameter[:, None] * parent_direction)
-    ideal_end = element_start + end_parameter[:, None] * parent_direction
-    ideal_length = np.linalg.norm(ideal_end - ideal_start, axis=1)
-    if np.any(ideal_length <= topology_tolerance):
-        raise RuntimeError(
-            "An imperfect beam element does not span a finite interval on "
-            "its assigned perfect parent strut.")
-
+    first_strut = element_strut[:, None]
+    second_strut = element_strut[None, :]
     for shift_index, integer_shift in enumerate(integer_shifts):
         image_shift = edge_length * integer_shift
-        image_parent_start = element_start + image_shift
-        image_parent_end = element_end + image_shift
-        junction_distance = np.minimum.reduce((
-            np.linalg.norm(
-                element_start[:, None, :]
-                - image_parent_start[None, :, :],
-                axis=2),
-            np.linalg.norm(
-                element_start[:, None, :]
-                - image_parent_end[None, :, :],
-                axis=2),
-            np.linalg.norm(
-                element_end[:, None, :]
-                - image_parent_start[None, :, :],
-                axis=2),
-            np.linalg.norm(
-                element_end[:, None, :]
-                - image_parent_end[None, :, :],
-                axis=2)))
+        image_points = parent_points + image_shift
+        endpoint_distance = np.linalg.norm(
+            parent_points[:, None, :, None, :]
+            - image_points[None, :, None, :, :], axis=4)
+        matching = endpoint_distance <= topology_tolerance
+        number_of_matches = np.sum(matching, axis=(2, 3))
 
-        connected = junction_distance <= topology_tolerance
+        # One matching endpoint identifies a common idealized joint. Two
+        # matches identify the same parent strut or a periodic image of it.
+        connected = number_of_matches == 1
+        flattened = np.argmax(matching.reshape(
+            number_of_struts, number_of_struts, 4), axis=2)
+        parent_first_joint = np.where(connected, flattened // 2, -1)
+        parent_second_joint = np.where(connected, flattened % 2, -1)
+        first_joint[shift_index] = parent_first_joint[
+            first_strut, second_strut]
+        second_joint[shift_index] = parent_second_joint[
+            first_strut, second_strut]
 
-        # Exact distances are needed only where the midpoint bound permits
-        # reference overlap of the circular beam sections.
-        image_start = reference_start + image_shift
-        image_end = reference_end + image_shift
-        image_midpoint = reference_midpoint + image_shift
-        midpoint_distance = np.linalg.norm(
-            reference_midpoint[:, None, :]
-            - image_midpoint[None, :, :], axis=2)
-        possible_overlap = (
-            midpoint_distance - half_length_sum
-            <= diameter + contact_tolerance)
-        first, second = np.nonzero(possible_overlap)
+        coincident = (number_of_matches >= 2)[first_strut, second_strut]
+        first, second = np.nonzero(coincident)
         if len(first) == 0:
             continue
 
         distance = segment_distances(
             reference_start[first], reference_end[first],
-            image_start[second], image_end[second])
-        overlap = distance <= diameter + contact_tolerance
-        if not np.any(overlap):
-            continue
+            reference_start[second] + image_shift,
+            reference_end[second] + image_shift)
+        local_overlap = distance <= diameter + contact_tolerance
+        masks[shift_index, first[local_overlap],
+              second[local_overlap]] = False
 
-        first = first[overlap]
-        second = second[overlap]
-        overlap_distance = distance[overlap]
-        ideal_distance = segment_distances(
-            ideal_start[first], ideal_end[first],
-            ideal_start[second] + image_shift,
-            ideal_end[second] + image_shift)
-        intentional = (connected[first, second]
-                       & (ideal_distance
-                          <= diameter + contact_tolerance))
-        if np.any(np.invert(intentional)):
-            local = int(np.flatnonzero(np.invert(intentional))[0])
-            raise RuntimeError(
-                "Beam elements overlap outside an intentional ideal-joint "
-                "region in the reference cell or one of its periodic "
-                "images: elements ({}, {}), periodic shift {}, centerline "
-                "distance {:.8e}, diameter {:.8e}.".format(
-                    int(first[local]), int(second[local]), integer_shift,
-                    overlap_distance[local], diameter))
-
-        # Exempt only the element pairs that already form the finite overlap
-        # region of an ideal rigid joint. Portions outside this reference
-        # overlap remain contact candidates even on connected struts.
-        masks[shift_index, first, second] = False
-
-    return masks
+    return masks, first_joint, second_joint
 
 
-def minimum_periodic_distance(current_start, current_end, current_shifts,
-                              admissible_pairs, seed_pair=None):
+def pair_distance(first, shift_index, second, current_start, current_end,
+                  current_shifts, first_joint, second_joint,
+                  exterior_intervals):
+    """Return one periodic segment-pair distance outside ideal joints."""
+    image_shift = current_shifts[shift_index]
+    second_start = current_start[second] + image_shift
+    second_end = current_end[second] + image_shift
+    first_endpoint = first_joint[shift_index, first, second]
+    if first_endpoint < 0:
+        return segment_distances(
+            current_start[first][None, :],
+            current_end[first][None, :],
+            second_start[None, :], second_end[None, :])[0]
+
+    second_endpoint = second_joint[shift_index, first, second]
+    return connected_segment_distance(
+        current_start[first], current_end[first], second_start, second_end,
+        exterior_intervals[first][first_endpoint],
+        exterior_intervals[second][second_endpoint])
+
+
+def minimum_periodic_distance(
+        current_start, current_end, current_shifts, admissible_pairs,
+        first_joint, second_joint, exterior_intervals, seed_pair=None):
     """Return the exact minimum distance over all admissible image pairs."""
     midpoint = 0.5 * (current_start + current_end)
     length = np.linalg.norm(current_end - current_start, axis=1)
@@ -290,13 +400,12 @@ def minimum_periodic_distance(current_start, current_end, current_shifts,
     if seed_pair is not None:
         first, shift_index, second = seed_pair
         if admissible_pairs[shift_index, first, second]:
-            image_shift = current_shifts[shift_index]
-            minimum = segment_distances(
-                current_start[first][None, :],
-                current_end[first][None, :],
-                (current_start[second] + image_shift)[None, :],
-                (current_end[second] + image_shift)[None, :])[0]
-            critical_pair = seed_pair
+            minimum = pair_distance(
+                first, shift_index, second, current_start, current_end,
+                current_shifts, first_joint, second_joint,
+                exterior_intervals)
+            if np.isfinite(minimum):
+                critical_pair = seed_pair
 
     for shift_index, image_shift in enumerate(current_shifts):
         image_start = current_start + image_shift
@@ -318,23 +427,59 @@ def minimum_periodic_distance(current_start, current_end, current_shifts,
         if len(first) == 0:
             continue
 
-        distance = segment_distances(
-            current_start[first], current_end[first],
-            image_start[second], image_end[second])
-        local = np.argmin(distance)
-        if distance[local] < minimum:
-            minimum = distance[local]
-            critical_pair = (
-                int(first[local]), shift_index, int(second[local]))
+        connected = first_joint[shift_index, first, second] >= 0
+
+        # Nonconnected segments need no clipping and remain vectorized.
+        independent = np.invert(connected)
+        if np.any(independent):
+            independent_first = first[independent]
+            independent_second = second[independent]
+            distance = segment_distances(
+                current_start[independent_first],
+                current_end[independent_first],
+                image_start[independent_second],
+                image_end[independent_second])
+            local = np.argmin(distance)
+            if distance[local] < minimum:
+                minimum = distance[local]
+                critical_pair = (
+                    int(independent_first[local]), shift_index,
+                    int(independent_second[local]))
+
+        if not np.any(connected):
+            continue
+
+        # The unclipped distance is a lower bound for the distance after
+        # removing the joint portions. It cheaply rejects connected pairs
+        # that cannot improve the current minimum.
+        connected_first = first[connected]
+        connected_second = second[connected]
+        lower = segment_distances(
+            current_start[connected_first], current_end[connected_first],
+            image_start[connected_second], image_end[connected_second])
+        possible = np.flatnonzero(lower < minimum)
+        for local in possible:
+            first_element = int(connected_first[local])
+            second_element = int(connected_second[local])
+            distance = pair_distance(
+                first_element, shift_index, second_element,
+                current_start, current_end, current_shifts, first_joint,
+                second_joint, exterior_intervals)
+            if distance < minimum:
+                minimum = distance
+                critical_pair = (
+                    first_element, shift_index, second_element)
 
     if critical_pair is None:
-        raise RuntimeError("No nonconnected beam-element pair was found.")
+        raise RuntimeError(
+            "No beam-segment pair outside the idealized joints was found.")
     return minimum, critical_pair
 
 
 def evaluate_clearance(
-        case_name, vtk_root, model_name, edge_length, diameter):
-    """Evaluate all non-overlapping centerline pairs throughout one case."""
+        case_name, vtk_root, model_name, edge_length, diameter,
+        joint_radius):
+    """Evaluate exterior centerline distances throughout one load case."""
     records = read_collection(vtk_root, case_name, model_name)
     reference_points, _, connectivity = read_frame(records[0][1])
     reference_start = reference_points[connectivity[:, 0]]
@@ -349,9 +494,19 @@ def evaluate_clearance(
             for j in (-1, 0, 1)
             for k in (-1, 0, 1)
             if (i, j, k) != (0, 0, 0)], dtype=float)
-    admissible_pairs = build_admissible_pair_masks(
+    admissible_pairs, first_joint, second_joint = build_pair_topology(
         reference_start, reference_end, element_strut, strut_start,
         strut_end, integer_shifts, edge_length, diameter)
+    endpoint_element, endpoint_side = map_strut_endpoints(
+        reference_start, reference_end, element_strut, strut_start,
+        strut_end, edge_length)
+    reference_strut_endpoints = strut_endpoint_coordinates(
+        reference_start, reference_end, endpoint_element, endpoint_side)
+    tolerance = 1.0e-10 * edge_length
+    exterior_intervals = build_joint_exterior_intervals(
+        reference_start, reference_end, element_strut,
+        reference_strut_endpoints, joint_radius, tolerance)
+    reference_shifts = edge_length * integer_shifts
 
     output = []
     global_minimum = np.inf
@@ -374,18 +529,17 @@ def evaluate_clearance(
         current_shifts = edge_length * integer_shifts.dot(deformation.T)
         minimum, frame_pair = minimum_periodic_distance(
             current_start, current_end, current_shifts,
-            admissible_pairs, seed_pair=previous_pair)
+            admissible_pairs, first_joint, second_joint, exterior_intervals,
+            seed_pair=previous_pair)
         previous_pair = frame_pair
 
         if minimum < global_minimum:
             global_minimum = minimum
             first, shift_index, second = frame_pair
-            image_shift = edge_length * integer_shifts[shift_index]
-            reference_distance = segment_distances(
-                reference_start[first][None, :],
-                reference_end[first][None, :],
-                (reference_start[second] + image_shift)[None, :],
-                (reference_end[second] + image_shift)[None, :])[0]
+            reference_distance = pair_distance(
+                first, shift_index, second,
+                reference_start, reference_end, reference_shifts,
+                first_joint, second_joint, exterior_intervals)
             closest_pair = {
                 "frame": frame_index,
                 "pseudo_time": pseudo_time,
@@ -409,29 +563,32 @@ def report_case(case_name, result, closest_pair, diameter):
     frame = np.argmin(result[:, 2])
     distance = result[frame, 2]
     print("\n{}:".format(case_name))
-    print("  minimum centerline distance: {:.8e}".format(distance))
-    print("  minimum surface clearance  : {:.8e}".format(
+    print("  minimum exterior centerline distance: {:.8e}".format(distance))
+    print("  minimum exterior surface clearance  : {:.8e}".format(
         distance - diameter))
-    print("  loading magnitude          : {:.6f}".format(
+    print("  loading magnitude                  : {:.6f}".format(
         result[frame, 1]))
 
     if closest_pair is None:
-        print("  no independent pair entered the near-contact search radius")
+        print("  no exterior pair entered the near-contact search radius")
         return
 
-    print("  critical frame             : {} (tau = {:.6f})".format(
+    print("  critical frame                     : {} (tau = {:.6f})".format(
         closest_pair["frame"], closest_pair["pseudo_time"]))
-    print("  VTK cell indices (zero-based): ({}, {})".format(
+    print("  VTK cell indices (zero-based)      : ({}, {})".format(
         closest_pair["first_cell"], closest_pair["second_cell"]))
-    print("  periodic image shift       : {}".format(
+    print("  periodic image shift               : {}".format(
         closest_pair["shift"]))
-    print("  initial centerline distance: {:.8e}".format(
-        closest_pair["reference_distance"]))
+    if np.isfinite(closest_pair["reference_distance"]):
+        print("  initial exterior centerline distance: {:.8e}".format(
+            closest_pair["reference_distance"]))
+    else:
+        print("  initial exterior centerline distance: not applicable")
 
 
 def assert_no_contact(case_name, result, closest_pair, diameter,
                       edge_length):
-    """Raise an error if two nonconnected beam surfaces touch or overlap."""
+    """Raise if beam surfaces touch outside idealized joint regions."""
     frame = np.argmin(result[:, 2])
     distance = result[frame, 2]
     tolerance = 1.0e-10 * edge_length
@@ -441,9 +598,9 @@ def assert_no_contact(case_name, result, closest_pair, diameter,
     # Tangency and positive overlap both invalidate the no-contact model;
     # values within tolerance are treated conservatively as unresolved.
     raise RuntimeError(
-        "Contact detected or unresolved in '{}' at tau={:.8e}: centerline "
-        "distance {:.8e}, diameter {:.8e}, elements ({}, {}), periodic "
-        "shift {}.".format(
+        "Contact detected or unresolved outside an idealized joint in '{}' "
+        "at tau={:.8e}: centerline distance {:.8e}, diameter {:.8e}, "
+        "elements ({}, {}), periodic shift {}.".format(
             case_name, closest_pair["pseudo_time"], distance, diameter,
             closest_pair["first_cell"], closest_pair["second_cell"],
             closest_pair["shift"]))
@@ -454,14 +611,17 @@ def main():
     edge_length = 1.0
     beam_radius = 0.04
     diameter = 2.0 * beam_radius
+    joint_radius = octet_joint_radius(edge_length, diameter)
     model_name = "RVE"
     cases = ("compression", "tension", "shear_12")
     vtk_root = os.path.join(here, "vtk_output")
     result_root = os.path.join(here, "results")
+    print("Idealized joint exclusion radius: {:.8e}".format(joint_radius))
 
     for case_name in cases:
         result, closest_pair = evaluate_clearance(
-            case_name, vtk_root, model_name, edge_length, diameter)
+            case_name, vtk_root, model_name, edge_length, diameter,
+            joint_radius)
         result_directory = os.path.join(result_root, case_name)
         if not os.path.isdir(result_directory):
             os.makedirs(result_directory)
@@ -469,7 +629,7 @@ def main():
             result,
             os.path.join(result_directory, "contact_clearance.csv"),
             header=("pseudo_time,loading_measure,"
-                    "minimum_centerline_distance"))
+                    "minimum_exterior_centerline_distance"))
         report_case(case_name, result, closest_pair, diameter)
         assert_no_contact(
             case_name, result, closest_pair, diameter, edge_length)

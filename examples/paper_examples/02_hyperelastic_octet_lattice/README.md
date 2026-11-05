@@ -38,13 +38,16 @@ python verify_contact_clearance.py
 ```
 
 The check compares every retained primitive-cell beam element with the
-central cell and its 26 periodic neighbors. Only element pairs that already
-overlap within an idealized rigid joint in the reference configuration are
-excluded. Distal portions of connected struts and non-neighboring portions of
-the same strut outside this reference-overlap region remain contact
-candidates. The script raises an error if unconnected members overlap
-initially, if contact occurs during loading, or if a positive surface
-clearance cannot be resolved within the adopted numerical tolerance.
+central cell and its 26 periodic neighbors. Around every idealized rigid
+joint, it excludes a spherical region enclosing the nominal overlap of the
+incident circular beams. Its radius follows from the beam diameter and the
+smallest incident angle. The radius is 0.0924 for the present Octet cell.
+Beam segments are clipped at this boundary in the reference configuration.
+The corresponding material portions remain excluded throughout the load
+history, while all portions outside the joint region remain contact
+candidates. The script raises an error if contact occurs outside these
+regions or if a positive surface clearance cannot be resolved within the
+adopted numerical tolerance.
 
 ## Supercell check
 
@@ -76,7 +79,8 @@ Tensor components in `full_response.csv` are stored in row-major order. The
 first Hill–Mandel entry is undefined because no preceding frame exists. The
 peak kinetic-to-internal-energy ratio excludes the initial interval
 `tau < 0.02`. For the primitive cell, `contact_clearance.csv` additionally
-contains pseudo-time, loading magnitude, and minimum centerline distance.
+contains pseudo-time, loading magnitude, and minimum exterior centerline
+distance.
 
 Each `mode_XX.csv` contains the node label, three reference coordinates, and
 three normalized translational mode components. Primitive-cell
