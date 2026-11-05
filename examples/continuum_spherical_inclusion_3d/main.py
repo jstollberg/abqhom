@@ -7,7 +7,6 @@ import os
 import sys
 
 import gmsh
-# Load Matplotlib before Gmsh meshing to avoid legacy Abaqus DLL conflicts.
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
