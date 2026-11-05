@@ -14,6 +14,10 @@ import sys
 from itertools import permutations, product
 
 import gmsh
+# Load Matplotlib before Gmsh meshing to avoid legacy Abaqus DLL conflicts.
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 from abaqusConstants import ISOTROPIC, NEO_HOOKE, OFF, ON, VOLUMETRIC_DATA
 
@@ -141,10 +145,6 @@ def main():
         export_to_csv_file(
             curve, os.path.join(result_dir, "response.csv"),
             header="F_11,P_11")
-
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
 
         fig, ax = plt.subplots(figsize=(6.0, 5.0))
         ax.plot(curve[:, 0], curve[:, 1], "-", color="#1f6feb", lw=1.4)

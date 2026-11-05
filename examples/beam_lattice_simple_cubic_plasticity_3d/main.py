@@ -13,6 +13,10 @@ import os
 import sys
 
 import gmsh
+# Load Matplotlib before Gmsh meshing to avoid legacy Abaqus DLL conflicts.
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 from abaqusConstants import OFF
 
@@ -147,13 +151,6 @@ def main():
         export_to_csv_file(
             curve, os.path.join(result_dir, "cyclic_response.csv"),
             header="epsilon_11,sigma_11")
-
-        # ---------------------------------------------------------------
-        # Plot the cyclic response with the matplotlib bundled with Abaqus.
-        # Use the non-interactive Agg backend so it works under 'noGUI'.
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
 
         fig, ax = plt.subplots(figsize=(6.0, 5.0))
         ax.plot(curve[:, 0], curve[:, 1], "-", color="#1f6feb", lw=1.4)
