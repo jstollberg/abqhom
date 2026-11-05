@@ -19,12 +19,12 @@ abaqus cae noGUI=buckling.py
 abaqus cae noGUI=main.py
 ```
 
-The first command computes two periodic buckling modes for the primitive cell
-and, by default, for the `2 x 2 x 2` supercell. The first mode defines the
-geometric imperfection. The second records the neighboring buckling mode. The
-second command applies the translational part of the first mode and runs
-compression, tension, and shear for the primitive cell. Only compression is
-repeated for the supercell verification. Set
+The first command computes eight periodic buckling modes for the primitive
+cell and, by default, for the `2 x 2 x 2` supercell. The first mode defines
+the geometric imperfection, while the remaining modes resolve the neighboring
+eigenspectrum. The second command applies the translational part of the first
+mode and runs compression, tension, and shear for the primitive cell. Only
+compression is repeated for the supercell verification. Set
 `include_supercell=False` in the final call of either script to omit the
 supercell analysis.
 
@@ -39,15 +39,20 @@ python verify_contact_clearance.py
 
 The check compares every retained primitive-cell beam element with the
 central cell and its 26 periodic neighbors. Around every idealized rigid
-joint, it excludes a spherical region enclosing the nominal overlap of the
-incident circular beams. Its radius follows from the beam diameter and the
-smallest incident angle. The radius is 0.0924 for the present Octet cell.
-Beam segments are clipped at this boundary in the reference configuration.
-The corresponding material portions remain excluded throughout the load
-history, while all portions outside the joint region remain contact
-candidates. The script raises an error if contact occurs outside these
-regions or if a positive surface clearance cannot be resolved within the
-adopted numerical tolerance.
+joint, it excludes centerline intervals inside a spherical neighborhood. Its
+radius follows from the beam diameter and the smallest incident angle. The
+radius is 0.0924 for the parameters used here. Beam segments are clipped at
+this boundary in the reference configuration. The corresponding material
+intervals remain excluded throughout the load history, while all intervals
+outside the joint region remain contact candidates. The script raises an
+error if contact occurs outside these regions or if a positive surface
+clearance cannot be resolved within the adopted numerical tolerance. This is
+a piecewise-linear centerline-clearance diagnostic based on the nominal beam
+diameter, not a replacement for beam-to-beam contact in the finite element
+model. For each load case, the script exports the minimum-clearance
+configuration to `contact_vtk_output/`. The binary `CONTACT` cell field marks
+all participating elements. The central cell is always included, together
+with any periodic images required to display the detected contacts.
 
 ## Supercell check
 
@@ -64,6 +69,7 @@ can be compared directly through the respective `stress_curve.csv` files.
 | `abq/` | Primitive-cell Abaqus jobs |
 | `results/` | Primitive-cell modes, responses, and diagnostics |
 | `vtk_output/` | Primitive-cell VTK collections |
+| `contact_vtk_output/` | Critical clearance configurations with marked elements |
 | `supercell_abq/` | Supercell Abaqus jobs |
 | `supercell_results/` | Supercell modes, responses, and diagnostics |
 | `supercell_vtk_output/` | Supercell buckling-mode VTK collection |

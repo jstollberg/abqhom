@@ -4,11 +4,11 @@
 """Verify beam clearance throughout the three Octet load histories.
 
 Every retained beam element in the central cell is compared with the central
-cell and its 26 periodic neighbors. Portions of connected members inside a
-geometry-based spherical neighborhood of their reference idealized joint are
-excluded. These material portions remain excluded throughout the history.
-All other portions remain contact candidates. Contact is absent while all
-remaining centerline distances exceed the beam diameter.
+cell and its 26 periodic neighbors. Centerline intervals of connected members
+inside a geometry-based spherical neighborhood of their reference idealized
+joint are excluded. These material intervals remain excluded throughout the
+history. All other intervals remain contact candidates. Contact is absent
+while all remaining centerline distances exceed the beam diameter.
 This optional post-processing script requires the ``vtk`` Python package and
 runs outside Abaqus.
 """
@@ -19,7 +19,7 @@ import xml.etree.ElementTree as ET
 import numpy as np
 import vtk
 from octet import octet_topology
-from vtk.util.numpy_support import vtk_to_numpy
+from vtk.util.numpy_support import numpy_to_vtk, vtk_to_numpy
 
 from abqhom.utils import export_to_csv_file
 
@@ -237,13 +237,17 @@ def octet_joint_radius(edge_length, diameter):
                 cosine = np.clip(
                     np.dot(directions[first], directions[second]),
                     -1.0, 1.0)
-                angle = np.arccos(cosine)
-                effective_angle = min(angle, 0.5 * np.pi)
-                sine = np.sin(effective_angle)
-                if sine <= 1.0e-12:
+                if cosine >= 1.0 - 1.0e-12:
                     raise RuntimeError(
                         "The Octet topology contains coincident incident "
                         "struts at one joint.")
+                if cosine <= -1.0 + 1.0e-12:
+                    # Oppositely directed collinear struts form a continuous
+                    # member rather than a finite-angle joint overlap.
+                    continue
+                angle = np.arccos(cosine)
+                effective_angle = min(angle, np.pi - angle)
+                sine = np.sin(effective_angle)
                 maximum_extent = max(maximum_extent, diameter / sine)
     return maximum_extent
 
@@ -476,9 +480,134 @@ def minimum_periodic_distance(
     return minimum, critical_pair
 
 
+def find_contact_pairs(
+        current_start, current_end, current_shifts, admissible_pairs,
+        first_joint, second_joint, exterior_intervals, diameter,
+        tolerance):
+    """Return all exterior segment pairs within the contact threshold."""
+    midpoint = 0.5 * (current_start + current_end)
+    length = np.linalg.norm(current_end - current_start, axis=1)
+    half_length_sum = 0.5 * (length[:, None] + length[None, :])
+    threshold = diameter + tolerance
+    contacts = []
+
+    for shift_index, image_shift in enumerate(current_shifts):
+        image_start = current_start + image_shift
+        image_end = current_end + image_shift
+        image_midpoint = midpoint + image_shift
+        midpoint_distance = np.linalg.norm(
+            midpoint[:, None, :] - image_midpoint[None, :, :], axis=2)
+        lower_bound = midpoint_distance - half_length_sum
+        first, second = np.nonzero(
+            admissible_pairs[shift_index] & (lower_bound <= threshold))
+        if len(first) == 0:
+            continue
+
+        connected = first_joint[shift_index, first, second] >= 0
+        independent = np.invert(connected)
+        if np.any(independent):
+            independent_first = first[independent]
+            independent_second = second[independent]
+            distance = segment_distances(
+                current_start[independent_first],
+                current_end[independent_first],
+                image_start[independent_second],
+                image_end[independent_second])
+            for local in np.flatnonzero(distance <= threshold):
+                contacts.append((
+                    int(independent_first[local]), shift_index,
+                    int(independent_second[local])))
+
+        for local in np.flatnonzero(connected):
+            first_element = int(first[local])
+            second_element = int(second[local])
+            distance = pair_distance(
+                first_element, shift_index, second_element,
+                current_start, current_end, current_shifts,
+                first_joint, second_joint, exterior_intervals)
+            if distance <= threshold:
+                contacts.append(
+                    (first_element, shift_index, second_element))
+
+    return contacts
+
+
+def export_contact_state(
+        path, current_points, connectivity, integer_shifts,
+        current_shifts, contacts):
+    """Export the critical configuration and mark contacting elements."""
+    if not os.path.isdir(os.path.dirname(path)):
+        os.makedirs(os.path.dirname(path))
+
+    central_flags = np.zeros(len(connectivity), dtype=np.int32)
+    image_flags = {}
+    for first, shift_index, second in contacts:
+        central_flags[first] = 1
+        if shift_index == 0:
+            central_flags[second] = 1
+        else:
+            flags = image_flags.setdefault(
+                shift_index, np.zeros(len(connectivity), dtype=np.int32))
+            flags[second] = 1
+
+    displayed_shifts = [0] + sorted(image_flags)
+    point_blocks = []
+    contact_blocks = []
+    source_blocks = []
+    shift_blocks = []
+    cell_blocks = []
+    point_offset = 0
+    for shift_index in displayed_shifts:
+        point_blocks.append(current_points + current_shifts[shift_index])
+        cell_blocks.append(connectivity + point_offset)
+        point_offset += len(current_points)
+
+        flags = (central_flags if shift_index == 0
+                 else image_flags[shift_index])
+        contact_blocks.append(flags)
+        source_blocks.append(
+            np.arange(len(connectivity), dtype=np.int32))
+        shift = np.asarray(integer_shifts[shift_index], dtype=np.int32)
+        shift_blocks.append(np.tile(shift, (len(connectivity), 1)))
+
+    grid = vtk.vtkUnstructuredGrid()
+    points = vtk.vtkPoints()
+    points.SetData(numpy_to_vtk(
+        np.concatenate(point_blocks), deep=True))
+    grid.SetPoints(points)
+
+    for first, second in np.concatenate(cell_blocks):
+        line = vtk.vtkLine()
+        line.GetPointIds().SetId(0, int(first))
+        line.GetPointIds().SetId(1, int(second))
+        grid.InsertNextCell(line.GetCellType(), line.GetPointIds())
+
+    def add_cell_data(name, values, active=False):
+        """Attach one NumPy array as VTK cell data."""
+        array = numpy_to_vtk(values, deep=True)
+        array.SetName(name)
+        if active:
+            grid.GetCellData().SetScalars(array)
+        else:
+            grid.GetCellData().AddArray(array)
+
+    add_cell_data("CONTACT", np.concatenate(contact_blocks), active=True)
+    add_cell_data("SOURCE_ELEMENT", np.concatenate(source_blocks))
+    shifts = np.concatenate(shift_blocks)
+    add_cell_data("IMAGE_I", shifts[:, 0])
+    add_cell_data("IMAGE_J", shifts[:, 1])
+    add_cell_data("IMAGE_K", shifts[:, 2])
+
+    writer = vtk.vtkXMLUnstructuredGridWriter()
+    writer.SetFileName(path)
+    writer.SetInputData(grid)
+    if writer.Write() != 1:
+        raise IOError("Could not write contact VTK file '{}'.".format(path))
+
+
 def evaluate_clearance(
         case_name, vtk_root, model_name, edge_length, diameter,
-        joint_radius):
+        joint_radius, diagnostic_directory):
     """Evaluate exterior centerline distances throughout one load case."""
     records = read_collection(vtk_root, case_name, model_name)
     reference_points, _, connectivity = read_frame(records[0][1])
@@ -543,8 +672,8 @@ def evaluate_clearance(
             closest_pair = {
                 "frame": frame_index,
                 "pseudo_time": pseudo_time,
-                "first_cell": first,
-                "second_cell": second,
+                "first_element": first,
+                "second_element": second,
                 "shift": integer_shifts[shift_index].copy(),
                 "reference_distance": reference_distance,
             }
@@ -554,6 +683,27 @@ def evaluate_clearance(
                 or frame_index + 1 == len(records)):
             print("{}: checked frame {} of {}".format(
                 case_name, frame_index + 1, len(records)))
+
+    critical_frame = closest_pair["frame"]
+    points, displacement, frame_connectivity = read_frame(
+        records[critical_frame][1])
+    if not np.array_equal(frame_connectivity, connectivity):
+        raise RuntimeError("VTK connectivity changed between frames.")
+    current_points = points + displacement
+    current_start = current_points[connectivity[:, 0]]
+    current_end = current_points[connectivity[:, 1]]
+    deformation, _ = prescribed_state(
+        case_name, records[critical_frame][0])
+    current_shifts = edge_length * integer_shifts.dot(deformation.T)
+    contacts = find_contact_pairs(
+        current_start, current_end, current_shifts, admissible_pairs,
+        first_joint, second_joint, exterior_intervals, diameter,
+        tolerance)
+    print("{}: export minimum-clearance configuration.".format(case_name))
+    export_contact_state(
+        os.path.join(diagnostic_directory, case_name + ".vtu"),
+        current_points, connectivity, integer_shifts, current_shifts,
+        contacts)
 
     return np.asarray(output), closest_pair
 
@@ -576,7 +726,7 @@ def report_case(case_name, result, closest_pair, diameter):
     print("  critical frame                     : {} (tau = {:.6f})".format(
         closest_pair["frame"], closest_pair["pseudo_time"]))
     print("  VTK cell indices (zero-based)      : ({}, {})".format(
-        closest_pair["first_cell"], closest_pair["second_cell"]))
+        closest_pair["first_element"], closest_pair["second_element"]))
     print("  periodic image shift               : {}".format(
         closest_pair["shift"]))
     if np.isfinite(closest_pair["reference_distance"]):
@@ -602,7 +752,7 @@ def assert_no_contact(case_name, result, closest_pair, diameter,
         "at tau={:.8e}: centerline distance {:.8e}, diameter {:.8e}, "
         "elements ({}, {}), periodic shift {}.".format(
             case_name, closest_pair["pseudo_time"], distance, diameter,
-            closest_pair["first_cell"], closest_pair["second_cell"],
+            closest_pair["first_element"], closest_pair["second_element"],
             closest_pair["shift"]))
 
 
@@ -615,13 +765,15 @@ def main():
     model_name = "RVE"
     cases = ("compression", "tension", "shear_12")
     vtk_root = os.path.join(here, "vtk_output")
+    diagnostic_root = os.path.join(here, "contact_vtk_output")
     result_root = os.path.join(here, "results")
     print("Idealized joint exclusion radius: {:.8e}".format(joint_radius))
 
+    failures = []
     for case_name in cases:
         result, closest_pair = evaluate_clearance(
             case_name, vtk_root, model_name, edge_length, diameter,
-            joint_radius)
+            joint_radius, diagnostic_root)
         result_directory = os.path.join(result_root, case_name)
         if not os.path.isdir(result_directory):
             os.makedirs(result_directory)
@@ -631,8 +783,15 @@ def main():
             header=("pseudo_time,loading_measure,"
                     "minimum_exterior_centerline_distance"))
         report_case(case_name, result, closest_pair, diameter)
-        assert_no_contact(
-            case_name, result, closest_pair, diameter, edge_length)
+        try:
+            assert_no_contact(
+                case_name, result, closest_pair, diameter, edge_length)
+        except RuntimeError as error:
+            failures.append(str(error))
+
+    if failures:
+        raise RuntimeError(
+            "Contact verification failed:\n  " + "\n  ".join(failures))
 
 
 if __name__ == "__main__":
