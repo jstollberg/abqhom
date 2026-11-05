@@ -3,8 +3,6 @@
 
 """Install the Python packages required by abqhom into an Abaqus prefix."""
 
-from __future__ import print_function
-
 import argparse
 import fnmatch
 import json

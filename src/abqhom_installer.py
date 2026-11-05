@@ -3,8 +3,6 @@
 
 """Bootstrap the Abaqus installer from the adjacent abqhom package."""
 
-from __future__ import print_function
-
 import os
 import sys
 
