@@ -5,7 +5,6 @@
 
 import os
 from collections import OrderedDict
-from numbers import Integral
 
 try:
     from collections import UserDict
@@ -1149,7 +1148,7 @@ class Boundary(UserDict, object):
 
         """
 
-        if isinstance(n, bool) or not isinstance(n, Integral) or n < 1:
+        if not isinstance(n, int) or n < 1:
             raise ValueError(
                 "The sampling density must be a positive integer.")
         self._sampling_density = int(n)

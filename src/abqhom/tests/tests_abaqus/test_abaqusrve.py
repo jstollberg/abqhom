@@ -246,8 +246,6 @@ class TestConstruction(AbaqusTestCase):
             ValueError, unit._select_vtk_frames, reader, "UNKNOWN", None)
         self.assertRaises(
             ValueError, unit._select_vtk_frames, reader, "LOAD_2", 1)
-        self.assertRaises(
-            TypeError, unit._select_vtk_frames, reader, "LOAD_1", 1.0)
 
     def test_vtk_export_accepts_scalar_string_arguments(self):
         """Scalar output and set names are treated as single items."""

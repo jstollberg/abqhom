@@ -4,7 +4,6 @@
 """Abaqus model construction and homogenization post-processing."""
 
 import os
-from numbers import Integral
 
 import numpy as np
 
@@ -1066,7 +1065,7 @@ class AbaqusRVE(object):
 
         # Create and run the job. Repeated analyses use distinct names because
         # immediate reuse can leave solver resources associated with the old
-        # job name, particularly in Abaqus Learning Edition.
+        # job name.
         self.close_odb_file()
         self._job_count = getattr(self, "_job_count", 0) + 1
         job_name = "JOB_" + self.model_name
@@ -1158,10 +1157,6 @@ class AbaqusRVE(object):
 
     def _select_vtk_frames(self, reader, step_name=None, frame=None):
         """Return the requested ``(step_name, frame_index)`` pairs."""
-
-        if frame is not None and (isinstance(frame, bool)
-                                  or not isinstance(frame, Integral)):
-            raise TypeError("The VTK frame index must be an integer.")
 
         available_steps = list(self.odb.steps.keys())
         if step_name is None:

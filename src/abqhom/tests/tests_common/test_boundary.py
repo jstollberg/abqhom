@@ -111,8 +111,6 @@ class TestBoundaryGeometry(GmshTestCase):
                           sampling_density=0)
         self.assertRaises(ValueError, Boundary, "DENSITY",
                           sampling_density=1.5)
-        self.assertRaises(ValueError, Boundary, "DENSITY",
-                          sampling_density=True)
 
 
 class TestBoundaryClassification(GmshTestCase):
