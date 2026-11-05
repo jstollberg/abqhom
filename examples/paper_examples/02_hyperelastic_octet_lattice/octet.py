@@ -156,51 +156,129 @@ def _read_mode(path):
     return coordinates, translations
 
 
+def _repeat_primitive_mode(reference_coordinates, mode_translations,
+                           current_nodes, edge_length, tolerance):
+    """Map a primitive-cell mode periodically onto a compatible mesh."""
+    if edge_length <= 0.0:
+        raise ValueError("The primitive-cell edge length must be positive.")
+
+    reference_values = np.asarray(list(reference_coordinates.values()))
+    reference_minimum = np.min(reference_values, axis=0)
+    reference_extent = np.ptp(reference_values, axis=0)
+    if not np.allclose(
+            reference_extent, edge_length,
+            rtol=0.0, atol=1.0e-8 * edge_length):
+        raise RuntimeError(
+            "The stored mode does not span one cubic primitive cell.")
+
+    current_values = np.asarray(
+        [coordinates for coordinates, _ in current_nodes.values()])
+    current_minimum = np.min(current_values, axis=0)
+    cell_counts = np.ptp(current_values, axis=0) / edge_length
+    if (np.any(cell_counts < 1.0 - 1.0e-8)
+            or not np.allclose(
+                cell_counts, np.round(cell_counts),
+                rtol=0.0, atol=1.0e-8)):
+        raise RuntimeError(
+            "The target mesh does not span an integer number of primitive "
+            "cells in every coordinate direction.")
+
+    coordinate_tolerance = 1.0e-8 * edge_length
+
+    def coordinate_key(coordinates):
+        """Return a key at the coordinate-matching tolerance."""
+        return tuple(int(round(float(value) / coordinate_tolerance))
+                     for value in coordinates)
+
+    def periodic_key(coordinates, minimum):
+        """Return a coordinate key within the primitive reference cell."""
+        phase = np.mod(coordinates - minimum, edge_length)
+        near_boundary = np.minimum(
+            np.abs(phase), np.abs(phase - edge_length))
+        phase[near_boundary <= coordinate_tolerance] = 0.0
+        return coordinate_key(reference_minimum + phase)
+
+    periodic_mode = {}
+    for tag, coordinates in reference_coordinates.items():
+        key = periodic_key(coordinates, reference_minimum)
+        if (key in periodic_mode
+                and np.linalg.norm(
+                    periodic_mode[key] - mode_translations[tag])
+                > tolerance):
+            raise RuntimeError(
+                "The stored primitive-cell mode is not periodic.")
+        periodic_mode[key] = mode_translations[tag]
+
+    repeated_mode = {}
+    for tag, (coordinates, _) in current_nodes.items():
+        key = periodic_key(coordinates, current_minimum)
+        if key not in periodic_mode:
+            raise RuntimeError(
+                "The target mesh is incompatible with the primitive-cell "
+                "mode at node {}.".format(tag))
+        repeated_mode[tag] = periodic_mode[key]
+    return repeated_mode
+
+
 def apply_eigenmode_imperfection(gmsh_cell, result_directory, amplitude,
-                                 mode_number=1, tolerance=1.0e-10):
-    """Perturb a periodic mesh along one normalized buckling mode."""
+                                 mode_number=1, tolerance=1.0e-10,
+                                 primitive_edge_length=None):
+    """Perturb a periodic mesh along a mode or its periodic repetition."""
     import gmsh
 
     from abqhom.constants import PERIODIC_PAIRS
 
-    reference_coordinates, mode = _read_mode(os.path.join(
+    reference_coordinates, mode_translations = _read_mode(os.path.join(
         result_directory, "mode_{:02d}.csv".format(mode_number)))
     node_tags = [int(tag) for tag in gmsh_cell.node_sets["ALL_NODES"]]
-    node_tag_set = set(node_tags)
-
-    missing = [tag for tag in node_tags if tag not in mode]
-    extra = [tag for tag in mode if tag not in node_tag_set]
-    if missing or extra:
-        raise RuntimeError(
-            "The buckling mode and current mesh have different node tags.")
 
     current_nodes = {}
-    coordinate_error = 0.0
-    coordinate_scale = 1.0
     gmsh_cell.activate()
-
-    # Validate labels and reference coordinates before applying a mode from
-    # the independently generated buckling model.
     for tag in node_tags:
         coordinates, parametric, _, _ = gmsh.model.mesh.get_node(tag)
         coordinates = np.asarray(coordinates, dtype=float)
         current_nodes[tag] = (coordinates, parametric)
-        coordinate_error = max(
-            coordinate_error,
-            np.linalg.norm(coordinates - reference_coordinates[tag]))
-        coordinate_scale = max(
-            coordinate_scale, np.linalg.norm(reference_coordinates[tag]))
-    if coordinate_error > 1.0e-8 * coordinate_scale:
-        raise RuntimeError(
-            "The buckling mode was generated for a different mesh; maximum "
-            "coordinate mismatch = {:.3e}.".format(coordinate_error))
 
-    normalization = max(np.linalg.norm(mode[tag]) for tag in node_tags)
+    if primitive_edge_length is None:
+        node_tag_set = set(node_tags)
+        missing = [tag for tag in node_tags if tag not in mode_translations]
+        extra = [tag for tag in mode_translations
+                 if tag not in node_tag_set]
+        if missing or extra:
+            raise RuntimeError(
+                "The buckling mode and current mesh have different node "
+                "tags.")
+
+        # Validate labels and reference coordinates before applying a mode
+        # from the independently regenerated buckling model.
+        coordinate_error = 0.0
+        coordinate_scale = 1.0
+        for tag in node_tags:
+            coordinates = current_nodes[tag][0]
+            coordinate_error = max(
+                coordinate_error,
+                np.linalg.norm(coordinates - reference_coordinates[tag]))
+            coordinate_scale = max(
+                coordinate_scale,
+                np.linalg.norm(reference_coordinates[tag]))
+        if coordinate_error > 1.0e-8 * coordinate_scale:
+            raise RuntimeError(
+                "The buckling mode was generated for a different mesh; "
+                "maximum coordinate mismatch = {:.3e}.".format(
+                    coordinate_error))
+    else:
+        mode_translations = _repeat_primitive_mode(
+            reference_coordinates, mode_translations, current_nodes,
+            primitive_edge_length, tolerance)
+
+    normalization = max(
+        np.linalg.norm(mode_translations[tag]) for tag in node_tags)
     if normalization <= 0.0:
         raise RuntimeError("The selected buckling mode is zero.")
 
     # The prescribed amplitude is therefore the largest nodal perturbation.
-    direction = {tag: mode[tag] / normalization for tag in node_tags}
+    direction = {
+        tag: mode_translations[tag] / normalization for tag in node_tags}
 
     # The eigenproblem must produce matching translations on periodic pairs
     residual = 0.0

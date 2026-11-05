@@ -20,11 +20,12 @@ abaqus cae noGUI=main.py
 ```
 
 The first command computes eight periodic buckling modes for the primitive
-cell and, by default, for the `2 x 2 x 2` supercell. The first mode defines
-the geometric imperfection, while the remaining modes resolve the neighboring
-eigenspectrum. The second command applies the translational part of the first
-mode and runs compression, tension, and shear for the primitive cell. Only
-compression is repeated for the supercell verification. Set
+cell and, by default, for the `2 x 2 x 2` supercell. The independent
+supercell calculation checks for non-primitive instabilities. The second
+command applies the translational part of the first primitive-cell mode and
+runs compression, tension, and shear for the primitive cell. It periodically
+repeats the same imperfection over the supercell and repeats only the
+compression path there. Set
 `include_supercell=False` in the final call of either script to omit the
 supercell analysis.
 
