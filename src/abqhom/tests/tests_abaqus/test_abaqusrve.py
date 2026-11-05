@@ -111,6 +111,55 @@ class TestLoadHistory(unittest.TestCase):
 class TestConstruction(AbaqusTestCase):
     """Test construction, output access, and VTK selection."""
 
+    def test_run_analysis_rejects_missing_job_status(self):
+        """A missing Abaqus job status must not be accepted as success."""
+        class Model(object):
+            """Provide the model containers accessed by run_analysis."""
+
+            def __init__(self):
+                """Initialize empty output requests and an initial step."""
+                self.fieldOutputRequests = {}
+                self.historyOutputRequests = {}
+                self.steps = {"Initial": object()}
+
+        class Job(object):
+            """Represent a submitted job whose status is unavailable."""
+
+            status = None
+
+            @staticmethod
+            def submit():
+                """Accept the mocked job submission."""
+
+            @staticmethod
+            def waitForCompletion():
+                """Return without assigning a successful status."""
+
+        class ModelDatabase(object):
+            """Create and retain mocked Abaqus jobs."""
+
+            def __init__(self):
+                """Initialize the mocked job repository."""
+                self.jobs = {}
+
+            def Job(self, name, **kwargs):
+                """Create a job with an unavailable completion status."""
+                self.jobs[name] = Job()
+
+        unit = object.__new__(AbaqusRVE)
+        unit._model_name = "MISSING_STATUS"
+        unit._model = Model()
+        unit._odb = None
+        unit._job_name = None
+        unit._job_count = 0
+
+        original_mdb = abqmodel.mdb
+        abqmodel.mdb = ModelDatabase()
+        try:
+            self.assertRaises(RuntimeError, unit.run_analysis)
+        finally:
+            abqmodel.mdb = original_mdb
+
     def test_vtk_reader_uses_current_job_name(self):
         """VTK export reads the most recently submitted repeated job."""
         class Reader(object):

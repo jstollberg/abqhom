@@ -1079,7 +1079,7 @@ class AbaqusRVE(object):
         mdb.jobs[job_name].submit()
         mdb.jobs[job_name].waitForCompletion()
         status = mdb.jobs[job_name].status
-        if status is not None and status != COMPLETED:
+        if status != COMPLETED:
             raise RuntimeError(
                 "Abaqus job '{}' ended with status {}. See the job files "
                 "for details.".format(job_name, status))
