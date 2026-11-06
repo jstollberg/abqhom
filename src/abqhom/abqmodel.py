@@ -142,7 +142,9 @@ class AbaqusRVE(object):
             self._collect_node_element_types())
 
         # Remove redundant periodic copies while retaining their nodes
-        if (remove_secondary and self.periodic_mesh
+        has_periodic_reduction = (gmsh_rve.periodic_boundary
+                                  or self.periodic_mesh)
+        if (remove_secondary and has_periodic_reduction
                 and "ELSET_SECONDARY_ELEMENTS" in self.part.sets):
             self.part.deleteElement(
                 elements=self.part.sets["ELSET_SECONDARY_ELEMENTS"],
@@ -419,6 +421,20 @@ class AbaqusRVE(object):
                                       amplitude=amplitude_name_i,
                                       u1=u[0], u2=u[1], u3=u[2])
 
+    def _create_reference_point(self, point_name):
+        """Create a reference-point instance and return its region and set."""
+
+        part = self.model.Part(dimensionality=self.model_dimension,
+                               name=point_name, type=DEFORMABLE_BODY)
+        point = part.ReferencePoint(point=(0.0, 0.0, 0.0))
+        part.Set(name="REFERENCE_POINT",
+                 referencePoints=[part.referencePoints[point.id]])
+        instance = self.model.rootAssembly.Instance(
+            name=point_name, part=part, dependent=ON)
+        region = instance.sets["REFERENCE_POINT"]
+        qualified_set = point_name + ".REFERENCE_POINT"
+        return region, qualified_set
+
     def _clear_boundary_conditions(self):
         """Remove boundary conditions and constraints created by this class."""
 
@@ -432,7 +448,7 @@ class AbaqusRVE(object):
             if name.startswith("DIRICHLET"):
                 del model.amplitudes[name]
         for name in list(model.constraints.keys()):
-            if name.startswith("PBC_"):
+            if name.startswith("PBC_") or name.startswith("AFFINE_"):
                 del model.constraints[name]
         for name in list(assembly.instances.keys()):
             if name.startswith("REFERENCE_POINT_"):
@@ -493,18 +509,38 @@ class AbaqusRVE(object):
         time_history = displacement_gradient_history.time_data
         displacement_gradients = displacement_gradient_history.load_data
 
-        # Apply Dirichlet boundary conditions on all boundary nodes
+        dim = 3 if self.model_dimension == THREE_D else 2
+
+        # Store the columns of the macroscopic displacement gradient on a
+        # small set of control points. Boundary-node equations then evaluate
+        # u = H X without creating one amplitude per node and component.
+        reference_point_sets = []
+        for column in range(dim):
+            point_name = "REFERENCE_POINT_AFFINE_{}".format(column + 1)
+            region, set_name = self._create_reference_point(point_name)
+            u_history = displacement_gradients[:, :, column]
+            self._add_dirichlet_from_displacement_history(
+                time_history, u_history, region, initialization_step,
+                "DIRICHLET_" + point_name, "DIRICHLET_" + point_name)
+            reference_point_sets.append(set_name)
+
+        # Couple each boundary translation to the control-point values.
         boundary_nodes = self.instance.sets["NSET_BOUNDARY_NODES"]
         for node in boundary_nodes.nodes:
-            region = Region(nodes=MeshNodeArray(nodes=[node]))
-            x = np.array(node.coordinates)
-            u_history = np.dot(displacement_gradients, x)
-
-            amplitude_name = "DIRICHLET_{}".format(node.label)
-            bc_name = "DIRICHLET_{}".format(node.label)
-            self._add_dirichlet_from_displacement_history(
-                time_history, u_history, region, initialization_step, bc_name,
-                amplitude_name)
+            node_set = "NSET_AFFINE_NODE_{}".format(node.label)
+            if node_set not in self.part.sets:
+                self.part.SetFromNodeLabels(
+                    name=node_set, nodeLabels=[node.label], unsorted=True)
+            qualified_node_set = self.model_name + "." + node_set
+            for dof in range(1, dim + 1):
+                terms = [[1.0, qualified_node_set, dof]]
+                for axis, reference_set in enumerate(reference_point_sets):
+                    coefficient = -float(node.coordinates[axis])
+                    if coefficient != 0.0:
+                        terms.append(
+                            [coefficient, reference_set, dof])
+                self.model.Equation(
+                    name="AFFINE_{}_{}".format(node.label, dof), terms=terms)
 
         self._bc_initialized = True
 
@@ -564,25 +600,14 @@ class AbaqusRVE(object):
         def create_reference_point(primary, secondary):
             """Create the control point for a periodic entity pair."""
 
-            coords = [0.0, 0.0, 0.0]
             point_name = "REFERENCE_POINT_{}_{}".format(primary, secondary)
-            part = self.model.Part(dimensionality=self.model_dimension,
-                                   name=point_name, type=DEFORMABLE_BODY)
-            point = self.model.parts[point_name].ReferencePoint(point=coords)
-            self.model.parts[point_name].Set(
-                name="REFERENCE_POINT",
-                referencePoints=[self.model.parts[point_name]
-                                 .referencePoints[point.id]])
-            self.model.rootAssembly.Instance(name=point_name, part=part,
-                                             dependent=ON)
+            region, _ = self._create_reference_point(point_name)
 
             # Compute the +/- coordinates of the respective groups
             x_minus = rve_sets["NSET_" + primary].nodes[0].coordinates
             x_plus = rve_sets["NSET_" + secondary].nodes[0].coordinates
 
             # Apply the boundary conditions
-            region = self.model.rootAssembly.instances[point_name].sets[
-                "REFERENCE_POINT"]
             u_history = np.dot(displacement_gradients,
                                np.array(x_plus) - np.array(x_minus))
 
@@ -1576,6 +1601,10 @@ class AbaqusRVE(object):
         The analysis must contain the field outputs ``NFORC``, ``U`` and,
         when rotational degrees of freedom are present, ``UR``. These are
         requested by default by :meth:`run_analysis`.
+
+        Consecutive rotation-vector outputs must remain on a common,
+        continuous parameterization branch. A branch jump makes their direct
+        difference unsuitable for the incremental rotational work.
 
         Parameters
         ----------

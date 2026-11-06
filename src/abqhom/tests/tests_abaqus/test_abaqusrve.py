@@ -470,6 +470,20 @@ class TestConstruction(AbaqusTestCase):
         self.assertEqual(len(unit.part.sets["ELSET_STRUTS"].elements),
                          remaining_elements)
 
+    def test_reduction_does_not_require_a_matching_boundary_mesh(self):
+        """Geometric ownership reduction is independent of node matching."""
+        fixtures.simple_cubic("D2_NONMATCHING", length=2.0)
+        rve = GmshRVE("D2_NONMATCHING")
+        rve.generate_mesh(element_size=0.7)
+        rve.build_element_sets()
+        remaining_elements = (len(rve.element_sets["ALL_ELEMENTS"])
+                              - len(rve.element_sets["SECONDARY_ELEMENTS"]))
+
+        self.assertFalse(rve.periodic_mesh)
+        unit = AbaqusRVE(rve)
+
+        self.assertEqual(len(unit.part.elements), remaining_elements)
+
     def test_secondary_elements_can_be_retained(self):
         """The unreduced periodic representation remains available."""
         fixtures.simple_cubic("D3", length=2.0)
@@ -674,3 +688,12 @@ class TestAffineBoundaryConditions(AbaqusTestCase):
                 has_dirichlet = True
                 break
         self.assertTrue(has_dirichlet)
+
+        reference_points = [
+            name for name in unit.model.rootAssembly.instances.keys()
+            if name.startswith("REFERENCE_POINT_AFFINE_")]
+        self.assertEqual(len(reference_points), 3)
+        self.assertEqual(len(unit.model.amplitudes), 9)
+        self.assertEqual(
+            len(unit.model.constraints),
+            3 * len(unit.instance.sets["NSET_BOUNDARY_NODES"].nodes))
