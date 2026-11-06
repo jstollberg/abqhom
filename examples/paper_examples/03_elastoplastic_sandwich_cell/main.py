@@ -50,60 +50,52 @@ def assign_sections(cell, parameters):
 
 
 def evaluate_response(cell, step_name, load_path, power_tolerance):
-    """Evaluate effective stresses and discrete Hill--Mandel residuals."""
+    """Evaluate stresses and Hill--Mandel residuals from an open ODB."""
     response = []
-    cell.open_odb_file()
-    try:
-        step = cell.odb.steps[step_name]
-        previous_gradient = None
-        for frame_index, frame in enumerate(step.frames):
-            gradient = load_path(frame.frameValue)
-            stress = cell.average_stress(step_name, frame=frame_index)
-            scale = max(np.linalg.norm(stress), 1.0e-30)
-            asymmetry = np.linalg.norm(stress - stress.T) / scale
+    step = cell.odb.steps[step_name]
+    previous_gradient = None
+    for frame_index, frame in enumerate(step.frames):
+        gradient = load_path(frame.frameValue)
+        stress = cell.average_stress(step_name, frame=frame_index)
+        scale = max(np.linalg.norm(stress), 1.0e-30)
+        asymmetry = np.linalg.norm(stress - stress.T) / scale
 
-            hill_mandel = np.nan
-            if previous_gradient is not None:
-                # Insert the increment between successive converged frames
-                # as the common macroscopic and microscopic test direction.
-                increment = gradient - previous_gradient
-                macroscopic_work = float(np.sum(stress * increment))
-                microscopic_work = cell.average_power_increment(
-                    step_name, frame=frame_index)
-                hill_mandel = hill_mandel_residual(
-                    macroscopic_work, microscopic_work, power_tolerance)
+        hill_mandel = np.nan
+        if previous_gradient is not None:
+            # Insert the increment between successive converged frames as the
+            # common macroscopic and microscopic test direction.
+            increment = gradient - previous_gradient
+            macroscopic_work = float(np.sum(stress * increment))
+            microscopic_work = cell.average_power_increment(
+                step_name, frame=frame_index)
+            hill_mandel = hill_mandel_residual(
+                macroscopic_work, microscopic_work, power_tolerance)
 
-            response.append(np.concatenate((
-                [frame.frameValue, gradient[0, 0]], stress.reshape(-1),
-                [asymmetry, hill_mandel])))
-            previous_gradient = gradient
-    finally:
-        cell.close_odb_file()
+        response.append(np.concatenate((
+            [frame.frameValue, gradient[0, 0]], stress.reshape(-1),
+            [asymmetry, hill_mandel])))
+        previous_gradient = gradient
 
     return np.asarray(response)
 
 
 def evaluate_peeq_history(cell, step_name):
-    """Return maximum shell and beam PEEQ values for every frame."""
+    """Return maximum shell and beam PEEQ values from an open ODB."""
     records = []
-    cell.open_odb_file()
-    try:
-        step = cell.odb.steps[step_name]
-        instance = cell.odb.rootAssembly.instances[cell.model_name]
-        regions = (
-            instance.elementSets["ELSET_SHELL_FACES"],
-            instance.elementSets["ELSET_BEAM_STRUTS"],
-        )
+    step = cell.odb.steps[step_name]
+    instance = cell.odb.rootAssembly.instances[cell.model_name]
+    regions = (
+        instance.elementSets["ELSET_SHELL_FACES"],
+        instance.elementSets["ELSET_BEAM_STRUTS"],
+    )
 
-        for frame in step.frames:
-            peeq = frame.fieldOutputs["PEEQ"]
-            maxima = []
-            for region in regions:
-                values = peeq.getSubset(region=region).values
-                maxima.append(max(float(value.data) for value in values))
-            records.append([frame.frameValue] + maxima)
-    finally:
-        cell.close_odb_file()
+    for frame in step.frames:
+        peeq = frame.fieldOutputs["PEEQ"]
+        maxima = []
+        for region in regions:
+            values = peeq.getSubset(region=region).values
+            maxima.append(max(float(value.data) for value in values))
+        records.append([frame.frameValue] + maxima)
 
     return np.asarray(records)
 
@@ -200,9 +192,14 @@ def run_case(gmsh_cell, reversal_times, reversal_strains, parameters,
 
     print("  Post-process effective response and plastic strains.")
     sys.stdout.flush()
-    response = evaluate_response(
-        cell, step_name, load_path, parameters["power_tolerance"])
-    peeq_history = evaluate_peeq_history(cell, step_name)
+    # Reuse one ODB handle for the stress, work, and PEEQ histories.
+    cell.open_odb_file()
+    try:
+        response = evaluate_response(
+            cell, step_name, load_path, parameters["power_tolerance"])
+        peeq_history = evaluate_peeq_history(cell, step_name)
+    finally:
+        cell.close_odb_file()
     metrics = export_results(
         result_directory, response, peeq_history)
 
@@ -303,7 +300,7 @@ def main():
 
 
 if __name__ == "__main__":
-    # Abaqus replaces stdout; restore the shell that launched the example.
+    # Abaqus replaces stdout. Restore the shell that launched the example.
     if sys.__stdout__ is not None:
         sys.stdout = sys.__stdout__
     main()

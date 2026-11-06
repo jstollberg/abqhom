@@ -117,6 +117,7 @@ def compute_elastic_stiffness(gmsh_cell, parameters, strain_magnitude):
             cell.instance.sets["ELSET_BEAM_STRUTS"],
             cell.instance.sets["ELSET_CONTINUUM_MATRIX"])
         print("  Run Abaqus analysis.")
+        sys.stdout.flush()
         cell.run_analysis(numCpus=1)
         stiffness[:, component] = (
             tensor_to_voigt(cell.average_stress(step_name), "STRESS")
@@ -215,6 +216,7 @@ def constituent_peeq_increment_data(cell, step_name, lower_time, upper_time,
 def yield_state(cell, step_name, base_strain, strain_direction,
                 strain_limit, criterion):
     """Interpolate yield from increments accumulated during one probe."""
+    close_odb = cell.odb is None
     cell.open_odb_file()
     try:
         step = cell.odb.steps[step_name]
@@ -292,9 +294,7 @@ def yield_state(cell, step_name, base_strain, strain_direction,
         peeq_yield = peeq[0] + fraction * (peeq[1] - peeq[0])
 
         # Report which structural constituent first activated the PEEQ guard.
-        if np.all(np.isnan(onset_times)):
-            controlling_constituent = "NONE"
-        elif np.isnan(onset_times[1]) or (
+        if np.isnan(onset_times[1]) or (
                 not np.isnan(onset_times[0])
                 and onset_times[0] < onset_times[1] - 1.0e-12):
             controlling_constituent = "SHELL"
@@ -313,7 +313,8 @@ def yield_state(cell, step_name, base_strain, strain_direction,
             "constituent": controlling_constituent,
         }
     finally:
-        cell.close_odb_file()
+        if close_odb:
+            cell.close_odb_file()
 
 
 def sample_direction(gmsh_cell, parameters, preload_strain, base_strain,
@@ -395,27 +396,32 @@ def sample_direction(gmsh_cell, parameters, preload_strain, base_strain,
             field_outputs=["PEEQ"],
             history_outputs=["ALLPD", "ALLIE"], numCpus=1)
 
-        # Confirm that returning from the preload to the common base state did
-        # not produce additional plastic strain during unloading.
-        if prepared_state:
-            unload_peeq, _ = constituent_peeq_increment_data(
-                cell, unload_step, 0.0, 1.0)
-            maximum_unload_peeq = unload_peeq[-1]
-            if np.max(maximum_unload_peeq) > 1.0e-10:
-                raise RuntimeError(
-                    "The common base state was not reached by elastic "
-                    "unloading: maximum constituent PEEQ increments are "
-                    "{}.".format(maximum_unload_peeq))
-            base_stress = tensor_to_voigt(
-                cell.average_stress(unload_step), "STRESS")
-        else:
-            maximum_unload_peeq = np.zeros(2)
-            base_stress = np.zeros(6)
+        # Reuse one ODB handle for unloading checks and yield extraction.
+        cell.open_odb_file()
+        try:
+            # Confirm that returning from the preload to the common base state
+            # did not produce additional plastic strain during unloading.
+            if prepared_state:
+                unload_peeq, _ = constituent_peeq_increment_data(
+                    cell, unload_step, 0.0, 1.0)
+                maximum_unload_peeq = unload_peeq[-1]
+                if np.max(maximum_unload_peeq) > 1.0e-10:
+                    raise RuntimeError(
+                        "The common base state was not reached by elastic "
+                        "unloading. Maximum constituent PEEQ increments are "
+                        "{}.".format(maximum_unload_peeq))
+                base_stress = tensor_to_voigt(
+                    cell.average_stress(unload_step), "STRESS")
+            else:
+                maximum_unload_peeq = np.zeros(2)
+                base_stress = np.zeros(6)
 
-        # Extract the first acceptable yield point from the completed probe.
-        state = yield_state(
-            cell, probe_step, base_strain, strain_direction,
-            strain_limit, criterion)
+            # Extract the first acceptable yield point from the probe.
+            state = yield_state(
+                cell, probe_step, base_strain, strain_direction,
+                strain_limit, criterion)
+        finally:
+            cell.close_odb_file()
         if state is not None:
             state.update({
                 "strain_limit": strain_limit,
@@ -482,10 +488,6 @@ def _validate_result_configuration(path, configuration, result_paths):
     if os.path.isfile(path):
         with open_csv_file(path, "r") as csv_file:
             reader = csv.DictReader(csv_file)
-            if reader.fieldnames != ["setting", "value"]:
-                raise RuntimeError(
-                    "The result configuration '{}' has an unexpected "
-                    "header.".format(path))
             rows = list(reader)
         actual = {row["setting"]: row["value"] for row in rows}
         if len(actual) != len(rows):
@@ -537,11 +539,11 @@ def write_yield_results(path, records):
     """Write sampled yield points and their common base state."""
     header = (["theta", "yield-time", "strain-limit"]
               + ["epsilon-{}".format(name)
-                 for name in ("11", "22", "33", "23", "13", "12")]
+                 for name in VOIGT_COMPONENTS]
               + ["sigma-{}".format(name)
-                 for name in ("11", "22", "33", "23", "13", "12")]
+                 for name in VOIGT_COMPONENTS]
               + ["base-sigma-{}".format(name)
-                 for name in ("11", "22", "33", "23", "13", "12")]
+                 for name in VOIGT_COMPONENTS]
               + ["max-unload-delta-peeq-shell",
                  "max-unload-delta-peeq-beam",
                  "max-delta-peeq-shell", "max-delta-peeq-beam",
@@ -576,13 +578,13 @@ def read_yield_results(path):
                 "strain_limit": float(row["strain-limit"]),
                 "strain": np.asarray([
                     float(row["epsilon-" + name])
-                    for name in ("11", "22", "33", "23", "13", "12")]),
+                    for name in VOIGT_COMPONENTS]),
                 "stress": np.asarray([
                     float(row["sigma-" + name])
-                    for name in ("11", "22", "33", "23", "13", "12")]),
+                    for name in VOIGT_COMPONENTS]),
                 "base_stress": np.asarray([
                     float(row["base-sigma-" + name])
-                    for name in ("11", "22", "33", "23", "13", "12")]),
+                    for name in VOIGT_COMPONENTS]),
                 "unload_peeq_shell": float(
                     row["max-unload-delta-peeq-shell"]),
                 "unload_peeq_beam": float(
@@ -710,8 +712,8 @@ def sample_plane(gmsh_cell, parameters, compliance, state_name,
     completed_angles = [record["theta"] for record in records]
     if (len(records) > len(angles)
             or not np.allclose(completed_angles, angles[:len(records)])):
-        print("Existing {} results do not match the angular grid; "
-              "starting this plane again.".format(plane_name))
+        print("Existing {} results do not match the angular grid. "
+              "Starting this plane again.".format(plane_name))
         records = []
 
     print("\nSampling {} {} with {} fixed-increment directions.".format(
@@ -747,7 +749,7 @@ def sample_plane(gmsh_cell, parameters, compliance, state_name,
             except Exception as error:
                 if attempt == 1:
                     raise
-                print("    analysis failed once; rebuilding and retrying: "
+                print("    analysis failed once. Rebuilding and retrying: "
                       "{}".format(error))
                 sys.stdout.flush()
         state["theta"] = angle
@@ -939,7 +941,7 @@ def main():
 
 
 if __name__ == "__main__":
-    # Abaqus replaces stdout; restore the shell that launched the example.
+    # Abaqus replaces stdout. Restore the shell that launched the example.
     if sys.__stdout__ is not None:
         sys.stdout = sys.__stdout__
     main()

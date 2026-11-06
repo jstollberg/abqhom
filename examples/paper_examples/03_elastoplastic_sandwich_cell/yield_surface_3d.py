@@ -82,21 +82,21 @@ def icosphere(subdivisions=3):
     for _ in range(subdivisions):
         midpoint_cache = {}
 
-        def midpoint(first, second, cache):
+        def midpoint(first, second):
             """Return the cached midpoint vertex of an icosphere edge."""
             edge = tuple(sorted((first, second)))
-            if edge not in cache:
+            if edge not in midpoint_cache:
                 vertex = vertices[first] + vertices[second]
                 vertex /= np.linalg.norm(vertex)
-                cache[edge] = len(vertices)
+                midpoint_cache[edge] = len(vertices)
                 vertices.append(vertex)
-            return cache[edge]
+            return midpoint_cache[edge]
 
         refined_faces = []
         for first, second, third in faces:
-            first_second = midpoint(first, second, midpoint_cache)
-            second_third = midpoint(second, third, midpoint_cache)
-            third_first = midpoint(third, first, midpoint_cache)
+            first_second = midpoint(first, second)
+            second_third = midpoint(second, third)
+            third_first = midpoint(third, first)
             refined_faces.extend((
                 (first, first_second, third_first),
                 (second, second_third, first_second),
@@ -136,10 +136,6 @@ def read_worker_results(path):
 
     with open_csv_file(path, "r") as csv_file:
         reader = csv.DictReader(csv_file)
-        if reader.fieldnames != CSV_HEADER:
-            raise RuntimeError(
-                "Worker result file '{}' has an unexpected header."
-                .format(path))
         rows = list(reader)
 
     records = {}
@@ -420,7 +416,7 @@ def main():
                 except Exception as error:
                     if attempt == 1:
                         raise
-                    print("    analysis failed once; retrying: {}"
+                    print("    analysis failed once. Retrying: {}"
                           .format(error))
                     sys.stdout.flush()
 
@@ -438,7 +434,7 @@ def main():
 
 
 if __name__ == "__main__":
-    # Abaqus replaces stdout; restore the shell that launched the example.
+    # Abaqus replaces stdout. Restore the shell that launched the example.
     if sys.__stdout__ is not None:
         sys.stdout = sys.__stdout__
     main()
