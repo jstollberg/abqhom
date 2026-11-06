@@ -48,6 +48,8 @@ def _runtime_requirements():
             "abqhom package metadata is unavailable. Install abqhom before "
             "running the Abaqus installer.")
 
+    # The regular package metadata remains the single source of version
+    # constraints. Select only packages that must be visible inside Abaqus.
     requested = {_canonical_name(name): name for name in RUNTIME_PROJECTS}
     selected = {}
     for requirement in requirements:
@@ -66,6 +68,8 @@ def _runtime_requirements():
 def _default_prefix():
     """Return the versioned default directory for the Abaqus runtime."""
 
+    # Separate runtimes by abqhom and installer-Python version so an update
+    # cannot silently replace an environment created for another release.
     python_tag = "py{}.{}".format(sys.version_info[0], sys.version_info[1])
     return os.path.join(os.path.expanduser("~"), ".abqhom",
                         "abaqus-runtime", __version__ + "-" + python_tag)
@@ -79,6 +83,9 @@ def _pip_command(prefix, abqhom_source, requirements=None):
         source = "abqhom=={}".format(__version__)
     if requirements is None:
         requirements = _runtime_requirements()
+
+    # Install the selected runtime projects explicitly. --no-deps prevents
+    # pip from adding packages such as NumPy that must come from Abaqus.
     return [
         sys.executable,
         "-m",
@@ -118,6 +125,8 @@ def _read_marker(prefix):
             "The runtime prefix has an invalid ownership marker: {}"
             .format(error))
 
+    # The marker is both an ownership record and a guard against replacing an
+    # unrelated directory. Do not trust paths read from it without checking.
     if not isinstance(data, dict):
         raise RuntimeError("The runtime ownership marker must contain a "
                            "JSON object.")
@@ -147,6 +156,9 @@ def _prepare_prefix(prefix):
     """Validate the destination and create its parent directory."""
 
     prefix = os.path.abspath(os.path.expanduser(prefix))
+
+    # Refuse broad or ambiguous replacement targets. A nonempty destination
+    # is reusable only when a valid abqhom ownership marker is present.
     if prefix == os.path.dirname(prefix):
         raise RuntimeError("A filesystem root cannot be a runtime prefix.")
     if os.path.islink(prefix):
@@ -169,6 +181,8 @@ def _prepare_prefix(prefix):
 def _find_site_packages(prefix):
     """Locate the installed package directory below the prefix."""
 
+    # A pip --prefix layout varies between platforms and Python versions.
+    # Locate it through the installed packages instead of assuming a path.
     matches = []
     for root, directories, files in os.walk(prefix):
         if os.path.basename(root).lower() != "abqhom":
@@ -220,6 +234,8 @@ def _check_runtime_contents(prefix, package_directory):
         raise RuntimeError("The runtime prefix does not contain the native "
                            "Gmsh shared library.")
 
+    # An external NumPy can shadow the version bundled with Abaqus and cause
+    # binary incompatibilities when the runtime is added to PYTHONPATH.
     for name in os.listdir(package_directory):
         normalized = name.lower()
         if (normalized in ("numpy", "numpy.py")
@@ -232,6 +248,8 @@ def _check_runtime_contents(prefix, package_directory):
 def _check_runtime_imports(prefix, package_directory):
     """Import isolated runtime packages and validate the abqhom version."""
 
+    # Run the check in a clean subprocess with only the staged package
+    # directory on PYTHONPATH. Each required module must resolve inside it.
     script = """
 import os
 import sys
@@ -277,6 +295,8 @@ def _shell_quote(value):
 def _write_activation_scripts(directory, package_directory):
     """Write platform-specific scripts that prepend the runtime path."""
 
+    # Add only the dedicated runtime package directory. Exposing the complete
+    # installer environment could shadow modules bundled with Abaqus.
     paths = []
     if os.name == "nt":
         powershell = os.path.join(directory, "activate_abqhom.ps1")
@@ -346,6 +366,9 @@ def _promote_stage(stage, prefix):
 
     backup = stage + ".previous"
     had_previous = os.path.lexists(prefix)
+
+    # Rename the previous runtime rather than deleting it first. It can then
+    # be restored if promoting the staged installation fails.
     if had_previous:
         os.rename(prefix, backup)
     try:
@@ -396,6 +419,9 @@ def install(prefix, abqhom_source=None):
     prefix = _prepare_prefix(prefix)
     requirements = _runtime_requirements()
     parent = os.path.dirname(prefix)
+
+    # Build beside the final prefix so the final directory replacement stays
+    # on one filesystem and can use atomic rename operations where supported.
     stage = tempfile.mkdtemp(
         prefix=".{}-staging-".format(os.path.basename(prefix)), dir=parent)
 
@@ -421,6 +447,8 @@ def install(prefix, abqhom_source=None):
         _promote_stage(stage, prefix)
         stage = None
     finally:
+        # Failed installations never modify the active runtime. Remove only
+        # the temporary directory still owned by this invocation.
         if stage is not None and os.path.isdir(stage):
             shutil.rmtree(stage)
 
