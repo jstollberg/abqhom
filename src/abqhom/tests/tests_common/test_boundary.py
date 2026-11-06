@@ -302,6 +302,14 @@ class TestGmshRVEValidation(GmshTestCase):
         gmsh.model.set_physical_name(1, group, "POINT_1")
         self.assertRaises(RuntimeError, GmshRVE, "CONFLICT")
 
+    def test_generated_set_name_is_rejected(self):
+        """User groups may not reuse names of generated mesh sets."""
+        fixtures.square_lattice("SET_CONFLICT", size=1.0)
+        curve = gmsh.model.get_entities(1)[0][1]
+        group = gmsh.model.add_physical_group(1, [curve])
+        gmsh.model.set_physical_name(1, group, "BOUNDARY_NODES")
+        self.assertRaises(RuntimeError, GmshRVE, "SET_CONFLICT")
+
     def test_one_dimensional_model_is_rejected(self):
         """GmshRVE rejects models with geometric dimension below two."""
         gmsh.model.add("LINE")

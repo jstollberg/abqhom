@@ -402,7 +402,7 @@ class GmshRVE(object):
             element_tags[el_type] = np.concatenate(element_tags[el_type])
             conn = np.concatenate(element_connectivity[el_type])
 
-            nen = gmsh.model.mesh.getElementProperties(el_type)[3]
+            nen = gmsh.model.mesh.get_element_properties(el_type)[3]
             conn = conn.reshape(-1, nen)
             if el_type not in ABAQUS_CONNECTIVITY_ORDER:
                 raise NotImplementedError(
@@ -427,15 +427,21 @@ class GmshRVE(object):
 
         self.activate()
 
-        # Check for name conflicts
+        # Check for conflicts with all automatically generated set names.
         boundary_groups = POINT_GROUPS + EDGE_GROUPS + FACE_GROUPS
+        generated_sets = {
+            "POINT_NODES", "EDGE_NODES", "FACE_NODES", "BOUNDARY_NODES",
+            "ALL_NODES", "INNER_NODES", "POINT_ELEMENTS", "EDGE_ELEMENTS",
+            "FACE_ELEMENTS", "BOUNDARY_ELEMENTS", "SECONDARY_ELEMENTS",
+            "ALL_ELEMENTS", "INNER_ELEMENTS",
+        }
+        reserved_names = set(boundary_groups) | generated_sets
         for dimtag in gmsh.model.get_physical_groups():
             name = gmsh.model.get_physical_name(*dimtag)
-            if name.upper() in boundary_groups:
+            if name.upper() in reserved_names:
                 raise RuntimeError(
-                    "Physical group {} conflicts with the automatically "
-                    "generated physical boundary groups. Do not use any of "
-                    "the following names: {}".format(name, boundary_groups))
+                    "Physical group '{}' conflicts with a name reserved by "
+                    "abqhom: {}.".format(name, name.upper()))
 
         # Add physical groups to model
         for name, dimtags in self.boundary.items():
@@ -468,25 +474,32 @@ class GmshRVE(object):
 
         self.activate()
 
-        # Set element order
         if element_order not in {1, 2}:
             raise ValueError("Only first-order and second-order elements "
                              "are supported.")
-        gmsh.option.set_number("Mesh.ElementOrder", element_order)
-        gmsh.option.set_number("Mesh.SecondOrderIncomplete", 1)
 
-        # Set meshing algorithms
-        gmsh.option.set_number("Mesh.Algorithm", algorithm_2d)
-        gmsh.option.set_number("Mesh.Algorithm3D", algorithm_3d)
-
-        # Set mesh size
+        option_values = {
+            "Mesh.ElementOrder": element_order,
+            "Mesh.SecondOrderIncomplete": 1,
+            "Mesh.Algorithm": algorithm_2d,
+            "Mesh.Algorithm3D": algorithm_3d,
+        }
         if element_size is not None:
-            gmsh.option.set_number("Mesh.MeshSizeFromPoints", 0)
-            gmsh.option.set_number("Mesh.MeshSizeMin", element_size)
-            gmsh.option.set_number("Mesh.MeshSizeMax", element_size)
+            option_values.update({
+                "Mesh.MeshSizeFromPoints": 0,
+                "Mesh.MeshSizeMin": element_size,
+                "Mesh.MeshSizeMax": element_size,
+            })
+        previous_values = {
+            name: gmsh.option.get_number(name) for name in option_values}
 
-        mesh_dim = gmsh.model.get_dimension()
-        gmsh.model.mesh.generate(mesh_dim)
+        try:
+            for name, value in option_values.items():
+                gmsh.option.set_number(name, value)
+            gmsh.model.mesh.generate(gmsh.model.get_dimension())
+        finally:
+            for name, value in previous_values.items():
+                gmsh.option.set_number(name, value)
 
     def add_periodic_mesh_constraints(self):
         """
@@ -552,24 +565,24 @@ class GmshRVE(object):
             if primary is None:
                 primary = secondary
 
-            # Compute the sorting order for finding matching nodes based
-            # on the coordinates
+            # Determine the free coordinates used to order corresponding
+            # primary and secondary nodes.
             group_to_coords = self.boundary.get_group_coordinate_identifiers()
-            order = np.where(np.isnan(group_to_coords[primary]))[0][::-1]
-            order = order if len(order) > 0 else [0]
+            free_axes = np.where(np.isnan(group_to_coords[primary]))[0]
 
             # Find all coordinates on the respective groups
             node_tags = {}
-            for group in [primary, secondary]:
+            for group in (primary, secondary):
                 nodes = [gmsh.model.mesh.get_nodes(dim, tag, True, False)
                          for (dim, tag) in self.boundary[group]]
                 group_node_tags = [tag for n in nodes for tag in n[0]]
                 group_node_coords = [coord for n in nodes for coord in n[1]]
                 group_node_coords = np.reshape(group_node_coords, (-1, 3))
-                group_node_coords = np.round(group_node_coords, decimals=10)
 
                 # Sort the nodes according to their spatial positions
-                sorter = np.lexsort([group_node_coords[:, i] for i in order])
+                sort_axes = free_axes if len(free_axes) > 0 else [0]
+                sorter = np.lexsort(self._coordinate_sort_keys(
+                    group_node_coords, sort_axes))
                 group_node_tags = np.array(group_node_tags,
                                            dtype=np.uint64)[sorter]
 
@@ -661,6 +674,28 @@ class GmshRVE(object):
             signature_to_group[tuple(signature)] = group
 
         return group_signature, signature_to_group, active_axes
+
+    def _coordinate_tolerance(self):
+        """Return a scale-aware tolerance for boundary-node matching."""
+
+        bounds = np.asarray(
+            self.get_bounding_box_from_points(),
+            dtype=np.float64).reshape(2, 3)
+        span = float(np.max(bounds[1] - bounds[0]))
+        magnitude = max(float(np.max(np.abs(bounds))), span,
+                        np.finfo(np.float64).tiny)
+        return max(1.0e-9*span,
+                   10.0*np.finfo(np.float64).eps*magnitude)
+
+    def _coordinate_sort_keys(self, coordinates, axes):
+        """Return tolerance-quantized keys for lexicographic sorting."""
+
+        bounds = np.asarray(
+            self.get_bounding_box_from_points(),
+            dtype=np.float64).reshape(2, 3)
+        tolerance = self._coordinate_tolerance()
+        return [np.rint((coordinates[:, axis] - bounds[0, axis]) / tolerance)
+                for axis in reversed(axes)]
 
     def _get_boundary_element_sets(self, element_tags,
                                    element_connectivity, tol=None):
@@ -834,26 +869,31 @@ class GmshRVE(object):
                          if (active_axes[axis]
                              and group_signature[group][axis] == 0)]
             if len(free_axes) > 0:
-                keys = [np.round(coords[indices, axis], 8)
-                        for axis in free_axes]
-                indices = indices[np.lexsort(keys)]
+                sort_keys = self._coordinate_sort_keys(
+                    coords[indices], free_axes)
+                indices = indices[np.lexsort(sort_keys)]
 
             self.node_sets[group] = tags[indices]
-            group_coordinates[group] = tuple(
-                tuple(round(float(coords[index, axis]), 8)
-                      for axis in free_axes)
-                for index in indices)
+            group_coordinates[group] = coords[indices][:, free_axes]
         return group_coordinates
 
     @staticmethod
-    def _periodic_node_sets_match(group_coordinates, group_signature):
+    def _periodic_node_sets_match(group_coordinates, group_signature,
+                                  tolerance):
         """Return whether all relevant periodic node sets match one to one."""
 
         for secondary, primary in PERIODIC_PAIRS.items():
             if secondary not in group_signature:
                 continue
-            if (group_coordinates.get(primary, ())
-                    != group_coordinates.get(secondary, ())):
+            free_axes = [axis for axis in range(3)
+                         if group_signature[primary][axis] == 0]
+            empty = np.empty((0, len(free_axes)))
+            primary_coords = group_coordinates.get(primary, empty)
+            secondary_coords = group_coordinates.get(secondary, empty)
+            if primary_coords.shape != secondary_coords.shape:
+                return False
+            if not np.allclose(primary_coords, secondary_coords,
+                               atol=tolerance, rtol=0.0):
                 return False
         return True
 
@@ -900,7 +940,8 @@ class GmshRVE(object):
         group_coordinates = self._order_boundary_node_sets(
             tags, coords, members, group_signature, active_axes)
         self._periodic_mesh = self._periodic_node_sets_match(
-            group_coordinates, group_signature)
+            group_coordinates, group_signature,
+            tolerance=self._coordinate_tolerance())
         self._add_prebuilt_mesh_node_sets(tags)
 
     @staticmethod
@@ -1061,13 +1102,7 @@ class Boundary(UserDict, object):
 
         # Build the boundary automatically
         if not initial_data:
-            try:
-                self._build_boundary()
-            except Exception as error:
-                raise RuntimeError(
-                    "Automatic boundary generation not possible. Please "
-                    "provide the boundary manually. Original error: {}"
-                    .format(error))
+            self._build_boundary()
 
         # Add missing groups as empty groups
         for key in POINT_GROUPS + EDGE_GROUPS + FACE_GROUPS:
@@ -1085,14 +1120,7 @@ class Boundary(UserDict, object):
 
         # Rearrange boundary map in case of a periodic geometry
         if check_periodic:
-            try:
-                self._check_for_periodicity()
-            except Exception as error:
-                raise RuntimeError(
-                    "Automatic periodicity check not possible. Please set "
-                    "check_periodic = False and provide information on "
-                    "periodicity through construction of initial_data and "
-                    "periodic_default. Original error: {}".format(error))
+            self._check_for_periodicity()
 
     @property
     def periodic(self):

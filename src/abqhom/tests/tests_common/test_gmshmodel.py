@@ -124,6 +124,28 @@ class TestNodesAndElements(GmshTestCase):
         self.assertEqual(gmsh.model.get_current(), "ACTIVE_RVE")
         self.assertIn(1, element_tags)
 
+    def test_generate_mesh_restores_global_options(self):
+        """Per-call meshing settings do not leak into later Gmsh models."""
+        fixtures.simple_cubic("RESTORE_OPTIONS", length=2.0)
+        rve = GmshRVE("RESTORE_OPTIONS")
+        option_values = {
+            "Mesh.ElementOrder": 1.0,
+            "Mesh.SecondOrderIncomplete": 0.0,
+            "Mesh.Algorithm": 6.0,
+            "Mesh.Algorithm3D": 1.0,
+            "Mesh.MeshSizeFromPoints": 1.0,
+            "Mesh.MeshSizeMin": 0.125,
+            "Mesh.MeshSizeMax": 4.0,
+        }
+        for name, value in option_values.items():
+            gmsh.option.set_number(name, value)
+
+        rve.generate_mesh(element_order=2, element_size=0.75,
+                          algorithm_2d=5, algorithm_3d=4)
+
+        for name, expected in option_values.items():
+            self.assertEqual(gmsh.option.get_number(name), expected)
+
 
 class TestPeriodicity(GmshTestCase):
     """Test periodic mesh constraints and node correspondence."""
@@ -166,9 +188,21 @@ class TestPeriodicity(GmshTestCase):
         """Periodic groups with unequal node counts must not match."""
         signatures = {"POINT_1": (-1, -1, -1),
                       "POINT_2": (1, -1, -1)}
-        coordinates = {"POINT_1": ((),), "POINT_2": ((), ())}
+        coordinates = {"POINT_1": np.empty((1, 0)),
+                       "POINT_2": np.empty((2, 0))}
         self.assertFalse(GmshRVE._periodic_node_sets_match(
-            coordinates, signatures))
+            coordinates, signatures, tolerance=1.0e-12))
+
+    def test_periodic_node_matching_detects_small_scale_mismatch(self):
+        """Matching does not erase differences through decimal rounding."""
+        signatures = {"EDGE_1": (0, -1, -1),
+                      "EDGE_3": (0, 1, -1)}
+        coordinates = {
+            "EDGE_1": np.array([[0.0], [2.0e-10]]),
+            "EDGE_3": np.array([[0.0], [3.0e-10]]),
+        }
+        self.assertFalse(GmshRVE._periodic_node_sets_match(
+            coordinates, signatures, tolerance=1.0e-15))
 
 
 class TestNodeAndElementSets(GmshTestCase):
