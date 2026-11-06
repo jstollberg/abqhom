@@ -24,13 +24,15 @@ for runtime creation and activation on Windows and Linux.
 
 | Example | Cell | Demonstrates / exercises |
 |---|---|---|
-| [`beam_lattice_simple_cubic_3d`](beam_lattice_simple_cubic_3d) | edge struts of the cube | periodic beam constraints, automatic boundary-element reduction and analytical axial-stiffness verification |
+| [`beam_lattice_simple_cubic_3d`](beam_lattice_simple_cubic_3d) | edge struts of the cube | retaining the complete periodic cell through linear-elastic ownership weighting, periodic beam constraints and analytical axial-stiffness verification |
 | [`beam_lattice_honeycomb_2d`](beam_lattice_honeycomb_2d) | regular hexagonal honeycomb | 2D boundary classification and pairing for struts intersecting cell edges away from the corners, and in-plane isotropy |
 | [`beam_lattice_kelvin_3d`](beam_lattice_kelvin_3d) | Kelvin (truncated octahedron) | finite-strain beam homogenization for a cell whose vertices lie on faces rather than only at corners |
 | [`beam_lattice_simple_cubic_plasticity_3d`](beam_lattice_simple_cubic_plasticity_3d) | simple cubic, cyclic perfect plasticity | path-dependent beam response, cyclic loading and microscopic plastic-strain export |
 
-The simple-cubic and Kelvin cells rely on the automatic removal of redundant
-secondary element copies. No manual stiffness correction is applied.
+The simple-cubic example retains all periodic boundary members and scales
+their Young's modulus by the edge ownership factor (1/4). For linear
+elasticity, this weights the complete beam response. The Kelvin cell instead
+uses the automatic removal of redundant secondary element copies.
 
 ## Continuum and mixed-dimensional cells
 

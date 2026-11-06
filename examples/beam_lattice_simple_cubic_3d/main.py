@@ -1,12 +1,13 @@
 # SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Homogenize a simple-cubic beam lattice in the linear regime.
+"""Homogenize a complete simple-cubic beam lattice in the linear regime.
 
 The twelve edge struts are shared by four neighboring cells, making this the
-simplest example of the automatic boundary-element reduction. The numerical
-stiffness is compared with ``C11 = E*pi*r**2/L**2``, while the transverse
-coupling terms are expected to vanish.
+simplest example of ownership weighting. The complete cell is retained and
+the Young's modulus of every strut is scaled by its ownership factor 1/4.
+The numerical stiffness is compared with ``C11 = E*pi*r**2/L**2``, while the
+transverse coupling terms are expected to vanish.
 """
 
 import os
@@ -69,6 +70,7 @@ def main():
         length = 10.0    # edge length of the cubic unit cell
         radius = 0.5     # strut radius
         element_size = 1.0
+        edge_ownership = 0.25  # four neighboring cells share each edge
 
         # ---------------------------------------------------------------
         # Build the model once and update only the periodic boundary conditions
@@ -79,10 +81,14 @@ def main():
         unit_cell.add_periodic_mesh_constraints()
         unit_cell.generate_mesh(element_size=element_size)
 
-        unit_cell = AbaqusRVE(unit_cell)
-        material = unit_cell.model.Material(name="STRUT")
-        material.Elastic(table=[[E, nu]])
-        unit_cell.assign_beam_section("STRUTS", "STRUT", radius)
+        # Retain the complete periodic representation. Each edge strut is
+        # shared by four cells, so scaling E by 1/4 weights its complete
+        # linear-elastic beam response by the corresponding ownership factor.
+        unit_cell = AbaqusRVE(unit_cell, remove_secondary=False)
+        material = unit_cell.model.Material(name="WEIGHTED_STRUT")
+        material.Elastic(table=[[edge_ownership*E, nu]])
+        unit_cell.assign_beam_section(
+            "STRUTS", "WEIGHTED_STRUT", radius)
         unit_cell.model.StaticStep(name="LOAD", previous="Initial")
 
         # Run the homogenization routine (six load cases in 3D)
