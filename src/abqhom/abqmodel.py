@@ -94,10 +94,12 @@ class AbaqusRVE(object):
         dim = THREE_D if gmsh_rve.model_dimension == 3 else TWO_D_PLANAR
         custom_types = {} if custom_types is None else dict(custom_types)
 
-        # Write Abaqus input file
+        # Abaqus cannot import the in-memory Gmsh model directly. Use an
+        # intermediate input file for the mesh and connectivity transfer.
         input_file = gmsh_rve.write_abaqus_input(custom_types=custom_types)
 
-        # Load the RVE into Abaqus
+        # Start from a fresh model database so names and objects from a
+        # previously constructed RVE cannot leak into the new model.
         Mdb()
         default_model = mdb.models.keys()[0]
         mdb.ModelFromInputFile(name=gmsh_rve.model_name,
@@ -117,7 +119,8 @@ class AbaqusRVE(object):
         self._job_count = 0
         self._section_radius = {}
 
-        # Store the geometric bounding box of the RVE
+        # Preserve the geometric cell bounds before entering the Abaqus data
+        # model, where only the imported mesh remains available.
         self._bounding_box = tuple(
             float(v) for v in gmsh_rve.get_bounding_box_from_points())
 
@@ -369,6 +372,8 @@ class AbaqusRVE(object):
     def _collect_node_element_types(self):
         """Map each node label to the types of its attached elements."""
 
+        # Abaqus element connectivity stores zero-based node-array indices,
+        # whereas sets and output databases identify nodes by their labels.
         node_element_types = {}
         for element in self.part.elements:
             element_type = str(element.type)
@@ -386,6 +391,8 @@ class AbaqusRVE(object):
             if constraint.__class__.__name__ != "EmbeddedRegion":
                 continue
 
+            # Abaqus stores the referenced part-set name as the first entry
+            # of the embedded-region descriptor.
             set_name = constraint.embeddedRegion[0]
             if set_name in self.part.sets:
                 labels.update(n.label for n in self.part.sets[set_name].nodes)
@@ -402,10 +409,11 @@ class AbaqusRVE(object):
             if i == 2 and self.model_dimension != THREE_D:
                 break
 
-            # Add amplitude for the load history
+            # Abaqus amplitudes are scalar, so each displacement component
+            # requires an individual amplitude and boundary condition.
             amplitude_name_i = amplitude_name + "_{}".format(i + 1)
             data = np.vstack((time_history, u_history[:, i])).T
-            data = tuple([(t, v) for t, v in data])
+            data = tuple((t, v) for t, v in data)
             self.model.TabularAmplitude(name=amplitude_name_i, timeSpan=TOTAL,
                                         data=data)
 
@@ -424,6 +432,8 @@ class AbaqusRVE(object):
     def _create_reference_point(self, point_name):
         """Create a reference-point instance and return its region and set."""
 
+        # A separate part gives the reference point a stable qualified set
+        # name that can be used directly in multi-point equations.
         part = self.model.Part(dimensionality=self.model_dimension,
                                name=point_name, type=DEFORMABLE_BODY)
         point = part.ReferencePoint(point=(0.0, 0.0, 0.0))
@@ -441,6 +451,8 @@ class AbaqusRVE(object):
         model = self.model
         assembly = model.rootAssembly
 
+        # Restrict cleanup to the naming prefixes owned by AbaqusRVE. User
+        # loads, constraints, and amplitudes remain untouched.
         for name in list(model.boundaryConditions.keys()):
             if name.startswith("DIRICHLET"):
                 del model.boundaryConditions[name]
@@ -524,7 +536,9 @@ class AbaqusRVE(object):
                 "DIRICHLET_" + point_name, "DIRICHLET_" + point_name)
             reference_point_sets.append(set_name)
 
-        # Couple each boundary translation to the control-point values.
+        # Couple each boundary translation to the control-point values. The
+        # equation coefficients are the reference coordinates, so the
+        # control-point translations represent the columns of H.
         boundary_nodes = self.instance.sets["NSET_BOUNDARY_NODES"]
         for node in boundary_nodes.nodes:
             node_set = "NSET_AFFINE_NODE_{}".format(node.label)
@@ -603,11 +617,13 @@ class AbaqusRVE(object):
             point_name = "REFERENCE_POINT_{}_{}".format(primary, secondary)
             region, _ = self._create_reference_point(point_name)
 
-            # Compute the +/- coordinates of the respective groups
+            # Any paired nodes yield the same cell-translation vector. Use
+            # the first pair to evaluate the prescribed displacement jump.
             x_minus = rve_sets["NSET_" + primary].nodes[0].coordinates
             x_plus = rve_sets["NSET_" + secondary].nodes[0].coordinates
 
-            # Apply the boundary conditions
+            # Store H DeltaX as the translation of the control point that
+            # appears on the right-hand side of the periodic equations.
             u_history = np.dot(displacement_gradients,
                                np.array(x_plus) - np.array(x_minus))
 
@@ -633,7 +649,8 @@ class AbaqusRVE(object):
             time_history, u_history, region, initialization_step, bc_name,
             amplitude_name)
 
-        # Nodes tied by an embedded-region constraint
+        # Embedded translations are already eliminated in favor of the host
+        # interpolation and must not enter an additional equation constraint.
         embedded = self._embedded_region_nodes()
 
         # Add periodic coupling to edges and faces
@@ -675,6 +692,8 @@ class AbaqusRVE(object):
         if not embedded:
             return secondary_set, primary_set
 
+        # Filter complete periodic pairs rather than individual nodes. A pair
+        # embedded on only one side indicates an inconsistent cell coupling.
         secondary_nodes = self.part.sets[secondary_set].nodes
         primary_nodes = self.part.sets[primary_set].nodes
         if len(secondary_nodes) != len(primary_nodes):
@@ -701,6 +720,8 @@ class AbaqusRVE(object):
         if len(secondary_labels) == len(secondary_nodes):
             return secondary_set, primary_set
 
+        # Only a subset remains independent. Preserve its original ordering
+        # in new sets so Abaqus couples corresponding labels by list index.
         secondary_set = "NSET_{}_INDEPENDENT".format(secondary)
         primary_set = "NSET_{}_INDEPENDENT".format(primary)
         if secondary_set not in self.part.sets:
@@ -761,6 +782,8 @@ class AbaqusRVE(object):
                     continue
                 secondary_labels, primary_labels = zip(*paired_labels)
 
+                # Create one pair of ordered sets per rotational DOF. Abaqus
+                # then expands a single equation over all paired set entries.
                 secondary_subset = "{}_DOF_{}".format(secondary_set, dof)
                 primary_subset = "{}_DOF_{}".format(primary_set, dof)
                 if secondary_subset not in self.part.sets:
@@ -972,6 +995,8 @@ class AbaqusRVE(object):
     def _assign_general_section(self, section_name, element_set_name):
         """Assign an existing material section to an element set."""
 
+        # Accept both the public physical-group name and the prefixed set
+        # name created during the Gmsh-to-Abaqus transfer.
         if element_set_name not in self.part.sets:
             element_set_name = "ELSET_{}".format(element_set_name)
         if element_set_name not in self.part.sets:
@@ -1123,6 +1148,8 @@ class AbaqusRVE(object):
             raise IOError(
                 "The file {} does not exist".format(odb_file))
 
+        # Reuse a database already registered in the Abaqus session. This is
+        # important for repeated post-processing over many frames.
         if odb_file not in session.odbs.keys():
             session.openOdb(name=odb_file)
         self._odb = session.odbs[odb_file]
@@ -1147,6 +1174,8 @@ class AbaqusRVE(object):
         reader = OdbReader(odb_path=odb_file,
                            model_name=self.model_name,
                            instance_names=[self.model_name])
+
+        # Paraqus accepts either a raw field or a field/invariant pair.
         for output in field_outputs:
             if isinstance(output, (tuple, list)) and len(output) == 2:
                 reader.add_field_export_request(
@@ -1170,6 +1199,7 @@ class AbaqusRVE(object):
         if len(strut_radius) == 0:
             return
 
+        # Expand set-wise section radii into an element-wise VTK scalar.
         element_radius = {}
         for name, value in strut_radius.items():
             set_name = self._vtk_set_name(name, "ELSET_")
@@ -1194,6 +1224,8 @@ class AbaqusRVE(object):
         else:
             step_names = [step_name]
 
+        # Paraqus reports only frames containing all requested fields. Check
+        # the user selection against that filtered set rather than the raw ODB.
         selection = []
         for name in step_names:
             available_frames = reader.get_frame_indices(name)
@@ -1287,6 +1319,8 @@ class AbaqusRVE(object):
         if not os.path.isdir(path):
             os.makedirs(path)
 
+        # A caller may keep an ODB open across repeated operations. Only close
+        # databases whose lifetime starts inside this method.
         close_odb = self.odb is None
         self.open_odb_file()
         try:
@@ -1406,7 +1440,9 @@ class AbaqusRVE(object):
             node_coords = {n.label: np.array(n.coordinates[0:dim])
                            for n in odb_instance.nodes}
 
-            # Assemble the internal nodal force vectors per (element, node)
+            # Assemble internal nodal force vectors per (element, node).
+            # Keeping duplicate node labels from different elements is
+            # essential because the virial is an element-wise sum.
             forces = {}
             for i in range(dim):
                 for f in field_outputs["NFORC{}".format(i + 1)].values:
@@ -1441,6 +1477,8 @@ class AbaqusRVE(object):
 
         angle = np.linalg.norm(rotation)
         rotation_hat = AbaqusRVE._hat_operator(rotation)
+
+        # The closed form loses precision through cancellation near zero.
         if angle < 1.0e-8:
             return (np.eye(3) + 0.5*rotation_hat
                     + rotation_hat.dot(rotation_hat)/6.0)
@@ -1465,6 +1503,8 @@ class AbaqusRVE(object):
     def _odb_rotation_field(self, outputs, instance, dim):
         """Return ODB nodal rotations as three-component vectors."""
 
+        # Abaqus may expose rotations as one vector field or as individual
+        # scalar components, depending on the analysis and element family.
         if "UR" in outputs:
             rotations = self._odb_vector_field(outputs, "UR", instance)
             result = {}
@@ -1493,6 +1533,8 @@ class AbaqusRVE(object):
     def _consecutive_frames(step, frame):
         """Return the selected output frame and its predecessor."""
 
+        # Normalize negative indexing before checking that a predecessor
+        # exists. Frame zero cannot define a finite increment by itself.
         n_frames = len(step.frames)
         frame_index = frame if frame >= 0 else n_frames + frame
         if frame_index <= 0 or frame_index >= n_frames:
@@ -1522,6 +1564,10 @@ class AbaqusRVE(object):
                 raise RuntimeError(
                     "Nodal rotation output is inconsistent between the "
                     "consecutive frames.")
+
+            # A finite difference of rotation vectors is not itself the
+            # virtual spin. The left Jacobian maps it into the spatial
+            # incremental rotation work-conjugate to the nodal moment.
             increment = rotation - previous[node]
             increments[node] = self._left_jacobian(rotation).dot(increment)
         return increments
@@ -1541,6 +1587,8 @@ class AbaqusRVE(object):
     def _translation_incremental_work(outputs, instance, increments, dim):
         """Assemble the translational contribution to incremental work."""
 
+        # NFORC follows the force-on-node convention. Its negative therefore
+        # gives the internal element force used in the work expression.
         work = 0.0
         for component in range(dim):
             name = "NFORC{}".format(component + 1)
@@ -1560,6 +1608,8 @@ class AbaqusRVE(object):
     def _rotation_incremental_work(outputs, instance, increments, dim):
         """Assemble the moment--rotation contribution to incremental work."""
 
+        # Components 4--6 are nodal moments in 3D. Only component 6 and the
+        # corresponding out-of-plane rotation exist in a planar model.
         work = 0.0
         components = ((3, 4, 5) if dim == 3 else (5,))
         for component in components:
@@ -1625,6 +1675,8 @@ class AbaqusRVE(object):
         close_odb = self.odb is None
         self.open_odb_file()
         try:
+            # The selected frame supplies the current element resultants. Its
+            # predecessor defines the finite kinematic increment.
             step = self.odb.steps[step_name]
             current, previous = self._consecutive_frames(step, frame)
             current_outputs = current.fieldOutputs
@@ -1640,6 +1692,8 @@ class AbaqusRVE(object):
             dim = 3 if self.model_dimension == THREE_D else 2
             odb_instance = self.odb.rootAssembly.instances[self.model_name]
 
+            # Read translations and rotations into label-keyed dictionaries
+            # so different ODB field layouts can be treated uniformly.
             translations_current = self._odb_vector_field(
                 current_outputs, "U", odb_instance)
             translations_previous = self._odb_vector_field(
@@ -1660,6 +1714,8 @@ class AbaqusRVE(object):
             rotation_increment = self._rotation_increments(
                 rotations_current, rotations_previous)
 
+            # Contract the current internal element resultants with the
+            # finite increments and normalize by the reference-cell measure.
             incremental_work = self._translation_incremental_work(
                 current_outputs, odb_instance, translation_increment, dim)
             incremental_work += self._rotation_incremental_work(
@@ -1712,7 +1768,8 @@ class LoadHistory(object):
             raise TypeError("The history must be callable.")
         self._history = history
 
-        # Validate the tensor returned by the history function.
+        # Evaluate one sample immediately so malformed history functions fail
+        # when the LoadHistory is constructed rather than during model setup.
         _ = self[0]
 
     @property
