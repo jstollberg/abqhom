@@ -8,10 +8,10 @@ volume elements with `Gmsh <https://gmsh.info/>`_ and
 truss, beam, and shell constituents, including mixed-dimensional cells,
 finite kinematics, and path-dependent material behavior available in Abaqus.
 
-The package connects geometry and meshing in Gmsh with model
-construction, analysis, and effective-response recovery in Abaqus. It also
-removes redundant copies of structural elements on periodic cell boundaries
-before the boundary-value problem is solved.
+The package connects geometry and meshing in Gmsh with model construction,
+analysis, and effective-response recovery in Abaqus. By default, it removes
+redundant copies of structural elements on periodic cell boundaries before
+the boundary-value problem is solved.
 
 Start with :doc:`installation`, then run the complete example in
 :doc:`usage`. The :doc:`examples` page presents the tutorial and

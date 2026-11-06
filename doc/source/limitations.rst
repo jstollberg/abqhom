@@ -45,9 +45,12 @@ By default, :class:`~abqhom.abqmodel.AbaqusRVE` removes redundant element
 copies associated with secondary periodic boundary entities. Their nodes are
 retained so that the periodic equations remain applicable. Constructing the
 model with ``remove_secondary=False`` is useful for inspecting or visualizing
-the complete periodic representation, but the resulting unweighted model is
-not an ownership-consistent boundary-value problem when structural members
-are duplicated on the cell boundary.
+the complete periodic representation. When structural members are duplicated
+on the cell boundary, the retained model is ownership-consistent only if
+their complete constitutive response is weighted appropriately. The
+simple-cubic tutorial demonstrates such weighting for linear elasticity.
+Constitutive-parameter scaling is not a general substitute for element
+reduction in nonlinear or path-dependent analyses.
 
 Execution environment
 ---------------------

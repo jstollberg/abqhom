@@ -8,6 +8,8 @@ periodic uniaxial strain, and evaluates its effective stress. Save it as
 
 .. code-block:: python
 
+   import sys
+
    import numpy as np
    import gmsh
 
@@ -15,6 +17,10 @@ periodic uniaxial strain, and evaluates its effective stress. Save it as
    from abqhom.gmshmodel import GmshRVE
    from abqhom.utils import tensor_to_voigt, voigt_to_tensor
 
+
+   # Abaqus replaces stdout. Restore output to the launching shell.
+   if sys.__stdout__ is not None:
+       sys.stdout = sys.__stdout__
 
    gmsh.initialize()
    try:

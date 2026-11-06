@@ -23,8 +23,10 @@ integration, nonlinear solution procedures, and output databases.
   Abaqus material models and solution procedures.
 - Periodic translational and rotational constraints for continuum and
   structural finite elements.
-- Automatic removal of redundant structural-element copies on secondary
-  periodic boundaries without constitutive-parameter scaling.
+- Ownership-consistent treatment of structural members on periodic
+  boundaries through automatic removal of redundant copies. Complete cells
+  can instead be retained with an explicitly weighted linear-elastic
+  response.
 - Effective first Piola–Kirchhoff stress recovery from element nodal forces
   and incremental microscopic work for discrete Hill–Mandel checks.
 - Nonconforming structural–continuum coupling through Abaqus embedded
@@ -88,9 +90,10 @@ cd examples/beam_lattice_simple_cubic_3d
 abaqus cae noGUI=main.py
 ```
 
-The script constructs and periodically meshes the lattice, evaluates six
-independent small-strain cases, compares the axial stiffness with its
-analytical value, and writes CSV and VTK output.
+The script constructs and periodically meshes the complete lattice, weights
+the boundary-member stiffnesses by their ownership, evaluates six independent
+small-strain cases, compares the axial stiffness with its analytical value,
+and writes CSV and VTK output.
 
 See the
 [`beam_lattice_simple_cubic_3d/main.py`](examples/beam_lattice_simple_cubic_3d/main.py)

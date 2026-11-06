@@ -20,9 +20,11 @@ Core capabilities
   generated in Gmsh or verified for imported meshes. Periodic translations
   and, where present, nodal rotations are constrained automatically. Affine
   displacement conditions are available for continuum cells.
-* **Consistent periodic-cell representation.** Redundant structural elements
-  on secondary boundary entities are removed before analysis while their
-  nodes are retained for the periodic constraints.
+* **Consistent periodic-cell representation.** By default, redundant
+  structural elements on secondary boundary entities are removed before
+  analysis while their nodes are retained for the periodic constraints. A
+  complete cell can instead be retained when its response is weighted
+  consistently.
 * **Effective-response recovery.** The effective first Piola--Kirchhoff stress
   is evaluated from element nodal forces. Incremental microscopic work can be
   recovered independently for a discrete Hill--Mandel check.

@@ -41,19 +41,19 @@ python verify_contact_clearance.py
 The check compares every retained primitive-cell beam element with the
 central cell and its 26 periodic neighbors. Around every idealized rigid
 joint, it excludes centerline intervals inside a spherical neighborhood. Its
-radius follows from the beam diameter and the smallest incident angle. The
-radius is 0.0924 for the parameters used here. Beam segments are clipped at
-this boundary in the reference configuration. The corresponding material
-intervals remain excluded throughout the load history, while all intervals
-outside the joint region remain contact candidates. The script raises an
-error if contact occurs outside these regions or if a positive surface
-clearance cannot be resolved within the adopted numerical tolerance. This is
-a piecewise-linear centerline-clearance diagnostic based on the nominal beam
-diameter, not a replacement for beam-to-beam contact in the finite element
-model. For each load case, the script exports the minimum-clearance
-configuration to `contact_vtk_output/`. The binary `CONTACT` cell field marks
-all participating elements. The central cell is always included, together
-with any periodic images required to display the detected contacts.
+radius follows from the beam diameter and the smallest incident angle. Beam
+segments are clipped at this boundary in the reference configuration. The
+corresponding material intervals remain excluded throughout the load history,
+while all intervals outside the joint region remain contact candidates. The
+script raises an error if contact occurs outside these regions or if a
+positive surface clearance cannot be resolved within the adopted numerical
+tolerance. This is a piecewise-linear centerline-clearance diagnostic based
+on the nominal beam diameter, not a replacement for beam-to-beam contact in
+the finite element model. For each load case, the script exports the
+minimum-clearance configuration to `contact_vtk_output/`. The binary
+`CONTACT` cell field marks all participating elements. The central cell is
+always included, together with any periodic images required to display the
+detected contacts.
 
 ## Supercell check
 

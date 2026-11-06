@@ -25,7 +25,7 @@ Tutorial examples
      - Demonstrates
    * - `beam_lattice_simple_cubic_3d <https://github.com/jstollberg/abqhom/tree/main/examples/beam_lattice_simple_cubic_3d>`_
      - Simple-cubic beam lattice
-     - Linear stiffness and analytical :math:`C_{11}` check
+     - Full-cell ownership weighting and analytical :math:`C_{11}` check
    * - `beam_lattice_honeycomb_2d <https://github.com/jstollberg/abqhom/tree/main/examples/beam_lattice_honeycomb_2d>`_
      - Regular beam honeycomb
      - Two-dimensional effective response and in-plane isotropy
@@ -51,11 +51,13 @@ Tutorial examples
      - Imported sheet-gyroid shell mesh
      - Finite-strain shell response and imported-mesh workflow
 
-The simple-cubic and Kelvin examples exercise the automatic reduction of
-redundant structural elements on periodic boundaries. The gyroid mesh is
-generated separately with `microgen <https://github.com/3MAH/microgen>`_ and
-then read through :meth:`~abqhom.gmshmodel.GmshRVE.read_from_mesh`. Microgen
-is not a runtime dependency of ``abqhom``.
+The simple-cubic example retains the complete boundary-member representation
+and demonstrates ownership weighting for linear elasticity. The Kelvin
+example exercises the automatic reduction of redundant structural elements.
+The gyroid mesh is generated separately with
+`microgen <https://github.com/3MAH/microgen>`_ and then read through
+:meth:`~abqhom.gmshmodel.GmshRVE.read_from_mesh`. Microgen is not a runtime
+dependency of ``abqhom``.
 
 Output directories
 ------------------
