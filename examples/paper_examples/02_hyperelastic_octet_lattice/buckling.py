@@ -175,6 +175,11 @@ def export_modes(cell, step_name, result_directory,
     try:
         step = cell.odb.steps[step_name]
         instance = cell.odb.rootAssembly.instances[cell.model_name]
+        # Reference coordinates make every exported mode self-validating
+        # when it is transferred to a separately regenerated Gmsh mesh.
+        coordinates = {
+            node.label: np.asarray(node.coordinates, dtype=float)
+            for node in instance.nodes}
         records = []
         for mode_number in range(1, len(step.frames)):
             frame = step.frames[mode_number]
@@ -190,11 +195,6 @@ def export_modes(cell, step_name, result_directory,
                     "Buckling mode {} has zero displacement."
                     .format(mode_number))
 
-            # Reference coordinates make the exported mode self-validating
-            # when it is transferred to a separately regenerated Gmsh mesh.
-            coordinates = {
-                node.label: np.asarray(node.coordinates, dtype=float)
-                for node in instance.nodes}
             mode_data = np.asarray([
                 [label] + list(coordinates[label]) + list(value / maximum)
                 for label, value in sorted(displacement.items())])
@@ -364,7 +364,7 @@ def main(include_supercell=True):
 
 
 if __name__ == "__main__":
-    # Abaqus replaces stdout; restore the shell that launched the example.
+    # Abaqus replaces stdout. Restore the shell that launched the example.
     if sys.__stdout__ is not None:
         sys.stdout = sys.__stdout__
     main(include_supercell=True)

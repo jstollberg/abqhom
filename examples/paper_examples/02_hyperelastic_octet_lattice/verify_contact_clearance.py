@@ -213,7 +213,7 @@ def assign_elements_to_struts(reference_start, reference_end, edge_length):
     maximum_error = np.max(distance[np.arange(len(midpoint)), assignment])
     if maximum_error > 2.0e-3 * edge_length:
         raise RuntimeError(
-            "Could not identify all parent struts; maximum error = {}."
+            "Could not identify all parent struts. Maximum error = {}."
             .format(maximum_error))
     return assignment, strut_start, strut_end
 
@@ -613,6 +613,9 @@ def evaluate_clearance(
     reference_points, _, connectivity = read_frame(records[0][1])
     reference_start = reference_points[connectivity[:, 0]]
     reference_end = reference_points[connectivity[:, 1]]
+
+    # Relate the retained finite elements to the ideal Octet topology and
+    # establish which periodic pairs share an idealized joint.
     element_strut, strut_start, strut_end = assign_elements_to_struts(
         reference_start, reference_end, edge_length)
 
@@ -622,7 +625,7 @@ def evaluate_clearance(
             for i in (-1, 0, 1)
             for j in (-1, 0, 1)
             for k in (-1, 0, 1)
-            if (i, j, k) != (0, 0, 0)], dtype=float)
+            if (i, j, k) != (0, 0, 0)], dtype=int)
     admissible_pairs, first_joint, second_joint = build_pair_topology(
         reference_start, reference_end, element_strut, strut_start,
         strut_end, integer_shifts, edge_length, diameter)
@@ -641,6 +644,9 @@ def evaluate_clearance(
     global_minimum = np.inf
     closest_pair = None
     previous_pair = None
+
+    # Search every stored configuration. The preceding critical pair only
+    # initializes an upper bound and cannot exclude a newly closer pair.
     for frame_index, (pseudo_time, path) in enumerate(records):
         points, displacement, frame_connectivity = read_frame(path)
         if not np.array_equal(frame_connectivity, connectivity):
@@ -684,6 +690,8 @@ def evaluate_clearance(
             print("{}: checked frame {} of {}".format(
                 case_name, frame_index + 1, len(records)))
 
+    # Re-read only the limiting frame and export all pairs that touch or
+    # overlap there outside the excluded joint neighborhoods.
     critical_frame = closest_pair["frame"]
     points, displacement, frame_connectivity = read_frame(
         records[critical_frame][1])
@@ -719,10 +727,6 @@ def report_case(case_name, result, closest_pair, diameter):
     print("  loading magnitude                  : {:.6f}".format(
         result[frame, 1]))
 
-    if closest_pair is None:
-        print("  no exterior pair entered the near-contact search radius")
-        return
-
     print("  critical frame                     : {} (tau = {:.6f})".format(
         closest_pair["frame"], closest_pair["pseudo_time"]))
     print("  VTK cell indices (zero-based)      : ({}, {})".format(
@@ -745,8 +749,8 @@ def assert_no_contact(case_name, result, closest_pair, diameter,
     if distance > diameter + tolerance:
         return
 
-    # Tangency and positive overlap both invalidate the no-contact model;
-    # values within tolerance are treated conservatively as unresolved.
+    # Tangency and positive overlap both invalidate the no-contact model.
+    # Values within tolerance are treated conservatively as unresolved.
     raise RuntimeError(
         "Contact detected or unresolved outside an idealized joint in '{}' "
         "at tau={:.8e}: centerline distance {:.8e}, diameter {:.8e}, "

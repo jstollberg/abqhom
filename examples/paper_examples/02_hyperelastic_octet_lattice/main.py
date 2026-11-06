@@ -42,103 +42,91 @@ def assign_section(cell, radius, youngs_modulus, poissons_ratio, density):
 
 
 def maximum_rotation(cell, step_name):
-    """Return the maximum nodal rotation-vector magnitude over all frames."""
-    cell.open_odb_file()
-    try:
-        instance = cell.odb.rootAssembly.instances[cell.model_name]
-        maximum = 0.0
-        for frame in cell.odb.steps[step_name].frames:
-            values = frame.fieldOutputs["UR"].getSubset(
-                region=instance).values
-            for value in values:
-                magnitude = np.linalg.norm(
-                    np.asarray(value.data, dtype=float))
-                maximum = max(maximum, magnitude)
-        return maximum
-    finally:
-        cell.close_odb_file()
+    """Return the maximum rotation-vector norm from an open ODB."""
+    instance = cell.odb.rootAssembly.instances[cell.model_name]
+    maximum = 0.0
+    for frame in cell.odb.steps[step_name].frames:
+        values = frame.fieldOutputs["UR"].getSubset(
+            region=instance).values
+        for value in values:
+            magnitude = np.linalg.norm(
+                np.asarray(value.data, dtype=float))
+            maximum = max(maximum, magnitude)
+    return maximum
 
 
 def energy_ratios(cell, step_name, minimum_pseudo_time=0.02):
-    """Return kinetic-to-internal-energy ratios for one analysis."""
-    cell.open_odb_file()
-    try:
-        step = cell.odb.steps[step_name]
-        region_name = "Assembly ASSEMBLY"
-        if region_name not in step.historyRegions:
-            raise RuntimeError(
-                "The assembly energy-history region is unavailable.")
-        outputs = step.historyRegions[region_name].historyOutputs
-        if "ALLIE" not in outputs or "ALLKE" not in outputs:
-            raise RuntimeError("ALLIE and ALLKE are unavailable in the ODB.")
+    """Return kinetic-to-internal-energy ratios from an open ODB."""
+    step = cell.odb.steps[step_name]
+    region_name = "Assembly ASSEMBLY"
+    if region_name not in step.historyRegions:
+        raise RuntimeError(
+            "The assembly energy-history region is unavailable.")
+    outputs = step.historyRegions[region_name].historyOutputs
+    if "ALLIE" not in outputs or "ALLKE" not in outputs:
+        raise RuntimeError("ALLIE and ALLKE are unavailable in the ODB.")
 
-        internal = dict(outputs["ALLIE"].data)
-        kinetic = dict(outputs["ALLKE"].data)
-        records = [(time, internal[time], kinetic[time])
-                   for time in sorted(set(internal) & set(kinetic))]
-        ratios = [(time, abs(ke) / max(abs(ie), 1.0e-30))
-                  for time, ie, ke in records
-                  if time >= minimum_pseudo_time]
-        if not ratios:
-            raise RuntimeError(
-                "No energy data are available after pseudo-time {}."
-                .format(minimum_pseudo_time))
+    internal = dict(outputs["ALLIE"].data)
+    kinetic = dict(outputs["ALLKE"].data)
+    records = [(time, internal[time], kinetic[time])
+               for time in sorted(set(internal) & set(kinetic))]
+    ratios = [(time, abs(ke) / max(abs(ie), 1.0e-30))
+              for time, ie, ke in records
+              if time >= minimum_pseudo_time]
+    if not ratios:
+        raise RuntimeError(
+            "No energy data are available after pseudo-time {}."
+            .format(minimum_pseudo_time))
 
-        peak_time, peak_ratio = max(ratios, key=lambda item: item[1])
-        maximum_kinetic = max(abs(ke) for _, _, ke in records)
-        maximum_internal = max(abs(ie) for _, ie, _ in records)
-        ratio_of_maxima = maximum_kinetic / maximum_internal
-        return {
-            "peak_ratio": peak_ratio,
-            "peak_time": peak_time,
-            "final_ratio": ratios[-1][1],
-            "ratio_of_maxima": ratio_of_maxima,
-        }
-    finally:
-        cell.close_odb_file()
+    peak_time, peak_ratio = max(ratios, key=lambda item: item[1])
+    maximum_kinetic = max(abs(ke) for _, _, ke in records)
+    maximum_internal = max(abs(ie) for _, ie, _ in records)
+    ratio_of_maxima = maximum_kinetic / maximum_internal
+    return {
+        "peak_ratio": peak_ratio,
+        "peak_time": peak_time,
+        "final_ratio": ratios[-1][1],
+        "ratio_of_maxima": ratio_of_maxima,
+    }
 
 
 def evaluate_response(cell, step_name, load_path, component,
                       power_tolerance):
-    """Evaluate effective stresses and discrete Hill--Mandel residuals."""
+    """Evaluate stresses and Hill--Mandel residuals from an open ODB."""
     response = []
-    cell.open_odb_file()
-    try:
-        step = cell.odb.steps[step_name]
-        previous_gradient = None
-        for frame_index, frame in enumerate(step.frames):
-            gradient = load_path(frame.frameValue)
-            deformation_gradient = np.eye(3) + gradient
-            nominal_stress = cell.average_stress(
+    step = cell.odb.steps[step_name]
+    previous_gradient = None
+    for frame_index, frame in enumerate(step.frames):
+        gradient = load_path(frame.frameValue)
+        deformation_gradient = np.eye(3) + gradient
+        nominal_stress = cell.average_stress(
+            step_name, frame=frame_index)
+
+        # Push the effective first Piola--Kirchhoff stress forward to
+        # the effective Cauchy stress at the current macroscopic state.
+        jacobian = np.linalg.det(deformation_gradient)
+        cauchy_stress = (nominal_stress.dot(
+            deformation_gradient.T) / jacobian)
+        scale = max(np.linalg.norm(cauchy_stress), 1.0e-30)
+        asymmetry = (np.linalg.norm(
+            cauchy_stress - cauchy_stress.T) / scale)
+
+        hill_mandel = np.nan
+        if previous_gradient is not None:
+            # Insert the increment between successive converged frames as the
+            # common macroscopic and microscopic test direction.
+            increment = gradient - previous_gradient
+            macroscopic_work = float(np.sum(nominal_stress * increment))
+            microscopic_work = cell.average_power_increment(
                 step_name, frame=frame_index)
+            hill_mandel = hill_mandel_residual(
+                macroscopic_work, microscopic_work, power_tolerance)
 
-            # Push the effective first Piola--Kirchhoff stress forward to
-            # the effective Cauchy stress at the current macroscopic state.
-            jacobian = np.linalg.det(deformation_gradient)
-            cauchy_stress = (nominal_stress.dot(
-                deformation_gradient.T) / jacobian)
-            scale = max(np.linalg.norm(cauchy_stress), 1.0e-30)
-            asymmetry = (np.linalg.norm(
-                cauchy_stress - cauchy_stress.T) / scale)
-
-            hill_mandel = np.nan
-            if previous_gradient is not None:
-                # Insert the increment between successive converged frames
-                # as the common macroscopic and microscopic test direction.
-                increment = gradient - previous_gradient
-                macroscopic_work = float(np.sum(nominal_stress * increment))
-                microscopic_work = cell.average_power_increment(
-                    step_name, frame=frame_index)
-                hill_mandel = hill_mandel_residual(
-                    macroscopic_work, microscopic_work, power_tolerance)
-
-            response.append(np.concatenate((
-                [frame.frameValue, deformation_gradient[component]],
-                nominal_stress.reshape(-1), cauchy_stress.reshape(-1),
-                [asymmetry, hill_mandel])))
-            previous_gradient = gradient
-    finally:
-        cell.close_odb_file()
+        response.append(np.concatenate((
+            [frame.frameValue, deformation_gradient[component]],
+            nominal_stress.reshape(-1), cauchy_stress.reshape(-1),
+            [asymmetry, hill_mandel])))
+        previous_gradient = gradient
 
     return np.asarray(response)
 
@@ -233,16 +221,21 @@ def run_case(gmsh_cell, case_name, component, final_value, parameters,
 
     print("  Post-process effective response.")
     sys.stdout.flush()
-    response = evaluate_response(
-        cell, step_name, load_path, component,
-        parameters["power_tolerance"])
-    if not np.isclose(response[-1, 0], 1.0):
-        raise RuntimeError(
-            "The {} case stopped at pseudo-time {}; expected 1.0."
-            .format(case_name, response[-1, 0]))
+    # Reuse one ODB handle for all frame-wise post-processing operations.
+    cell.open_odb_file()
+    try:
+        response = evaluate_response(
+            cell, step_name, load_path, component,
+            parameters["power_tolerance"])
+        if not np.isclose(response[-1, 0], 1.0):
+            raise RuntimeError(
+                "The {} case stopped at pseudo-time {}. Expected 1.0."
+                .format(case_name, response[-1, 0]))
 
-    rotation = maximum_rotation(cell, step_name)
-    energies = energy_ratios(cell, step_name)
+        rotation = maximum_rotation(cell, step_name)
+        energies = energy_ratios(cell, step_name)
+    finally:
+        cell.close_odb_file()
     curve, maximum_hill_mandel = export_results(
         result_directory, response, component, energies, rotation)
 
@@ -367,7 +360,7 @@ def main(include_supercell=True):
 
 
 if __name__ == "__main__":
-    # Abaqus replaces stdout; restore the shell that launched the example.
+    # Abaqus replaces stdout. Restore the shell that launched the example.
     if sys.__stdout__ is not None:
         sys.stdout = sys.__stdout__
     main(include_supercell=True)

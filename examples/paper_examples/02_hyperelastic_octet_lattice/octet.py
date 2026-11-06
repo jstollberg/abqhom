@@ -263,7 +263,7 @@ def apply_eigenmode_imperfection(gmsh_cell, result_directory, amplitude,
                 np.linalg.norm(reference_coordinates[tag]))
         if coordinate_error > 1.0e-8 * coordinate_scale:
             raise RuntimeError(
-                "The buckling mode was generated for a different mesh; "
+                "The buckling mode was generated for a different mesh. "
                 "maximum coordinate mismatch = {:.3e}.".format(
                     coordinate_error))
     else:
@@ -282,8 +282,8 @@ def apply_eigenmode_imperfection(gmsh_cell, result_directory, amplitude,
 
     # The eigenproblem must produce matching translations on periodic pairs
     residual = 0.0
+    sets = gmsh_cell.node_sets
     for secondary, primary in PERIODIC_PAIRS.items():
-        sets = gmsh_cell.node_sets
         pair_available = secondary in sets and primary in sets
         if not pair_available:
             continue
@@ -299,11 +299,11 @@ def apply_eigenmode_imperfection(gmsh_cell, result_directory, amplitude,
 
     if residual > tolerance:
         raise RuntimeError(
-            "The imperfection is not periodic; residual = {:.3e}.".format(
+            "The imperfection is not periodic. Residual = {:.3e}.".format(
                 residual))
 
-    # Only translational mode components alter the Gmsh nodal positions;
-    # finite beam rotations remain unknowns of the subsequent analysis.
+    # Only translational mode components alter the Gmsh nodal positions.
+    # Finite beam rotations remain unknowns of the subsequent analysis.
     for tag in node_tags:
         coordinates, parametric = current_nodes[tag]
         coordinates = coordinates.copy()
