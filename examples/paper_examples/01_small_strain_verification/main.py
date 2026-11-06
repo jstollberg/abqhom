@@ -118,6 +118,9 @@ def analytical_normal_stiffness(edge_length, continuum, shell, beam,
     shell_coupling = nu_s*shell_normal
     beam_area = np.pi*beam_radius**2
 
+    # Every normal diagonal contains two in-plane shell families and one
+    # axial beam family in addition to the continuum contribution. A normal
+    # coupling term receives the contribution of one shell family.
     diagonal = (lambda_c + 2.0*mu_c
                 + 2.0*shell_thickness/edge_length*shell_normal
                 + beam_area/edge_length**2*E_b)
@@ -129,12 +132,14 @@ def analytical_normal_stiffness(edge_length, continuum, shell, beam,
     return stiffness
 
 
-def compute_residuals(reduced_stiffness, analytical_stiffness, hill_mandel,
-                      weighted_stiffness):
-    """Return the names and values of all verification residuals."""
+def compute_residuals(reduced_stiffness, analytical_stiffness,
+                      hill_mandel_residuals, weighted_stiffness):
+    """Return the names and values of the five verification residuals."""
     if reduced_stiffness.shape != (6, 6):
         raise ValueError("Cubic symmetry requires a 6x6 stiffness matrix.")
 
+    # Project the computed stiffness onto cubic symmetry by averaging entries
+    # that are equivalent under the cubic material symmetry group.
     cubic = np.zeros((6, 6))
     normal_diagonal = np.mean(np.diag(reduced_stiffness)[:3])
     normal_coupling = np.mean(
@@ -170,7 +175,7 @@ def compute_residuals(reduced_stiffness, analytical_stiffness, hill_mandel,
         major_symmetry,
         cubic_symmetry,
         reduction,
-        np.max(hill_mandel),
+        np.max(hill_mandel_residuals),
     ])
     return names, values
 
@@ -192,17 +197,18 @@ def assign_constituent_sections(cell, properties, shell_thickness,
 
 
 def run_stiffness_cases(cell, step_name, strain_magnitude, component_names,
-                        collect_diagnostics=False, power_tolerance=None,
+                        evaluate_hill_mandel=False, power_tolerance=None,
                         vtk_directory=None, vtk_element_sets=None):
-    """Run six strain cases and return stiffness and optional diagnostics."""
+    """Run six strain cases and optionally evaluate Hill--Mandel residuals."""
     if len(component_names) != 6:
         raise ValueError("A three-dimensional stiffness requires six cases.")
-    if collect_diagnostics and power_tolerance is None:
+    if evaluate_hill_mandel and power_tolerance is None:
         raise ValueError(
             "A power tolerance is required for Hill--Mandel diagnostics.")
 
     stiffness = np.zeros((6, 6))
-    hill_mandel = np.zeros(6) if collect_diagnostics else None
+    hill_mandel_residuals = (
+        np.zeros(6) if evaluate_hill_mandel else None)
 
     for component, component_name in enumerate(component_names):
         print("\n------------------------------")
@@ -229,14 +235,16 @@ def run_stiffness_cases(cell, step_name, strain_magnitude, component_names,
             stiffness[:, component] = (
                 tensor_to_voigt(stress, "STRESS")/strain_magnitude)
 
-            if collect_diagnostics:
+            if evaluate_hill_mandel:
+                # Compare independent macroscopic and microscopic work
+                # evaluations over the final converged load increment.
                 current_time = cell.get_frame_time(step_name, -1)
                 previous_time = cell.get_frame_time(step_name, -2)
                 strain_increment = (strain_history(current_time)
                                     - strain_history(previous_time))
                 macroscopic_work = float(np.sum(stress*strain_increment))
                 microscopic_work = cell.average_power_increment(step_name)
-                hill_mandel[component] = hill_mandel_residual(
+                hill_mandel_residuals[component] = hill_mandel_residual(
                     macroscopic_work, microscopic_work, power_tolerance)
         finally:
             cell.close_odb_file()
@@ -249,11 +257,11 @@ def run_stiffness_cases(cell, step_name, strain_magnitude, component_names,
                 field_outputs=["U", "UR"],
                 element_sets=vtk_element_sets, clear=True)
 
-    return stiffness, hill_mandel
+    return stiffness, hill_mandel_residuals
 
 
 def export_results(result_directory, reduced_stiffness,
-                   analytical_stiffness, hill_mandel,
+                   analytical_stiffness, hill_mandel_residuals,
                    weighted_stiffness):
     """Export the stiffness matrices and verification residuals."""
     if not os.path.isdir(result_directory):
@@ -269,7 +277,7 @@ def export_results(result_directory, reduced_stiffness,
         analytical_stiffness,
         os.path.join(result_directory, "normal_stiffness_analytical"))
     export_to_csv_file(
-        hill_mandel,
+        hill_mandel_residuals,
         os.path.join(result_directory, "hill_mandel_residuals"),
         header="hill_mandel_residual")
     export_to_csv_file(
@@ -277,7 +285,7 @@ def export_results(result_directory, reduced_stiffness,
         os.path.join(result_directory, "effective_stiffness_weighted"))
 
     residual_names, residuals = compute_residuals(
-        reduced_stiffness, analytical_stiffness, hill_mandel,
+        reduced_stiffness, analytical_stiffness, hill_mandel_residuals,
         weighted_stiffness)
     export_to_csv_file(
         residuals[np.newaxis, :],
@@ -342,9 +350,9 @@ def main():
         reduced_cell.model.StaticStep(name=step_name, previous="Initial")
 
         print("\nHomogenize the reduced cell.")
-        reduced_stiffness, hill_mandel = run_stiffness_cases(
+        reduced_stiffness, hill_mandel_residuals = run_stiffness_cases(
             reduced_cell, step_name, strain_magnitude, component_names,
-            collect_diagnostics=True, power_tolerance=power_tolerance,
+            evaluate_hill_mandel=True, power_tolerance=power_tolerance,
             vtk_directory=os.path.join(vtk_directory, "reduced"),
             vtk_element_sets=vtk_element_sets)
 
@@ -354,6 +362,9 @@ def main():
             os.makedirs(weighted_directory)
         os.chdir(weighted_directory)
 
+        # Boundary shells are shared by two cells and edge beams by four.
+        # Scaling E with fixed nu weights their complete linear-elastic
+        # constitutive response by the corresponding ownership factor.
         weighted_properties = {
             "CONTINUUM": properties["CONTINUUM"],
             "SHELL": (0.5*properties["SHELL"][0],
@@ -381,7 +392,7 @@ def main():
         print("\nExport verification results.")
         export_results(
             result_directory, reduced_stiffness, analytical_stiffness,
-            hill_mandel, weighted_stiffness)
+            hill_mandel_residuals, weighted_stiffness)
     finally:
         os.chdir(original_directory)
         if gmsh.is_initialized():
@@ -389,7 +400,7 @@ def main():
 
 
 if __name__ == "__main__":
-    # Abaqus replaces stdout; restore the shell that launched the example.
+    # Abaqus replaces stdout. Restore the shell that launched the example.
     if sys.__stdout__ is not None:
         sys.stdout = sys.__stdout__
     main()
