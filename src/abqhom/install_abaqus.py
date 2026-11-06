@@ -1,10 +1,11 @@
 # SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Install the Python packages required by abqhom into an Abaqus prefix."""
+"""Install the packages required by abqhom into an isolated Abaqus runtime."""
 
 import argparse
 import fnmatch
+from importlib import metadata
 import json
 import os
 import re
@@ -15,11 +16,6 @@ import tempfile
 
 from abqhom import __version__
 
-
-try:
-    STRING_TYPES = (basestring,)
-except NameError:
-    STRING_TYPES = (str,)
 
 RUNTIME_PROJECTS = ("gmsh", "paraqus", "backports.weakref")
 MARKER_FILE = ".abqhom-runtime.json"
@@ -44,12 +40,6 @@ def _requirement_name(requirement):
 
 def _runtime_requirements():
     """Read the Abaqus-facing requirements from installed package metadata."""
-
-    try:
-        from importlib import metadata
-    except ImportError:
-        raise RuntimeError(
-            "The Abaqus installer must run in Python 3.9 or newer.")
 
     try:
         requirements = metadata.requires("abqhom") or []
@@ -139,9 +129,9 @@ def _read_marker(prefix):
                            "schema.")
     marker_prefix = data.get("prefix")
     package_directory = data.get("site_packages")
-    if not isinstance(marker_prefix, STRING_TYPES):
+    if not isinstance(marker_prefix, str):
         raise RuntimeError("The runtime marker contains an invalid prefix.")
-    if not isinstance(package_directory, STRING_TYPES):
+    if not isinstance(package_directory, str):
         raise RuntimeError("The runtime marker contains an invalid package "
                            "directory.")
     if _canonical_path(marker_prefix) != _canonical_path(prefix):
