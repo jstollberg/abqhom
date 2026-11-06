@@ -167,7 +167,7 @@ class TestPeriodicity(GmshTestCase):
         primary_coord = gmsh.model.mesh.get_node(int(primary[0]))[0]
         secondary_coord = gmsh.model.mesh.get_node(int(secondary[0]))[0]
         offset = np.array(secondary_coord) - np.array(primary_coord)
-        self.assertTrue(np.allclose(offset, [length, length, length]))
+        np.testing.assert_allclose(offset, [length, length, length])
 
     def test_periodic_mesh_constraint_is_registered_in_gmsh(self):
         """Gmsh records periodic correspondence on secondary faces."""
@@ -388,8 +388,8 @@ class TestReadFromMesh(GmshTestCase):
         top = coord[int(ns["EDGE_3"][0])]
         left = coord[int(ns["EDGE_4"][0])]
         right = coord[int(ns["EDGE_2"][0])]
-        self.assertTrue(np.allclose(top - bottom, [0.0, size, 0.0]))
-        self.assertTrue(np.allclose(right - left, [size, 0.0, 0.0]))
+        np.testing.assert_allclose(top - bottom, [0.0, size, 0.0])
+        np.testing.assert_allclose(right - left, [size, 0.0, 0.0])
 
         es = rve.element_sets
         self.assertEqual(set(es["SOLID"]), set(es["ALL_ELEMENTS"]))
@@ -442,7 +442,7 @@ class TestReadFromMesh(GmshTestCase):
         coord = {int(t): coords[i] for i, t in enumerate(tags)}
         for primary_tag, secondary_tag in zip(ns["FACE_1"], ns["FACE_2"]):
             offset = coord[int(secondary_tag)] - coord[int(primary_tag)]
-            self.assertTrue(np.allclose(offset, [0.0, 0.0, size]))
+            np.testing.assert_allclose(offset, [0.0, 0.0, size])
 
     def test_detects_a_non_periodic_mesh(self):
         """Mismatched spatial boundary nodes are detected as nonperiodic."""

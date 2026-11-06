@@ -29,6 +29,7 @@ from abqhom.utils import voigt_to_tensor
 def _uniaxial_history():
     """A trivial uniaxial (symmetric) strain history for BC tests."""
     def strain_history(time):
+        """Return the ramped uniaxial macroscopic strain."""
         strain = np.zeros(6)
         strain[0] = 1.0e-3
         return time*voigt_to_tensor(strain, "STRAIN")
@@ -41,7 +42,7 @@ def _build(builder, element_size=1.0, custom_types=None):
     rve = GmshRVE(name)
     rve.add_periodic_mesh_constraints()
     rve.generate_mesh(element_size=element_size)
-    return AbaqusRVE(rve, custom_types or {})
+    return AbaqusRVE(rve, custom_types=custom_types)
 
 
 class TestLoadHistory(unittest.TestCase):
@@ -85,15 +86,15 @@ class TestLoadHistory(unittest.TestCase):
         times = np.array([0.0, 0.5, 1.0])
         history = LoadHistory(times, self._history)
 
-        self.assertTrue(np.array_equal(history.time_data, times))
+        np.testing.assert_array_equal(history.time_data, times)
         expected = np.array([self._history(time) for time in times])
-        self.assertTrue(np.allclose(history.load_data, expected))
+        np.testing.assert_allclose(history.load_data, expected)
 
         table = history.as_table()
         self.assertEqual(len(table), len(times))
         for index, (time, load) in enumerate(table):
             self.assertEqual(time, times[index])
-            self.assertTrue(np.allclose(load, expected[index]))
+            np.testing.assert_allclose(load, expected[index])
 
     def test_iteration_is_reentrant(self):
         """Nested iteration does not alter another active iterator."""
@@ -108,11 +109,32 @@ class TestLoadHistory(unittest.TestCase):
         self.assertEqual(second_time, times[1])
 
 
-class TestConstruction(AbaqusTestCase):
-    """Test construction, output access, and VTK selection."""
+class TestRotationalKinematics(unittest.TestCase):
+    """Test rotation-vector mappings used for incremental work."""
 
-    def test_run_analysis_accepts_legacy_missing_job_status(self):
-        """A missing job status is accepted for legacy Abaqus releases."""
+    def test_left_jacobian_is_identity_at_zero_rotation(self):
+        """The SO(3) left Jacobian approaches the identity at zero."""
+        jacobian = AbaqusRVE._left_jacobian(np.zeros(3))
+        np.testing.assert_allclose(jacobian, np.eye(3))
+
+    def test_left_jacobian_matches_finite_axis_rotation(self):
+        """The closed form is correct for a finite rotation about z."""
+        angle = 0.5*np.pi
+        jacobian = AbaqusRVE._left_jacobian(
+            np.array([0.0, 0.0, angle]))
+        factor = 2.0/np.pi
+        expected = np.array([[factor, -factor, 0.0],
+                             [factor, factor, 0.0],
+                             [0.0, 0.0, 1.0]])
+        np.testing.assert_allclose(jacobian, expected)
+
+
+class TestAnalysisExecution(AbaqusTestCase):
+    """Test Abaqus job submission and completion handling."""
+
+    @staticmethod
+    def _run_with_status(status):
+        """Run an analysis with a mocked Abaqus job status."""
         class Model(object):
             """Provide the model containers accessed by run_analysis."""
 
@@ -123,9 +145,11 @@ class TestConstruction(AbaqusTestCase):
                 self.steps = {"Initial": object()}
 
         class Job(object):
-            """Represent a submitted job whose status is unavailable."""
+            """Represent a submitted job with a prescribed status."""
 
-            status = None
+            def __init__(self):
+                """Store the requested completion status."""
+                self.status = status
 
             @staticmethod
             def submit():
@@ -133,7 +157,7 @@ class TestConstruction(AbaqusTestCase):
 
             @staticmethod
             def waitForCompletion():
-                """Return without assigning a successful status."""
+                """Return without changing the prescribed status."""
 
         class ModelDatabase(object):
             """Create and retain mocked Abaqus jobs."""
@@ -143,11 +167,11 @@ class TestConstruction(AbaqusTestCase):
                 self.jobs = {}
 
             def Job(self, name, **kwargs):
-                """Create a job with an unavailable completion status."""
+                """Create a job with the prescribed completion status."""
                 self.jobs[name] = Job()
 
         unit = object.__new__(AbaqusRVE)
-        unit._model_name = "MISSING_STATUS"
+        unit._model_name = "MOCKED_STATUS"
         unit._model = Model()
         unit._odb = None
         unit._job_name = None
@@ -159,6 +183,18 @@ class TestConstruction(AbaqusTestCase):
             unit.run_analysis()
         finally:
             abqmodel.mdb = original_mdb
+
+    def test_run_analysis_accepts_legacy_missing_job_status(self):
+        """A missing job status is accepted for legacy Abaqus releases."""
+        self._run_with_status(None)
+
+    def test_run_analysis_rejects_unsuccessful_job_status(self):
+        """A definite unsuccessful job status raises a runtime error."""
+        self.assertRaises(RuntimeError, self._run_with_status, "ABORTED")
+
+
+class TestVTKExport(AbaqusTestCase):
+    """Test VTK reader configuration and frame selection."""
 
     def test_vtk_reader_uses_current_job_name(self):
         """VTK export reads the most recently submitted repeated job."""
@@ -276,12 +312,9 @@ class TestConstruction(AbaqusTestCase):
         self.assertEqual(captured["node_sets"], ["BOUNDARY_NODES"])
         self.assertEqual(captured["element_sets"], ["CONTINUUM"])
 
-    def test_missing_odb_raises_io_error(self):
-        """Opening a nonexistent output database raises an I/O error."""
-        unit = object.__new__(AbaqusRVE)
-        unit._model_name = "ODB_THAT_DOES_NOT_EXIST"
-        unit._odb = None
-        self.assertRaises(IOError, unit.open_odb_file)
+
+class TestConstruction(AbaqusTestCase):
+    """Test transfer of Gmsh geometry into an Abaqus model."""
 
     def test_model_dimension_3d(self):
         """A spatial Gmsh cell becomes a three-dimensional Abaqus RVE."""
@@ -298,8 +331,8 @@ class TestConstruction(AbaqusTestCase):
     def test_bounding_box_matches_geometry(self):
         """The transferred Abaqus RVE retains the Gmsh bounding box."""
         unit = _build(lambda: fixtures.simple_cubic("C", 2.0))
-        self.assertTrue(np.allclose(unit.get_bounding_box(),
-                                    [-1, -1, -1, 1, 1, 1]))
+        np.testing.assert_allclose(
+            unit.get_bounding_box(), [-1, -1, -1, 1, 1, 1])
 
     def test_volume_matches_3d_geometry(self):
         """RVE volume equals the cuboidal cell volume in three dimensions."""
@@ -310,6 +343,17 @@ class TestConstruction(AbaqusTestCase):
         """RVE volume denotes the cell area for a planar model."""
         unit = _build(lambda: fixtures.square_lattice("C2", 2.0))
         self.assertAlmostEqual(unit.get_volume(), 4.0)
+
+
+class TestODBPostprocessing(AbaqusTestCase):
+    """Test output-database lifetime and frame metadata."""
+
+    def test_missing_odb_raises_io_error(self):
+        """Opening a nonexistent output database raises an I/O error."""
+        unit = object.__new__(AbaqusRVE)
+        unit._model_name = "ODB_THAT_DOES_NOT_EXIST"
+        unit._odb = None
+        self.assertRaises(IOError, unit.open_odb_file)
 
     def test_frame_time_includes_time_accumulated_before_step(self):
         """Frame time includes the total time accumulated before its step."""
@@ -386,6 +430,7 @@ class TestConstruction(AbaqusTestCase):
             """Provide time and empty field-output data."""
 
             def __init__(self, value):
+                """Store the relative time and empty field outputs."""
                 self.frameValue = value
                 self.fieldOutputs = {}
 
@@ -444,6 +489,10 @@ class TestConstruction(AbaqusTestCase):
 
         self.assertRaises(RuntimeError, unit.average_stress, "LOAD")
         self.assertIsNone(unit.odb)
+
+
+class TestReduction(AbaqusTestCase):
+    """Test set transfer and periodic boundary-element reduction."""
 
     def test_node_and_element_sets_are_transferred(self):
         """Physical and generated sets are transferred into Abaqus."""
@@ -539,9 +588,7 @@ class TestRigidBodyAnchor(AbaqusTestCase):
         self.assertIn(node.label, corner_labels)
 
     def test_anchor_is_not_a_periodic_secondary_node(self):
-        """The auto-selected anchor must be a primary node so it can
-        carry a Dirichlet BC without over-constraining a periodic
-        equation."""
+        """Automatic anchoring excludes periodic secondary nodes."""
         unit = _build(lambda: fixtures.plus_lattice_2d("L", 2.0))
         _, node = unit.select_rigid_body_anchor()
         secondary_labels = set()
@@ -575,6 +622,18 @@ class TestRigidBodyAnchor(AbaqusTestCase):
 
 class TestPeriodicBoundaryConditions(AbaqusTestCase):
     """Test compatibility checks for periodic boundary conditions."""
+
+    def test_nonmatching_boundary_mesh_is_rejected(self):
+        """Periodic constraints require one-to-one boundary node pairs."""
+        fixtures.simple_cubic("PBC_NONMATCHING", length=2.0)
+        rve = GmshRVE("PBC_NONMATCHING")
+        rve.generate_mesh(element_size=0.7)
+        unit = AbaqusRVE(rve)
+        unit.model.StaticStep(name="LOAD", previous="Initial")
+
+        self.assertFalse(unit.periodic_mesh)
+        self.assertRaises(RuntimeError, unit.apply_periodic_bc,
+                          "LOAD", _uniaxial_history())
 
     def test_one_sided_embedded_pair_is_rejected(self):
         """A periodic pair cannot contain only one eliminated translation."""
@@ -630,8 +689,7 @@ class TestShellSection(AbaqusTestCase):
     """Test shell-section integration options."""
 
     def test_shell_section_is_integrated_during_analysis(self):
-        """assign_shell_section integrates through the thickness during the
-        analysis (preIntegrate OFF) so nonlinear materials are supported."""
+        """Shell sections are integrated during analysis by default."""
         unit = _build(lambda: fixtures.parallel_plates_3d("SHS", 2.0),
                       element_size=1.0)
         material = unit.model.Material(name="MAT")
@@ -655,8 +713,7 @@ class TestAffineBoundaryConditions(AbaqusTestCase):
     """Test applicability of affine displacement boundary conditions."""
 
     def test_beam_elements_are_rejected(self):
-        """Affine displacement BCs do not support rotational DOFs; a beam
-        lattice must raise NotImplementedError (periodic BCs handle it)."""
+        """Affine displacement BCs reject beam rotational DOFs."""
         unit = _build(lambda: fixtures.simple_cubic("AF1", 2.0))
         material = unit.model.Material(name="M")
         material.Elastic(table=[[210.0, 0.3]])
@@ -674,19 +731,16 @@ class TestAffineBoundaryConditions(AbaqusTestCase):
                           custom_types={1: "B31OS"})
 
     def test_continuum_is_supported(self):
-        """A pure continuum RVE has no rotational DOFs, so the affine BC
-        applies the translational Dirichlet BCs without raising."""
+        """Affine displacement BCs support pure continuum RVEs."""
         unit = _build(lambda: fixtures.solid_cube("AF3", 1.0))
         material = unit.model.Material(name="M")
         material.Elastic(table=[[100.0, 0.3]])
         unit.assign_solid_section("SOLID", "M")
         unit.model.StaticStep(name="LOAD", previous="Initial")
         unit.apply_affine_displacement_bc("LOAD", _uniaxial_history())
-        has_dirichlet = False
-        for name in unit.model.boundaryConditions.keys():
-            if name.startswith("DIRICHLET_"):
-                has_dirichlet = True
-                break
+        has_dirichlet = any(
+            name.startswith("DIRICHLET_")
+            for name in unit.model.boundaryConditions.keys())
         self.assertTrue(has_dirichlet)
 
         reference_points = [

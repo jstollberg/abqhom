@@ -25,13 +25,13 @@ class TestVoigtTensor(unittest.TestCase):
         """Voigt to tensor to Voigt reproduces a 3D strain vector."""
         v = np.array([0.1, -0.2, 0.3, 0.4, -0.5, 0.6])
         back = tensor_to_voigt(voigt_to_tensor(v, "STRAIN"), "STRAIN")
-        self.assertTrue(np.allclose(back, v))
+        np.testing.assert_allclose(back, v)
 
     def test_roundtrip_2d_stress(self):
         """Voigt to tensor to Voigt reproduces a 2D stress vector."""
         v = np.array([1.0, -2.0, 0.5])
         back = tensor_to_voigt(voigt_to_tensor(v, "STRESS"), "STRESS")
-        self.assertTrue(np.allclose(back, v))
+        np.testing.assert_allclose(back, v)
 
     def test_strain_shear_halving(self):
         """The engineering shear strain becomes the tensor component/2."""
@@ -51,7 +51,7 @@ class TestVoigtTensor(unittest.TestCase):
         tensor = np.array([[1.0, 2.0], [3.0, 4.0]])
         result = tensor_to_voigt(
             tensor, "STRESS", check_symmetry=False)
-        self.assertTrue(np.array_equal(result, [1.0, 4.0, 2.0]))
+        np.testing.assert_array_equal(result, [1.0, 4.0, 2.0])
 
     def test_invalid_quantities_are_rejected(self):
         """Both conversion directions reject unknown quantities."""
@@ -84,8 +84,8 @@ class TestBounds(unittest.TestCase):
         """The Voigt estimate is the volume-weighted average."""
         expected = sum(fraction*stiffness for fraction, stiffness in zip(
             self.fractions, self.stiffnesses))
-        self.assertTrue(np.allclose(
-            voigt(self.fractions, self.stiffnesses), expected))
+        np.testing.assert_allclose(
+            voigt(self.fractions, self.stiffnesses), expected)
 
     def test_reuss_matches_harmonic_mixture_and_is_below_voigt(self):
         """The Reuss estimate is the harmonic mixture and a lower bound."""
@@ -96,7 +96,7 @@ class TestBounds(unittest.TestCase):
             for fraction, stiffness in zip(
                 self.fractions, self.stiffnesses))
         expected = np.linalg.inv(expected_compliance)
-        self.assertTrue(np.allclose(C_reuss, expected))
+        np.testing.assert_allclose(C_reuss, expected)
         difference = 0.5*((C_voigt - C_reuss)
                           + (C_voigt - C_reuss).T)
         self.assertGreaterEqual(np.min(np.linalg.eigvalsh(difference)),
@@ -144,7 +144,7 @@ class TestHillMandelResidual(unittest.TestCase):
         """Incremental-work histories may be passed as arrays."""
         residual = hill_mandel_residual(np.array([2.0, 1.0e-9]),
                                         np.array([1.0, 0.0]), 1.0e-6)
-        self.assertTrue(np.allclose(residual, np.array([0.5, 1.0e-3])))
+        np.testing.assert_allclose(residual, np.array([0.5, 1.0e-3]))
 
     def test_nonpositive_tolerance_is_rejected(self):
         """A nonpositive incremental-work scale is not admissible."""
@@ -169,7 +169,7 @@ class TestFileIO(unittest.TestCase):
         csv_path = os.path.join(self.tmp, "stiffness.csv")
         export_to_csv_file(data, path)
         back = read_csv_file(csv_path)
-        self.assertTrue(np.allclose(back, data))
+        np.testing.assert_allclose(back, data)
         self.assertTrue(os.path.isfile(csv_path))
         self.assertFalse(os.path.exists(path))
 
@@ -182,7 +182,7 @@ class TestFileIO(unittest.TestCase):
 
         back, header = read_csv_file(path, has_header=True)
 
-        self.assertTrue(np.array_equal(back, data))
+        np.testing.assert_array_equal(back, data)
         self.assertEqual(header, ("first", "second"))
 
     def test_empty_csv_header_is_rejected(self):

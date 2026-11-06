@@ -29,7 +29,7 @@ class TestBoundaryGeometry(GmshTestCase):
         """Boundary points recover the exact cuboidal bounding box."""
         fixtures.simple_cubic("BB", length=2.0)
         box = Boundary("BB").get_bounding_box_from_points()
-        self.assertTrue(np.allclose(box, [-1, -1, -1, 1, 1, 1]))
+        np.testing.assert_allclose(box, [-1, -1, -1, 1, 1, 1])
 
     def test_isolated_points_do_not_enlarge_cell_bounds(self):
         """Disconnected construction points do not define RVE bounds."""
@@ -40,9 +40,9 @@ class TestBoundaryGeometry(GmshTestCase):
         boundary = Boundary("ISOLATED_POINT")
 
         self.assertTrue(boundary.periodic)
-        self.assertTrue(np.allclose(
+        np.testing.assert_allclose(
             boundary.get_bounding_box_from_points(),
-            [-1, -1, -1, 1, 1, 1]))
+            [-1, -1, -1, 1, 1, 1])
 
     def test_group_coordinate_identifiers(self):
         """Group identifiers encode fixed and unconstrained coordinates."""
@@ -53,8 +53,9 @@ class TestBoundaryGeometry(GmshTestCase):
                          POINT_GROUPS + EDGE_GROUPS + FACE_GROUPS)
 
         # POINT_1 is the minimum corner and POINT_7 the maximum corner.
-        self.assertTrue(np.allclose(identifiers["POINT_1"], [-1, -1, -1]))
-        self.assertTrue(np.allclose(identifiers["POINT_7"], [1, 1, 1]))
+        np.testing.assert_allclose(
+            identifiers["POINT_1"], [-1, -1, -1])
+        np.testing.assert_allclose(identifiers["POINT_7"], [1, 1, 1])
 
         # FACE_1 lies at z_min and is free in x and y.
         face1 = identifiers["FACE_1"]
@@ -70,12 +71,12 @@ class TestBoundaryGeometry(GmshTestCase):
             [-1.0, -1.0, -1.0], [1.0, 1.0, 1.0])
 
         for name in model_identifiers:
-            self.assertTrue(np.array_equal(
+            np.testing.assert_array_equal(
                 np.isnan(model_identifiers[name]),
-                np.isnan(static_identifiers[name])))
-            self.assertTrue(np.allclose(
+                np.isnan(static_identifiers[name]))
+            np.testing.assert_allclose(
                 np.nan_to_num(model_identifiers[name]),
-                np.nan_to_num(static_identifiers[name])))
+                np.nan_to_num(static_identifiers[name]))
 
     def test_group_identifiers_reject_invalid_shapes(self):
         """Static group identifiers require two three-component bounds."""
@@ -122,7 +123,7 @@ class TestBoundaryClassification(GmshTestCase):
         boundary = Boundary("CC")
         dim, tag = boundary["POINT_1"][0]
         coord = gmsh.model.get_value(dim, tag, [])
-        self.assertTrue(np.allclose(coord, [-1, -1, -1]))
+        np.testing.assert_allclose(coord, [-1, -1, -1])
 
     def test_corner_cell_populates_point_groups(self):
         """A corner-connected cubic cell populates all point groups."""
@@ -251,8 +252,8 @@ class TestBoundaryPeriodicity(GmshTestCase):
             gmsh.model.get_value(primary_dim, primary_tag, []))
         secondary = np.array(
             gmsh.model.get_value(secondary_dim, secondary_tag, []))
-        self.assertTrue(np.allclose(secondary - primary,
-                                    [length, 0.0, 0.0]))
+        np.testing.assert_allclose(
+            secondary - primary, [length, 0.0, 0.0])
 
 
 class TestBoundaryDict(GmshTestCase):
@@ -271,6 +272,29 @@ class TestBoundaryDict(GmshTestCase):
         fixtures.simple_cubic("ITER", length=2.0)
         boundary = Boundary("ITER")
         self.assertEqual(set(boundary), set(boundary.data))
+
+
+class TestBoundaryDataValidation(GmshTestCase):
+    """Test validation of manually supplied boundary mappings."""
+
+    def test_nonexistent_entity_reference_is_rejected(self):
+        """A supplied boundary may reference only existing Gmsh entities."""
+        fixtures.simple_cubic("MISSING_ENTITY", length=2.0)
+        data = {"POINT_1": [(0, 999999)]}
+
+        self.assertRaises(
+            RuntimeError, Boundary, "MISSING_ENTITY", initial_data=data,
+            check_periodic=False)
+
+    def test_entity_cannot_belong_to_multiple_boundary_groups(self):
+        """A supplied entity must belong to one disjoint boundary group."""
+        fixtures.simple_cubic("DUPLICATE_ENTITY", length=2.0)
+        point = gmsh.model.get_entities(0)[0]
+        data = {"POINT_1": [point], "POINT_2": [point]}
+
+        self.assertRaises(
+            RuntimeError, Boundary, "DUPLICATE_ENTITY", initial_data=data,
+            check_periodic=False)
 
 
 class TestGmshRVEValidation(GmshTestCase):

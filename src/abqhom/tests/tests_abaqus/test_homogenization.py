@@ -27,10 +27,11 @@ def _stiffness_column(build, assign_sections, comp, element_size,
     rve.add_periodic_mesh_constraints()
     rve.generate_mesh(element_size=element_size)
 
-    unit_cell = AbaqusRVE(rve, custom_types or {})
+    unit_cell = AbaqusRVE(rve, custom_types=custom_types)
     assign_sections(unit_cell)
 
     def strain_history(time):
+        """Return the selected ramped macroscopic strain component."""
         strain = np.zeros(6)
         strain[comp] = STRAIN
         return time*voigt_to_tensor(strain, "STRAIN")
@@ -57,11 +58,11 @@ class TestBeamLattices(AbaqusTestCase):
     """Test beam-lattice stiffness and incremental power."""
 
     def test_simple_cubic_axial_modulus(self):
-        """C11 of a simple-cubic beam lattice matches E*pi*r**2/L**2 and
-        the transverse coupling C12 vanishes."""
+        """The simple-cubic axial modulus matches its analytical value."""
         E, nu, r, L = 210.0, 0.3, 0.05, 1.0
 
         def assign(unit_cell):
+            """Assign the linear-elastic beam section."""
             _elastic(unit_cell, "M", E, nu)
             unit_cell.assign_beam_section("STRUTS", "M", r)
 
@@ -73,12 +74,12 @@ class TestBeamLattices(AbaqusTestCase):
         self.assertLess(abs(column[1]), 1.0e-3*analytical)
 
     def test_boundary_strut_ownership(self):
-        """After redundant periodic copies are removed, the retained edge
-        struts of a 2D square cell give C11 = E*A (not 2*E*A)."""
+        """Reduced square-edge struts recover the owned axial stiffness."""
         E, nu, r = 1.0, 0.3, 0.05
         area = np.pi*r*r
 
         def assign(unit_cell):
+            """Assign the linear-elastic beam section."""
             _elastic(unit_cell, "M", E, nu)
             unit_cell.assign_beam_section("STRUTS", "M", r)
 
@@ -87,8 +88,7 @@ class TestBeamLattices(AbaqusTestCase):
         self.assertAlmostEqual(column[0], E*area, delta=1.0e-4*E*area)
 
     def test_2d_virtual_power_matches_macroscopic_power(self):
-        """The incremental element-force power supports the shorter 2D
-        translation vector and the single out-of-plane beam rotation."""
+        """Microscopic and macroscopic power agree for a planar beam cell."""
         E, nu, r = 1.0, 0.3, 0.05
         fixtures.square_lattice("VP2", size=1.0)
         rve = GmshRVE("VP2")
@@ -101,6 +101,7 @@ class TestBeamLattices(AbaqusTestCase):
         unit.model.StaticStep(name="LOAD", previous="Initial")
 
         def strain_history(time):
+            """Return the ramped axial strain history."""
             strain = np.zeros(6)
             strain[0] = time*STRAIN
             return voigt_to_tensor(strain, "STRAIN")
@@ -131,6 +132,7 @@ class TestBeamLattices(AbaqusTestCase):
         unit.model.StaticStep(name="LOAD", previous="Initial")
 
         def strain_history(time):
+            """Return the ramped engineering-shear history."""
             strain = np.zeros(6)
             strain[5] = time*STRAIN
             return voigt_to_tensor(strain, "STRAIN")
@@ -150,6 +152,7 @@ class TestBeamLattices(AbaqusTestCase):
         E, nu, r, L = 210.0, 0.3, 0.05, 1.0
 
         def assign(unit_cell):
+            """Assign identical sections to edge and diagonal beams."""
             _elastic(unit_cell, "M", E, nu)
             unit_cell.assign_beam_section("CUBIC", "M", r)
             unit_cell.assign_beam_section("BCC", "M", r)
@@ -163,10 +166,7 @@ class TestBeamLattices(AbaqusTestCase):
                                delta=1.0e-6*abs(cxx[0]) + 1.0e-9)
 
     def test_one_model_runs_several_load_cases(self):
-        """A single AbaqusRVE can run several load cases in sequence:
-        re-applying the periodic BC clears the previous one and
-        run_analysis re-runs on the same model. Cases 0 and 1 of a
-        simple-cubic lattice must give C11 == C22."""
+        """One AbaqusRVE supports consecutive periodic load cases."""
         E, nu, r, L = 210.0, 0.3, 0.05, 1.0
         fixtures.simple_cubic("REUSE", length=L)
         rve = GmshRVE("REUSE")
@@ -180,6 +180,7 @@ class TestBeamLattices(AbaqusTestCase):
         columns = []
         for comp in (0, 1):
             def strain_history(time, c=comp):
+                """Return the current ramped normal-strain history."""
                 strain = np.zeros(6)
                 strain[c] = STRAIN
                 return time*voigt_to_tensor(strain, "STRAIN")
@@ -203,13 +204,11 @@ class TestShells(AbaqusTestCase):
     """Test homogenization of periodic shell structures."""
 
     def test_parallel_plates_membrane_modulus(self):
-        """Two parallel shell plates form a periodic stack of membranes.
-        One periodic copy of the plates is retained, so the effective
-        membrane stiffness is C11 = E*t/((1-nu**2)*spacing) with
-        C12 = nu*C11. Exercises assign_shell_section end to end."""
+        """Periodic shell plates recover their analytical membrane moduli."""
         E, nu, t, size, spacing = 210.0, 0.3, 0.01, 1.0, 1.0
 
         def assign(unit_cell):
+            """Assign the linear-elastic shell section."""
             _elastic(unit_cell, "M", E, nu)
             unit_cell.assign_shell_section("SHELLS", "M", t)
 
@@ -231,6 +230,7 @@ class TestContinuum(AbaqusTestCase):
         E, nu, L = 100.0, 0.3, 1.0
 
         def assign(unit_cell):
+            """Assign the homogeneous solid section."""
             _elastic(unit_cell, "M", E, nu)
             unit_cell.assign_solid_section("SOLID", "M")
 
@@ -247,12 +247,11 @@ class TestContinuum(AbaqusTestCase):
         self.assertAlmostEqual(cyz[3], C44, delta=1.0e-3*C44)
 
     def test_affine_bc_recovers_material_for_homogeneous_cube(self):
-        """Affine (Taylor/KUBC) BCs on a homogeneous continuum recover the
-        material stiffness exactly, since the material deforms affinely.
-        This is the end-to-end coverage of the affine displacement BC."""
+        """Affine BCs recover a homogeneous continuum's material stiffness."""
         E, nu, L = 100.0, 0.3, 1.0
 
         def assign(unit_cell):
+            """Assign the homogeneous solid section."""
             _elastic(unit_cell, "M", E, nu)
             unit_cell.assign_solid_section("SOLID", "M")
 
@@ -326,8 +325,7 @@ class TestEmbeddedFibers(AbaqusTestCase):
     """Test periodic homogenization with embedded beam fibers."""
 
     def test_boundary_fiber_excluded_from_translation_bc(self):
-        """A boundary-ending embedded beam is omitted from translational
-        periodic equations and increases the finite axial stiffness."""
+        """Embedded boundary fibers are excluded from periodic translations."""
         E_m, nu_m, E_f, nu_f = 50.0, 0.3, 210.0, 0.2
 
         fixtures.matrix_with_boundary_fiber("EMB", size=1.0)
@@ -346,6 +344,7 @@ class TestEmbeddedFibers(AbaqusTestCase):
         unit.model.StaticStep(name="LOAD", previous="Initial")
 
         def strain_history(time):
+            """Return the ramped axial strain applied to the fiber."""
             strain = np.zeros(6)
             strain[2] = STRAIN
             return time*voigt_to_tensor(strain, "STRAIN")

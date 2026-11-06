@@ -374,6 +374,34 @@ class TestTransactionalInstallation(_InstallerTestCase):
         self.assertEqual(installer._read_marker(prefix)["managed_by"],
                          "abqhom")
 
+    def test_failed_promotion_restores_previous_runtime(self):
+        """A failed staging rename restores the active managed runtime."""
+        prefix, old_file = self._create_existing_runtime()
+        stage = os.path.join(self.directory, "staged-runtime")
+        os.mkdir(stage)
+        staged_file = os.path.join(stage, "new-runtime.txt")
+        with open(staged_file, "w"):
+            pass
+
+        original_rename = installer.os.rename
+
+        def fail_stage_rename(source, destination):
+            """Fail only while promoting the staged runtime."""
+            if source == stage and destination == prefix:
+                raise OSError("simulated promotion failure")
+            return original_rename(source, destination)
+
+        installer.os.rename = fail_stage_rename
+        try:
+            self.assertRaises(
+                OSError, installer._promote_stage, stage, prefix)
+        finally:
+            installer.os.rename = original_rename
+
+        self.assertTrue(os.path.isfile(old_file))
+        self.assertTrue(os.path.isfile(staged_file))
+        self.assertFalse(os.path.exists(stage + ".previous"))
+
     def test_successful_update_replaces_previous_runtime(self):
         """A staged update removes stale files from the managed runtime."""
         prefix, old_file = self._create_existing_runtime()
