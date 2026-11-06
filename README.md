@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/jstollberg/abqhom/main/doc/logo_white.png" alt="abqhom logo" width="720">
+</p>
+
 # abqhom
 
 [![License: GPL v3+](https://img.shields.io/badge/License-GPL_v3%2B-blue.svg)](LICENSE)

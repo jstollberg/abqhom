@@ -58,6 +58,7 @@ napoleon_use_ivar = True
 # -- Options for HTML output -------------------------------------------------
 
 html_theme = "sphinx_rtd_theme"
+html_logo = "../logo_white.png"
 html_title = "abqhom documentation"
 html_short_title = "abqhom"
 html_domain_indices = False

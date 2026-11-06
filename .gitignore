@@ -52,5 +52,8 @@ yield_surface/
 *.png
 *.mp4
 
+# Documentation assets
+!doc/logo_white.png
+
 # Generated documentation
 /doc/build/
