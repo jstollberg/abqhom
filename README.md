@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/jstollberg/abqhom/main/doc/logo_white.png" alt="abqhom logo" width="720">
+  <img src="https://raw.githubusercontent.com/jstollberg/abqhom/main/doc/logo_white.png" alt="abqhom logo" width="504">
 </p>
 
 # abqhom
