@@ -4,6 +4,7 @@
 
 # abqhom
 
+[![CI](https://github.com/jstollberg/abqhom/actions/workflows/ci.yaml/badge.svg?branch=main)](https://github.com/jstollberg/abqhom/actions/workflows/ci.yaml)
 [![License: GPL v3+](https://img.shields.io/badge/License-GPL_v3%2B-blue.svg)](LICENSE)
 [![Documentation Status](https://readthedocs.org/projects/abqhom/badge/?version=latest)](https://abqhom.readthedocs.io/en/latest/?badge=latest)
 
