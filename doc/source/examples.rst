@@ -77,10 +77,10 @@ Manuscript-reproduction cases
 -----------------------------
 
 The cases in ``examples/paper_examples`` reproduce the numerical examples of
-the accompanying publication. They contain multi-stage analyses, auxiliary
-sampling jobs, and verification scripts and are intentionally more detailed
-than the tutorials. Their ``README.md`` documents the required execution
-order and generated data products. Their model sizes and number of analyses
-may require a full Abaqus license. See the
+the `accompanying preprint <https://arxiv.org/abs/2611.14770>`_. They contain
+multi-stage analyses, auxiliary sampling jobs, and verification scripts and
+are intentionally more detailed than the tutorials. Their ``README.md``
+documents the required execution order and generated data products. Their
+model sizes and number of analyses may require a full Abaqus license. See the
 `manuscript-example instructions <https://github.com/jstollberg/abqhom/tree/main/examples/paper_examples>`_
 before running them.

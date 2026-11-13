@@ -1,15 +1,15 @@
 Citation
 ========
 
-If you use ``abqhom`` in research, please cite the accompanying publication.
-Its bibliographic entry will be added here upon publication.
+If you use ``abqhom`` in research, please cite the
+`accompanying preprint <https://arxiv.org/abs/2611.14770>`_.
 
 .. code-block:: bibtex
 
-   % Reference will be added upon publication.
-
-Until then, cite the
-`project repository <https://github.com/jstollberg/abqhom>`_ together with the
-software version or commit used. For reproducibility, also report the Abaqus
-release, Gmsh version, and any changes made to the example or analysis
-scripts.
+   @article{stollberg_2026,
+     title = {Nonlinear homogenization of periodic unit cells composed of mixed continuum and structural elements with variationally consistent boundary-member reduction},
+     author = {Stollberg, Jonathan and Schillinger, Dominik},
+     year = {2026},
+     journal = {arXiv preprint arXiv:2611.14770},
+     doi = {10.48550/arXiv.2611.14770}
+   }

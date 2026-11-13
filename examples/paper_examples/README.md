@@ -1,9 +1,9 @@
 # Manuscript-reproduction examples
 
-These examples reproduce the numerical studies in the accompanying
-computational-homogenization manuscript. In contrast to the concise examples
-in the parent directory, they contain analysis and verification scripts for
-complete multi-stage workflows.
+These examples reproduce the numerical studies in the
+[accompanying computational-homogenization preprint](https://arxiv.org/abs/2611.14770).
+In contrast to the concise examples in the parent directory, they contain
+analysis and verification scripts for complete multi-stage workflows.
 
 | Directory | Study | Demonstrates |
 |---|---|---|
