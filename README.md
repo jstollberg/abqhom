@@ -41,8 +41,8 @@ integration, nonlinear solution procedures, and output databases.
 
 ## Scope
 
-Two-dimensional cells must be rectangular in the global X1–X2 plane with
-X3 = 0. Three-dimensional cells must be cuboidal and aligned with the global
+Two-dimensional cells must be rectangular in the global X₁–X₂ plane with
+X₃ = 0. Three-dimensional cells must be cuboidal and aligned with the global
 coordinate axes. Periodic meshes require one-to-one matching nodes on
 opposite boundaries. The effective medium is a first-order Cauchy continuum,
 and imposed macroscopic curvature and element warping degrees of freedom are
