@@ -25,7 +25,9 @@ env:
 jobs:
   common-tests:
     name: Common tests (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    # Python 3.9 and the Abaqus-compatible Python 3.10.5 are unavailable on
+    # Ubuntu 26.04.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
