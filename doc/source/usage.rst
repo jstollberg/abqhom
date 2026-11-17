@@ -99,10 +99,11 @@ analytical checks where available.
 Stress control
 --------------
 
-Periodic cells can alternatively be loaded by a prescribed effective stress.
-The method introduces shared macroscopic kinematic controls and applies their
-work-conjugate generalized forces. For a control :math:`q_\alpha` with tensor
-basis :math:`\boldsymbol{B}_\alpha`, this force is
+Periodic cells can alternatively be loaded by a prescribed effective stress
+through periodic traction boundary conditions. The method introduces shared
+macroscopic kinematic controls and applies their work-conjugate generalized
+forces. For a control :math:`q_\alpha` with tensor basis
+:math:`\boldsymbol{B}_\alpha`, this force is
 
 .. math::
 
@@ -128,7 +129,7 @@ zero effective stress in their respective directions.
        return stress
 
    history = LoadHistory([0.0, 1.0], stress_history)
-   cell.apply_periodic_stress_bc("LOAD", history)
+   cell.apply_periodic_traction_bc("LOAD", history)
    cell.run_analysis(field_outputs=["U"])
 
    stress = cell.average_stress("LOAD")

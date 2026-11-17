@@ -142,7 +142,7 @@ def main():
             return stress
 
         history = LoadHistory(np.array([0.0, 1.0]), stress_history)
-        unit_cell.apply_periodic_stress_bc("LOAD", history)
+        unit_cell.apply_periodic_traction_bc("LOAD", history)
         print("  Run Abaqus analysis.")
         sys.stdout.flush()
         unit_cell.run_analysis(field_outputs=["U"])

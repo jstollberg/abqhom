@@ -646,8 +646,8 @@ class TestPeriodicBoundaryConditions(AbaqusTestCase):
                           unit.apply_periodic_displacement_bc,
                           "LOAD", _uniaxial_history())
 
-    def test_planar_stress_control_uses_three_controls(self):
-        """Planar stress control creates its controls and constraints."""
+    def test_planar_traction_bc_uses_three_controls(self):
+        """Planar traction conditions create controls and constraints."""
         unit = _build(lambda: fixtures.square_lattice("PBC_STRESS_2D", 1.0))
         unit.model.StaticStep(name="LOAD", previous="Initial", nlgeom=OFF)
 
@@ -659,7 +659,7 @@ class TestPeriodicBoundaryConditions(AbaqusTestCase):
             return stress
 
         history = LoadHistory(np.array([0.0, 1.0]), stress_history)
-        unit.apply_periodic_stress_bc("LOAD", history)
+        unit.apply_periodic_traction_bc("LOAD", history)
 
         basis_sum = sum(
             control["basis"] for control in unit._macroscopic_controls)
@@ -673,8 +673,8 @@ class TestPeriodicBoundaryConditions(AbaqusTestCase):
         self.assertIn(
             "DIRICHLET_MACRO_UNUSED", unit.model.boundaryConditions.keys())
 
-    def test_planar_finite_strain_stress_control_fixes_rotation(self):
-        """Planar nominal-stress control uses an upper-triangular basis."""
+    def test_planar_finite_strain_traction_bc_fixes_rotation(self):
+        """Planar finite-strain tractions use an upper-triangular basis."""
         unit = _build(lambda: fixtures.square_lattice("PBC_STRESS_NL", 1.0))
         unit.model.StaticStep(name="LOAD", previous="Initial", nlgeom=ON)
 
@@ -685,7 +685,7 @@ class TestPeriodicBoundaryConditions(AbaqusTestCase):
             return stress
 
         history = LoadHistory(np.array([0.0, 1.0]), stress_history)
-        unit.apply_periodic_stress_bc("LOAD", history)
+        unit.apply_periodic_traction_bc("LOAD", history)
 
         basis_sum = sum(
             control["basis"] for control in unit._macroscopic_controls)
@@ -694,8 +694,8 @@ class TestPeriodicBoundaryConditions(AbaqusTestCase):
         self.assertEqual(len(unit._macroscopic_controls), 3)
         self.assertEqual(len(unit.model.loads), 3)
 
-    def test_finite_strain_stress_control_fixes_rotation(self):
-        """Finite-strain stress control fixes macroscopic rigid rotation."""
+    def test_finite_strain_traction_bc_fixes_rotation(self):
+        """Finite-strain tractions fix the macroscopic rigid rotation."""
         unit = _build(lambda: fixtures.solid_cube("PBC_NLGEOM", 1.0))
         unit.model.StaticStep(name="LOAD", previous="Initial", nlgeom=ON)
 
@@ -705,7 +705,7 @@ class TestPeriodicBoundaryConditions(AbaqusTestCase):
             return time*stress
 
         history = LoadHistory(np.array([0.0, 1.0]), stress_history)
-        unit.apply_periodic_stress_bc("LOAD", history)
+        unit.apply_periodic_traction_bc("LOAD", history)
 
         basis_sum = sum(
             control["basis"] for control in unit._macroscopic_controls)

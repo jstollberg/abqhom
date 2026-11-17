@@ -810,10 +810,10 @@ class AbaqusRVE(object):
         self._bc_initialized = True
         self._macroscopic_controls = controls
 
-    def apply_periodic_stress_bc(self, initialization_step, stress_history,
-                                 fixed_node=None):
+    def apply_periodic_traction_bc(self, initialization_step, stress_history,
+                                   fixed_node=None):
         r"""
-        Apply periodic stress control.
+        Apply periodic traction boundary conditions for stress control.
 
         The periodic equations contain shared macroscopic control DOFs. For a
         control :math:`q_{\alpha}` with tensor basis
@@ -834,7 +834,8 @@ class AbaqusRVE(object):
         Parameters
         ----------
         initialization_step : str
-            The name of the step in which stress control is initialized.
+            The name of the step in which the boundary conditions are
+            initialized.
         stress_history : LoadHistory
             History of the effective Cauchy stress for geometrically linear
             steps or the effective first Piola--Kirchhoff stress for

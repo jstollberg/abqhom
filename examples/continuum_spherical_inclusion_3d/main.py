@@ -189,11 +189,11 @@ def main():
         stress_history = LoadHistory(
             displacement_times, stress_path)
 
-        # The stress-controlled API replaces the preceding macroscopic
-        # displacement constraints. It creates generalized loads conjugate to
-        # the independent components of F, while the microscopic periodic
+        # The periodic traction conditions replace the preceding macroscopic
+        # displacement constraints. They create generalized loads conjugate
+        # to the independent components of F, while the microscopic periodic
         # equations retain their kinematic form.
-        unit_cell.apply_periodic_stress_bc(step_name, stress_history)
+        unit_cell.apply_periodic_traction_bc(step_name, stress_history)
         print("\nRun stress-controlled finite-strain load path.")
         print("  Run Abaqus analysis.")
         sys.stdout.flush()

@@ -283,7 +283,7 @@ class TestContinuum(AbaqusTestCase):
             return time*target_stress
 
         history = LoadHistory(np.array([0.0, 1.0]), stress_history)
-        unit.apply_periodic_stress_bc("LOAD", history)
+        unit.apply_periodic_traction_bc("LOAD", history)
         unit.run_analysis(field_outputs=["U"])
 
         recovered_stress = unit.average_stress("LOAD")
@@ -318,7 +318,7 @@ class TestContinuum(AbaqusTestCase):
             return stress
 
         history = LoadHistory(np.array([0.0, 1.0]), stress_history)
-        unit.apply_periodic_stress_bc("LOAD", history)
+        unit.apply_periodic_traction_bc("LOAD", history)
         unit.run_analysis(field_outputs=["U"])
 
         stress = unit.average_stress("LOAD")
