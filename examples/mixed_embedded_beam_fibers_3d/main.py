@@ -80,9 +80,9 @@ def create_geometry(model_name, edge_length=1.0, nodes_matrix=10,
     # Add two fibers running the full height of the cell, so their end
     # nodes lie on the z-boundary faces (and, through the periodic tiling,
     # the fibers are continuous along z). The embedded-region constraint
-    # eliminates those nodes' translational DOFs; apply_periodic_bc excludes
-    # them from the translational equations, so the fibers may reach the
-    # boundary.
+    # eliminates their translational DOFs. The periodic displacement method
+    # excludes them from the translational equations, so the fibers may
+    # reach the boundary.
     fiber_p1 = gmsh.model.geo.add_point(-0.25*dx, 0.25*dy, -0.5*dz)
     fiber_p2 = gmsh.model.geo.add_point(-0.25*dx, 0.25*dy, 0.5*dz)
     fiber_p3 = gmsh.model.geo.add_point(0.25*dx, -0.25*dy, -0.5*dz)
@@ -155,7 +155,7 @@ def main():
 
             history = LoadHistory(np.array([0.0, 1.0]), strain_history)
 
-            unit_cell.apply_periodic_bc("LOAD", history)
+            unit_cell.apply_periodic_displacement_bc("LOAD", history)
             print("  Run Abaqus analysis.")
             sys.stdout.flush()
             unit_cell.run_analysis(field_outputs=["U", "S"])

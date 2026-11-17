@@ -113,7 +113,7 @@ def main():
             initialInc=increment, minInc=increment, maxInc=increment)
 
         # Apply periodic boundary conditions and run the analysis
-        unit_cell.apply_periodic_bc(step_name, history)
+        unit_cell.apply_periodic_displacement_bc(step_name, history)
         print("\nRun cyclic axial load path.")
         print("  Run Abaqus analysis.")
         sys.stdout.flush()

@@ -24,7 +24,7 @@ for runtime creation and activation on Windows and Linux.
 
 | Example | Cell | Demonstrates / exercises |
 |---|---|---|
-| [`beam_lattice_simple_cubic_3d`](beam_lattice_simple_cubic_3d) | edge struts of the cube | retaining the complete periodic cell through linear-elastic ownership weighting, periodic beam constraints and analytical axial-stiffness verification |
+| [`beam_lattice_simple_cubic_3d`](beam_lattice_simple_cubic_3d) | edge struts of the cube | retaining the complete periodic cell through linear-elastic ownership weighting, periodic beam homogenization under displacement and stress control and analytical axial-stiffness verification |
 | [`beam_lattice_honeycomb_2d`](beam_lattice_honeycomb_2d) | regular hexagonal honeycomb | 2D boundary classification and pairing for struts intersecting cell edges away from the corners, and in-plane isotropy |
 | [`beam_lattice_kelvin_3d`](beam_lattice_kelvin_3d) | Kelvin (truncated octahedron) | finite-strain beam homogenization for a cell whose vertices lie on faces rather than only at corners |
 | [`beam_lattice_simple_cubic_plasticity_3d`](beam_lattice_simple_cubic_plasticity_3d) | simple cubic, cyclic perfect plasticity | path-dependent beam response, cyclic loading and microscopic plastic-strain export |
@@ -39,7 +39,7 @@ uses the automatic removal of redundant secondary element copies.
 | Example | Cell | Demonstrates / exercises |
 |---|---|---|
 | [`continuum_fiber_composite_2d`](continuum_fiber_composite_2d) | fibers in a matrix (plane strain) | affine displacement boundary conditions and verification of the effective stiffness against Voigt and Reuss bounds |
-| [`continuum_spherical_inclusion_3d`](continuum_spherical_inclusion_3d) | spherical inclusion | 3D periodic boundary conditions, automatic boundary classification and finite-strain continuum response |
+| [`continuum_spherical_inclusion_3d`](continuum_spherical_inclusion_3d) | spherical inclusion | 3D automatic boundary classification and recovery of a displacement-controlled finite-strain state under periodic stress control |
 | [`mixed_embedded_beam_fibers_3d`](mixed_embedded_beam_fibers_3d) | beam fibers embedded in a continuum | mixed-dimensional embedded coupling and periodic constraints on embedded boundary nodes |
 
 ## Shell cells

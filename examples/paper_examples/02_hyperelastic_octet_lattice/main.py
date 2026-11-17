@@ -214,7 +214,7 @@ def run_case(gmsh_cell, case_name, component, final_value, parameters,
         return gradient
 
     load_history = LoadHistory(np.asarray([0.0, 1.0]), load_path)
-    cell.apply_periodic_bc(step_name, load_history)
+    cell.apply_periodic_displacement_bc(step_name, load_history)
     print("  Run Abaqus analysis.")
     sys.stdout.flush()
     cell.run_analysis(history_outputs=["ALLIE", "ALLKE"])

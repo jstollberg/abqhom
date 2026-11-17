@@ -83,7 +83,7 @@ def main():
             np.array([0.0, 1.0]),
             lambda pseudo_time: np.diag(
                 [final_displacement_gradient*pseudo_time, 0.0, 0.0]))
-        cell.apply_periodic_bc(step_name, history)
+        cell.apply_periodic_displacement_bc(step_name, history)
         print("\nRun finite-strain axial load path.")
         print("  Run Abaqus analysis.")
         sys.stdout.flush()
