@@ -104,7 +104,7 @@ def main():
         inclusion_fraction = 0.3       # volume fraction of the inclusion
         parameters = {"MATRIX":    [3.5, 0.35],    # soft matrix
                       "INCLUSION": [230.0, 0.2]}   # stiff inclusion
-        element_size = 0.5
+        element_size = 1.0
         final_displacement_gradient = 0.2
 
         # ---------------------------------------------------------------
