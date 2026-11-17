@@ -621,7 +621,7 @@ class TestRigidBodyAnchor(AbaqusTestCase):
 
 
 class TestPeriodicBoundaryConditions(AbaqusTestCase):
-    """Test compatibility checks for periodic boundary conditions."""
+    """Test construction and checks for periodic boundary conditions."""
 
     def test_nonmatching_boundary_mesh_is_rejected(self):
         """Periodic constraints require one-to-one boundary node pairs."""
@@ -632,7 +632,8 @@ class TestPeriodicBoundaryConditions(AbaqusTestCase):
         unit.model.StaticStep(name="LOAD", previous="Initial")
 
         self.assertFalse(unit.periodic_mesh)
-        self.assertRaises(RuntimeError, unit.apply_periodic_bc,
+        self.assertRaises(RuntimeError,
+                          unit.apply_periodic_displacement_bc,
                           "LOAD", _uniaxial_history())
 
     def test_one_sided_embedded_pair_is_rejected(self):
@@ -641,8 +642,77 @@ class TestPeriodicBoundaryConditions(AbaqusTestCase):
         unit.model.StaticStep(name="LOAD", previous="Initial")
         embedded = unit.part.sets["NSET_EDGE_2"].nodes[0].label
         unit._embedded_region_nodes = lambda: {embedded}
-        self.assertRaises(RuntimeError, unit.apply_periodic_bc,
+        self.assertRaises(RuntimeError,
+                          unit.apply_periodic_displacement_bc,
                           "LOAD", _uniaxial_history())
+
+    def test_planar_stress_control_uses_three_controls(self):
+        """Planar stress control creates its controls and constraints."""
+        unit = _build(lambda: fixtures.square_lattice("PBC_STRESS_2D", 1.0))
+        unit.model.StaticStep(name="LOAD", previous="Initial", nlgeom=OFF)
+
+        def stress_history(time):
+            """Return stress data with an unused out-of-plane component."""
+            stress = np.zeros((3, 3))
+            stress[0, 0] = time
+            stress[2, 2] = 0.5*time
+            return stress
+
+        history = LoadHistory(np.array([0.0, 1.0]), stress_history)
+        unit.apply_periodic_stress_bc("LOAD", history)
+
+        basis_sum = sum(
+            control["basis"] for control in unit._macroscopic_controls)
+        np.testing.assert_array_equal(
+            basis_sum, np.array([[1.0, 0.5], [0.5, 1.0]]))
+        self.assertEqual(len(unit._macroscopic_controls), 3)
+        self.assertEqual(len(unit.model.loads), 3)
+        self.assertTrue(any(
+            name.startswith("PBC_")
+            for name in unit.model.constraints.keys()))
+        self.assertIn(
+            "DIRICHLET_MACRO_UNUSED", unit.model.boundaryConditions.keys())
+
+    def test_planar_finite_strain_stress_control_fixes_rotation(self):
+        """Planar nominal-stress control uses an upper-triangular basis."""
+        unit = _build(lambda: fixtures.square_lattice("PBC_STRESS_NL", 1.0))
+        unit.model.StaticStep(name="LOAD", previous="Initial", nlgeom=ON)
+
+        def stress_history(time):
+            """Return a nonsymmetric in-plane nominal stress."""
+            stress = np.zeros((3, 3))
+            stress[0, 1] = time
+            return stress
+
+        history = LoadHistory(np.array([0.0, 1.0]), stress_history)
+        unit.apply_periodic_stress_bc("LOAD", history)
+
+        basis_sum = sum(
+            control["basis"] for control in unit._macroscopic_controls)
+        np.testing.assert_array_equal(
+            basis_sum, np.array([[1.0, 1.0], [0.0, 1.0]]))
+        self.assertEqual(len(unit._macroscopic_controls), 3)
+        self.assertEqual(len(unit.model.loads), 3)
+
+    def test_finite_strain_stress_control_fixes_rotation(self):
+        """Finite-strain stress control fixes macroscopic rigid rotation."""
+        unit = _build(lambda: fixtures.solid_cube("PBC_NLGEOM", 1.0))
+        unit.model.StaticStep(name="LOAD", previous="Initial", nlgeom=ON)
+
+        def stress_history(time):
+            """Return a full nonsymmetric nominal-stress tensor."""
+            stress = np.arange(1.0, 10.0).reshape((3, 3))
+            return time*stress
+
+        history = LoadHistory(np.array([0.0, 1.0]), stress_history)
+        unit.apply_periodic_stress_bc("LOAD", history)
+
+        basis_sum = sum(
+            control["basis"] for control in unit._macroscopic_controls)
+        np.testing.assert_array_equal(
+            basis_sum, np.triu(np.ones((3, 3))))
+        self.assertEqual(len(unit._macroscopic_controls), 6)
+        self.assertEqual(len(unit.model.loads), 6)
 
 
 class TestSectionRadius(AbaqusTestCase):
@@ -745,7 +815,7 @@ class TestAffineBoundaryConditions(AbaqusTestCase):
 
         reference_points = [
             name for name in unit.model.rootAssembly.instances.keys()
-            if name.startswith("REFERENCE_POINT_AFFINE_")]
+            if name.startswith("REFERENCE_POINT_MACRO_")]
         self.assertEqual(len(reference_points), 3)
         self.assertEqual(len(unit.model.amplitudes), 9)
         self.assertEqual(

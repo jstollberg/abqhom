@@ -110,7 +110,7 @@ class AbaqusRVE(object):
         self._periodic_mesh = gmsh_rve.periodic_mesh
         self._model_dimension = dim
         self._bc_initialized = False
-        self._has_periodic_bc = False
+        self._macroscopic_controls = []
         self._model = mdb.models[self._model_name]
         self._part = self._model.parts[self._model_name]
         self._instance = None
@@ -399,35 +399,39 @@ class AbaqusRVE(object):
 
         return labels
 
-    def _add_dirichlet_from_displacement_history(self, time_history, u_history,
-                                                 region, step_name, bc_name,
-                                                 amplitude_name):
-        """Add history-dependent displacement boundary conditions."""
+    def _add_tabular_amplitude(self, time_history, value_history, name):
+        """Create a total-time tabular amplitude from scalar history data."""
 
-        for i in range(3):
-            # Ignore the out-of-plane component for 2D models
-            if i == 2 and self.model_dimension != THREE_D:
-                break
+        data = tuple(zip(time_history, value_history))
+        self.model.TabularAmplitude(name=name, timeSpan=TOTAL, data=data)
 
-            # Abaqus amplitudes are scalar, so each displacement component
-            # requires an individual amplitude and boundary condition.
-            amplitude_name_i = amplitude_name + "_{}".format(i + 1)
-            data = np.vstack((time_history, u_history[:, i])).T
-            data = tuple((t, v) for t, v in data)
-            self.model.TabularAmplitude(name=amplitude_name_i, timeSpan=TOTAL,
-                                        data=data)
+    def _add_scalar_displacement_history(self, time_history, value_history,
+                                         region, step_name, name, dof):
+        """Prescribe one translational DOF through a tabular amplitude."""
 
-            # Add the boundary condition
-            # The actual displacement value will be controlled by the
-            # amplitude, so just put a value of 1.0 here
-            bc_name_i = bc_name + "_{}".format(i + 1)
-            u = [UNSET, UNSET, UNSET]
-            u[i] = 1.0
-            self.model.DisplacementBC(name=bc_name_i,
-                                      createStepName=step_name,
-                                      region=region,
-                                      amplitude=amplitude_name_i,
-                                      u1=u[0], u2=u[1], u3=u[2])
+        self._add_tabular_amplitude(time_history, value_history, name)
+
+        # The unit boundary-condition value is scaled by the amplitude.
+        displacement = [UNSET, UNSET, UNSET]
+        displacement[dof - 1] = 1.0
+        self.model.DisplacementBC(
+            name=name, createStepName=step_name, region=region,
+            amplitude=name, u1=displacement[0],
+            u2=displacement[1], u3=displacement[2])
+
+    def _add_scalar_force_history(self, time_history, value_history, region,
+                                  step_name, name, dof):
+        """Load one translational DOF through a tabular amplitude."""
+
+        self._add_tabular_amplitude(time_history, value_history, name)
+
+        # The unit concentrated-force value is scaled by the amplitude.
+        force = [0.0, 0.0, 0.0]
+        force[dof - 1] = 1.0
+        self.model.ConcentratedForce(
+            name=name, createStepName=step_name, region=region,
+            amplitude=name, cf1=force[0], cf2=force[1],
+            cf3=force[2])
 
     def _create_reference_point(self, point_name):
         """Create a reference-point instance and return its region and set."""
@@ -445,6 +449,185 @@ class AbaqusRVE(object):
         qualified_set = point_name + ".REFERENCE_POINT"
         return region, qualified_set
 
+    def _macroscopic_gradient_basis(self):
+        """Return the tensor basis for the displacement-gradient controls."""
+
+        dim = 3 if self.model_dimension == THREE_D else 2
+        basis = []
+        for row in range(dim):
+            for column in range(dim):
+                tensor = np.zeros((dim, dim))
+                tensor[row, column] = 1.0
+                basis.append(tensor)
+        return basis
+
+    def _macroscopic_stress_control_basis(self, finite_strain):
+        """Return the symmetric or rotation-fixed stress-control basis."""
+
+        dim = 3 if self.model_dimension == THREE_D else 2
+        components = ([(0, 0), (1, 1), (2, 2),
+                       (1, 2), (0, 2), (0, 1)]
+                      if dim == 3 else [(0, 0), (1, 1), (0, 1)])
+        basis = []
+        for row, column in components:
+            tensor = np.zeros((dim, dim))
+
+            # A small-strain shear control stores the engineering shear and
+            # therefore contributes one half to each symmetric tensor entry.
+            # At finite strain, one upper-triangular gradient entry is the
+            # independent control itself.
+            tensor[row, column] = (
+                1.0 if finite_strain or row == column else 0.5)
+            if not finite_strain:
+                tensor[column, row] = tensor[row, column]
+            basis.append(tensor)
+        return basis
+
+    def _contract_tensor_history(self, tensors, basis):
+        """Double-contract a tensor history with each supplied basis tensor."""
+
+        dim = 3 if self.model_dimension == THREE_D else 2
+        components = []
+        for tensor in tensors:
+            components.append([
+                np.sum(tensor[:dim, :dim]*basis_tensor)
+                for basis_tensor in basis
+            ])
+        return np.asarray(components)
+
+    def _create_macroscopic_controls(self, basis, initialization_step):
+        """Create scalar control DOFs associated with tensor basis terms."""
+
+        dim = 3 if self.model_dimension == THREE_D else 2
+        controls = []
+        reference_points = []
+
+        # Pack the scalar controls into the translational DOFs of as few
+        # reference points as possible. Each control stores the tensor by
+        # which its scalar value contributes to the macroscopic kinematics.
+        for index, tensor in enumerate(basis):
+            point_index = index//dim
+            dof = index % dim + 1
+            if point_index == len(reference_points):
+                point_name = "REFERENCE_POINT_MACRO_{}".format(
+                    point_index + 1)
+                region, set_name = self._create_reference_point(point_name)
+                reference_points.append((point_name, region, set_name))
+            point_name, region, set_name = reference_points[point_index]
+            controls.append({
+                "basis": tensor,
+                "dof": dof,
+                "instance": point_name,
+                "region": region,
+                "set": set_name,
+            })
+
+        # Restrain translations left unused when the controls do not fill the
+        # final reference point.
+        remainder = len(controls) % dim
+        if remainder:
+            displacement = [UNSET, UNSET, UNSET]
+            for dof in range(remainder + 1, dim + 1):
+                displacement[dof - 1] = 0.0
+            self.model.DisplacementBC(
+                name="DIRICHLET_MACRO_UNUSED",
+                createStepName=initialization_step,
+                region=reference_points[-1][1],
+                u1=displacement[0], u2=displacement[1],
+                u3=displacement[2])
+        return controls
+
+    def _apply_macroscopic_gradient_history(self, controls, time_history,
+                                            gradient_history,
+                                            initialization_step):
+        """Apply a displacement-gradient history to the control DOFs."""
+
+        basis = [control["basis"] for control in controls]
+        component_history = self._contract_tensor_history(
+            gradient_history, basis)
+        for index, control in enumerate(controls):
+            name = "DIRICHLET_MACRO_{}".format(index + 1)
+            self._add_scalar_displacement_history(
+                time_history, component_history[:, index],
+                control["region"], initialization_step, name, control["dof"])
+
+    def _add_periodic_anchor(self, controls, fixed_node):
+        """Set the displacement fluctuation to zero at the anchor node."""
+
+        _, anchor_node = self.select_rigid_body_anchor(fixed_node)
+        set_name = "NSET_PERIODIC_ANCHOR_{}".format(anchor_node.label)
+        if set_name not in self.part.sets:
+            self.part.SetFromNodeLabels(
+                name=set_name, nodeLabels=[anchor_node.label], unsorted=True)
+        qualified_set = self.model_name + "." + set_name
+        coordinates = np.asarray(anchor_node.coordinates, dtype=float)
+        dim = 3 if self.model_dimension == THREE_D else 2
+
+        # Enforcing u_a = H X_a fixes the arbitrary translation while keeping
+        # the macroscopic control variables independent.
+        for row in range(dim):
+            terms = [[1.0, qualified_set, row + 1]]
+            for control in controls:
+                coefficient = -float(np.dot(
+                    control["basis"][row], coordinates[:dim]))
+                if coefficient != 0.0:
+                    terms.append(
+                        [coefficient, control["set"], control["dof"]])
+            self.model.Equation(
+                name="PBC_ANCHOR_{}".format(row + 1), terms=terms)
+
+    def _add_periodic_translations(self, controls):
+        """Couple periodic translations to shared macroscopic controls."""
+
+        rve_sets = self.instance.sets
+        dim = 3 if self.model_dimension == THREE_D else 2
+        embedded = self._embedded_region_nodes()
+
+        for secondary, primary in PERIODIC_PAIRS.items():
+            pair_sets = self._independent_periodic_sets(
+                secondary, primary, embedded)
+            if pair_sets is None:
+                continue
+            secondary_set, primary_set = pair_sets
+
+            # Every node pair in an entity group has the same translation
+            # vector, so the first pair defines the equation coefficients.
+            x_primary = np.asarray(
+                rve_sets["NSET_" + primary].nodes[0].coordinates,
+                dtype=float)
+            x_secondary = np.asarray(
+                rve_sets["NSET_" + secondary].nodes[0].coordinates,
+                dtype=float)
+            delta_x = x_secondary[:dim] - x_primary[:dim]
+
+            base_name = self.model_name + "."
+            for row in range(dim):
+                terms = [[1.0, base_name + secondary_set, row + 1],
+                         [-1.0, base_name + primary_set, row + 1]]
+                for control in controls:
+                    coefficient = -float(np.dot(
+                        control["basis"][row], delta_x))
+                    if coefficient != 0.0:
+                        terms.append(
+                            [coefficient, control["set"], control["dof"]])
+                self.model.Equation(
+                    name="PBC_{}_{}_{}".format(
+                        primary, secondary, row + 1), terms=terms)
+
+    def _initialize_periodic_controls(self, initialization_step, basis,
+                                      fixed_node):
+        """Create the shared controls and periodic constraints."""
+
+        if not self.periodic_mesh:
+            raise RuntimeError("The mesh is not suitable for periodic BCs.")
+
+        controls = self._create_macroscopic_controls(
+            basis, initialization_step)
+        self._add_periodic_anchor(controls, fixed_node)
+        self._add_periodic_translations(controls)
+        self._periodic_boundary_rotations()
+        return controls
+
     def _clear_boundary_conditions(self):
         """Remove boundary conditions and constraints created by this class."""
 
@@ -456,8 +639,12 @@ class AbaqusRVE(object):
         for name in list(model.boundaryConditions.keys()):
             if name.startswith("DIRICHLET"):
                 del model.boundaryConditions[name]
+        for name in list(model.loads.keys()):
+            if name.startswith("MACROSCOPIC_STRESS"):
+                del model.loads[name]
         for name in list(model.amplitudes.keys()):
-            if name.startswith("DIRICHLET"):
+            if (name.startswith("DIRICHLET")
+                    or name.startswith("MACROSCOPIC_STRESS")):
                 del model.amplitudes[name]
         for name in list(model.constraints.keys()):
             if name.startswith("PBC_") or name.startswith("AFFINE_"):
@@ -470,7 +657,7 @@ class AbaqusRVE(object):
                 del model.parts[name]
 
         self._bc_initialized = False
-        self._has_periodic_bc = False
+        self._macroscopic_controls = []
 
     def apply_affine_displacement_bc(self, initialization_step,
                                      displacement_gradient_history):
@@ -520,25 +707,21 @@ class AbaqusRVE(object):
 
         time_history = displacement_gradient_history.time_data
         displacement_gradients = displacement_gradient_history.load_data
-
         dim = 3 if self.model_dimension == THREE_D else 2
 
-        # Store the columns of the macroscopic displacement gradient on a
-        # small set of control points. Boundary-node equations then evaluate
-        # u = H X without creating one amplitude per node and component.
-        reference_point_sets = []
-        for column in range(dim):
-            point_name = "REFERENCE_POINT_AFFINE_{}".format(column + 1)
-            region, set_name = self._create_reference_point(point_name)
-            u_history = displacement_gradients[:, :, column]
-            self._add_dirichlet_from_displacement_history(
-                time_history, u_history, region, initialization_step,
-                "DIRICHLET_" + point_name, "DIRICHLET_" + point_name)
-            reference_point_sets.append(set_name)
+        basis = self._macroscopic_gradient_basis()
+        controls = self._create_macroscopic_controls(
+            basis, initialization_step)
+
+        # Prescribe the same macroscopic controls used by periodic
+        # displacement loading. Sharing this representation also provides a
+        # common recovery path for the deformation gradient.
+        self._apply_macroscopic_gradient_history(
+            controls, time_history, displacement_gradients,
+            initialization_step)
 
         # Couple each boundary translation to the control-point values. The
-        # equation coefficients are the reference coordinates, so the
-        # control-point translations represent the columns of H.
+        # basis contraction evaluates u = H X at the corresponding node.
         boundary_nodes = self.instance.sets["NSET_BOUNDARY_NODES"]
         for node in boundary_nodes.nodes:
             node_set = "NSET_AFFINE_NODE_{}".format(node.label)
@@ -546,22 +729,27 @@ class AbaqusRVE(object):
                 self.part.SetFromNodeLabels(
                     name=node_set, nodeLabels=[node.label], unsorted=True)
             qualified_node_set = self.model_name + "." + node_set
-            for dof in range(1, dim + 1):
-                terms = [[1.0, qualified_node_set, dof]]
-                for axis, reference_set in enumerate(reference_point_sets):
-                    coefficient = -float(node.coordinates[axis])
+            coordinates = np.asarray(node.coordinates[:dim], dtype=float)
+            for row in range(dim):
+                terms = [[1.0, qualified_node_set, row + 1]]
+                for control in controls:
+                    coefficient = -float(np.dot(
+                        control["basis"][row], coordinates))
                     if coefficient != 0.0:
-                        terms.append(
-                            [coefficient, reference_set, dof])
+                        terms.append([coefficient, control["set"],
+                                      control["dof"]])
                 self.model.Equation(
-                    name="AFFINE_{}_{}".format(node.label, dof), terms=terms)
+                    name="AFFINE_{}_{}".format(node.label, row + 1),
+                    terms=terms)
 
         self._bc_initialized = True
+        self._macroscopic_controls = controls
 
-    def apply_periodic_bc(self, initialization_step,
-                          displacement_gradient_history, fixed_node=None):
+    def apply_periodic_displacement_bc(self, initialization_step,
+                                       displacement_gradient_history,
+                                       fixed_node=None):
         r"""
-        Apply periodic translational and rotational constraints.
+        Apply displacement-controlled periodic boundary conditions.
 
         For every primary--secondary node pair :math:`(p,s)` separated by
         the cell translation :math:`\Delta\boldsymbol{X}^{g}`, the method
@@ -611,75 +799,79 @@ class AbaqusRVE(object):
         time_history = displacement_gradient_history.time_data
         displacement_gradients = displacement_gradient_history.load_data
 
-        def create_reference_point(primary, secondary):
-            """Create the control point for a periodic entity pair."""
+        basis = self._macroscopic_gradient_basis()
+        controls = self._initialize_periodic_controls(
+            initialization_step, basis, fixed_node)
 
-            point_name = "REFERENCE_POINT_{}_{}".format(primary, secondary)
-            region, _ = self._create_reference_point(point_name)
-
-            # Any paired nodes yield the same cell-translation vector. Use
-            # the first pair to evaluate the prescribed displacement jump.
-            x_minus = rve_sets["NSET_" + primary].nodes[0].coordinates
-            x_plus = rve_sets["NSET_" + secondary].nodes[0].coordinates
-
-            # Store H DeltaX as the translation of the control point that
-            # appears on the right-hand side of the periodic equations.
-            u_history = np.dot(displacement_gradients,
-                               np.array(x_plus) - np.array(x_minus))
-
-            amplitude_name = "DIRICHLET_{}".format(point_name)
-            bc_name = "DIRICHLET_{}".format(point_name)
-            self._add_dirichlet_from_displacement_history(
-                time_history, u_history, region, initialization_step, bc_name,
-                amplitude_name)
-
-        if not self.periodic_mesh:
-            raise RuntimeError("The mesh is not suitable for periodic BCs.")
-
-        rve_sets = self.instance.sets
-        dim = 3 if self.model_dimension == THREE_D else 2
-
-        # Suppress rigid-body translation
-        region, anchor_node = self.select_rigid_body_anchor(fixed_node)
-        x = np.array(anchor_node.coordinates)
-        u_history = np.dot(displacement_gradients, x)
-        amplitude_name = "DIRICHLET_ANCHOR_{}".format(anchor_node.label)
-        bc_name = "DIRICHLET_ANCHOR_{}".format(anchor_node.label)
-        self._add_dirichlet_from_displacement_history(
-            time_history, u_history, region, initialization_step, bc_name,
-            amplitude_name)
-
-        # Embedded translations are already eliminated in favor of the host
-        # interpolation and must not enter an additional equation constraint.
-        embedded = self._embedded_region_nodes()
-
-        # Add periodic coupling to edges and faces
-        for secondary, primary in PERIODIC_PAIRS.items():
-            pair_sets = self._independent_periodic_sets(
-                secondary, primary, embedded)
-            if pair_sets is None:
-                continue
-            secondary_set, primary_set = pair_sets
-
-            # Create a reference point for the right-hand side
-            create_reference_point(primary, secondary)
-
-            base_name = self.model_name + "."
-            for dof in range(1, dim + 1):
-                ref_set_name = ("REFERENCE_POINT_{}_{}.REFERENCE_POINT"
-                                .format(primary, secondary))
-                terms = [[1.0, base_name + secondary_set, dof],
-                         [-1.0, base_name + primary_set, dof],
-                         [-1.0, ref_set_name, dof]]
-
-                self.model.Equation(name="PBC_{}_{}_{}".format(
-                    primary, secondary, dof), terms=terms)
-
-        # Apply constraints also to rotations
-        self._periodic_boundary_rotations()
+        self._apply_macroscopic_gradient_history(
+            controls, time_history, displacement_gradients,
+            initialization_step)
 
         self._bc_initialized = True
-        self._has_periodic_bc = True
+        self._macroscopic_controls = controls
+
+    def apply_periodic_stress_bc(self, initialization_step, stress_history,
+                                 fixed_node=None):
+        r"""
+        Apply periodic stress control.
+
+        The periodic equations contain shared macroscopic control DOFs. For a
+        control :math:`q_{\alpha}` with tensor basis
+        :math:`\boldsymbol{B}_{\alpha}`, its generalized force is
+
+        .. math::
+            Q_{\alpha}(\tau)
+            =V\,\bar{\boldsymbol{T}}(\tau)
+            :\boldsymbol{B}_{\alpha}.
+
+        In a geometrically linear step, :math:`\boldsymbol{T}` is the
+        effective Cauchy stress and the controls are engineering strains. In
+        a geometrically nonlinear step, :math:`\boldsymbol{T}` is the
+        effective first Piola--Kirchhoff stress. An upper-triangular
+        deformation gradient fixes the macroscopic rigid rotation. The
+        remaining stress components arise as reactions to this constraint.
+
+        Parameters
+        ----------
+        initialization_step : str
+            The name of the step in which stress control is initialized.
+        stress_history : LoadHistory
+            History of the effective Cauchy stress for geometrically linear
+            steps or the effective first Piola--Kirchhoff stress for
+            geometrically nonlinear steps.
+        fixed_node : str, optional
+            The name of a node set whose first admissible node is used as the
+            anchor. If None, an anchor is selected automatically. The default
+            is None.
+
+        """
+
+        if self._bc_initialized:
+            self._clear_boundary_conditions()
+
+        step = self.model.steps[initialization_step]
+        finite_strain = step.nlgeom == ON
+        time_history = stress_history.time_data
+        stresses = stress_history.load_data
+
+        basis = self._macroscopic_stress_control_basis(finite_strain)
+        controls = self._initialize_periodic_controls(
+            initialization_step, basis, fixed_node)
+        volume = self.get_volume()
+        generalized_forces = (
+            volume*self._contract_tensor_history(stresses, basis))
+
+        # Apply one generalized force history to every independent control.
+        # A zero-valued history leaves its control DOF mechanically free.
+        for index, control in enumerate(controls):
+            values = generalized_forces[:, index]
+            name = "MACROSCOPIC_STRESS_{}".format(index + 1)
+            self._add_scalar_force_history(
+                time_history, values, control["region"], initialization_step,
+                name, control["dof"])
+
+        self._bc_initialized = True
+        self._macroscopic_controls = controls
 
     def _independent_periodic_sets(self, secondary, primary, embedded):
         """Return periodic node sets whose translations remain independent."""
@@ -1068,11 +1260,6 @@ class AbaqusRVE(object):
             Additional arguments that will be passed to the Abaqus job.
             See the documentation of the Abaqus Job class for details.
 
-        Raises
-        ------
-        RuntimeError
-            If the Abaqus job does not finish successfully.
-
         """
 
         # Remove defaults
@@ -1387,6 +1574,75 @@ class AbaqusRVE(object):
                 raise ValueError(
                     "Frame time is only defined for time-domain steps.")
             return float(step.totalTime + step.frames[frame].frameValue)
+        finally:
+            if close_odb:
+                self.close_odb_file()
+
+    def average_deformation_gradient(self, step_name, frame=-1):
+        r"""
+        Return the effective deformation gradient.
+
+        The control DOFs represent the macroscopic displacement gradient
+        :math:`\bar{\boldsymbol{H}}`. Under affine or periodic kinematics,
+        the averaging theorem for the equivalent continuum representation
+        gives
+
+        .. math::
+            \bar{\boldsymbol{F}}
+            =\boldsymbol{I}+\bar{\boldsymbol{H}}
+            =\frac{1}{V}\int_{\Omega_0}
+            \boldsymbol{F}\,\mathrm{d}V.
+
+        The method recovers this average from the shared macroscopic control
+        DOFs. The definition applies to geometrically linear and nonlinear
+        analyses. For small-strain stress control,
+        :math:`\bar{\boldsymbol{H}}` is symmetric by construction. For
+        finite-strain stress control, :math:`\bar{\boldsymbol{F}}` is upper
+        triangular to fix the macroscopic rigid rotation.
+
+        Parameters
+        ----------
+        step_name : str
+            Name of the analysis step.
+        frame : int, optional
+            Frame index. The default is -1.
+
+        Returns
+        -------
+        deformation_gradient : ndarray
+            Macroscopic deformation gradient with shape ``(2, 2)`` or
+            ``(3, 3)``.
+
+        """
+
+        close_odb = self.odb is None
+        self.open_odb_file()
+        try:
+            if not self._macroscopic_controls:
+                raise RuntimeError(
+                    "Macroscopic controls are unavailable. Apply affine or "
+                    "periodic boundary conditions before running the "
+                    "analysis.")
+
+            output_frame = self.odb.steps[step_name].frames[frame]
+            if "U" not in output_frame.fieldOutputs.keys():
+                raise RuntimeError("Field output 'U' is not available.")
+
+            displacement = output_frame.fieldOutputs["U"]
+            dim = 3 if self.model_dimension == THREE_D else 2
+            gradient = np.zeros((dim, dim))
+            for control in self._macroscopic_controls:
+                instance = self.odb.rootAssembly.instances[
+                    control["instance"]]
+                region = instance.nodeSets["REFERENCE_POINT"]
+                values = displacement.getSubset(region=region).values
+                if len(values) != 1:
+                    raise RuntimeError(
+                        "A macroscopic control set does not contain exactly "
+                        "one output value.")
+                value = float(values[0].data[control["dof"] - 1])
+                gradient += value*control["basis"]
+            return np.eye(dim) + gradient
         finally:
             if close_odb:
                 self.close_odb_file()
@@ -1731,11 +1987,10 @@ class LoadHistory(object):
     r"""
     Tensor-valued macroscopic loading history.
 
-    For the boundary-condition methods, the returned tensor is the
-    macroscopic displacement gradient
-    :math:`\bar{\boldsymbol{H}}(\tau)=
-    \bar{\boldsymbol{F}}(\tau)-\boldsymbol{I}` sampled at total analysis
-    times representing the pseudo-time :math:`\tau`.
+    The consuming boundary-condition method determines whether the returned
+    tensor represents a macroscopic displacement gradient, strain, or stress.
+    Values are sampled at total analysis times representing the pseudo-time
+    :math:`\tau`.
 
     Parameters
     ----------
@@ -1825,8 +2080,7 @@ class LoadHistory(object):
         Returns
         -------
         load : ArrayLike
-            Macroscopic displacement gradient returned by the history
-            function.
+            Macroscopic tensor returned by the history function.
 
         """
         return self._history(time)
