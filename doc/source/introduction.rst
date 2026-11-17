@@ -12,14 +12,16 @@ Core capabilities
 * **Mixed-dimensional unit cells.** Continuum, truss, beam, and shell
   constituents can occur separately or in the same model. Embedded-region
   constraints can couple nonconforming structural and continuum meshes.
-* **Linear and nonlinear analyses.** The loading history is expressed through
-  the macroscopic displacement gradient. Finite kinematics and nonlinear or
+* **Linear and nonlinear analyses.** Finite kinematics and nonlinear or
   path-dependent material models are handled by the corresponding Abaqus
   analysis step and constitutive definition.
-* **Periodic and affine boundary conditions.** Matching periodic meshes are
+* **Macroscopic kinematic and stress control.** Matching periodic meshes are
   generated in Gmsh or verified for imported meshes. Periodic translations
-  and, where present, nodal rotations are constrained automatically. Affine
-  displacement conditions are available for continuum cells.
+  and, where present, nodal rotations are constrained automatically. The
+  macroscopic displacement gradient can be prescribed directly. Stress
+  control uses Cauchy stress in geometrically linear analyses and
+  first Piola--Kirchhoff stress at finite strains. Affine displacement
+  conditions are available for continuum cells.
 * **Consistent periodic-cell representation.** By default, redundant
   structural elements on secondary boundary entities are removed before
   analysis while their nodes are retained for the periodic constraints. A

@@ -51,7 +51,7 @@ periodic uniaxial strain, and evaluates its effective stress. Save it as
            return time*voigt_to_tensor(strain, "STRAIN")
 
        history = LoadHistory([0.0, 1.0], displacement_gradient)
-       cell.apply_periodic_bc("LOAD", history)
+       cell.apply_periodic_displacement_bc("LOAD", history)
        cell.run_analysis(field_outputs=["S"])
 
        # Recover the effective first Piola--Kirchhoff stress.
@@ -75,9 +75,9 @@ What happens in the quickstart
    macroscopic displacement gradient
    :math:`\bar{\boldsymbol{H}}=\bar{\boldsymbol{F}}-\boldsymbol{I}`. In this
    geometrically linear example it equals the prescribed infinitesimal strain.
-#. :meth:`~abqhom.abqmodel.AbaqusRVE.apply_periodic_bc` creates the periodic
-   equations and the macroscopic loading reference points. A rigid-body anchor
-   is selected automatically.
+#. :meth:`~abqhom.abqmodel.AbaqusRVE.apply_periodic_displacement_bc` creates
+   the periodic equations and the macroscopic loading reference points. A
+   rigid-body anchor is selected automatically.
 #. :meth:`~abqhom.abqmodel.AbaqusRVE.average_stress` evaluates the effective
    first Piola--Kirchhoff stress from the element nodal-force virial.
 
@@ -95,6 +95,62 @@ components :math:`(11,22,12)`. Each effective stress vector divided by the
 applied strain magnitude forms one column of the effective stiffness matrix.
 The tutorial examples implement these loops and include numerical or
 analytical checks where available.
+
+Stress control
+--------------
+
+Periodic cells can alternatively be loaded by a prescribed effective stress.
+The method introduces shared macroscopic kinematic controls and applies their
+work-conjugate generalized forces. For a control :math:`q_\alpha` with tensor
+basis :math:`\boldsymbol{B}_\alpha`, this force is
+
+.. math::
+
+   Q_\alpha(\tau)
+   =V\,\bar{\boldsymbol{T}}(\tau)
+   :\boldsymbol{B}_\alpha.
+
+In a geometrically linear step, :math:`\bar{\boldsymbol{T}}` is the Cauchy
+stress and the controls are engineering strains. Their shear loads are
+therefore :math:`V\bar{\sigma}_{ij}` without an additional factor of two. In
+a geometrically nonlinear step, :math:`\bar{\boldsymbol{T}}` is the first
+Piola--Kirchhoff stress. An upper-triangular deformation gradient removes the
+arbitrary macroscopic rigid rotation while retaining six independent
+deformation components in three dimensions and three in two dimensions.
+Components with identically zero generalized loads remain free and enforce
+zero effective stress in their respective directions.
+
+.. code-block:: python
+
+   def stress_history(time):
+       stress = np.zeros((3, 3))
+       stress[0, 0] = time*1.0
+       return stress
+
+   history = LoadHistory([0.0, 1.0], stress_history)
+   cell.apply_periodic_stress_bc("LOAD", history)
+   cell.run_analysis(field_outputs=["U"])
+
+   stress = cell.average_stress("LOAD")
+   deformation_gradient = cell.average_deformation_gradient("LOAD")
+
+The deformation gradient is assembled from the solved macroscopic control
+DOFs. In the geometrically linear example above, the infinitesimal strain
+follows from the symmetric part of its displacement gradient. For a
+geometrically nonlinear step, the history function instead returns the
+effective first Piola--Kirchhoff stress. Its upper-triangular components are
+work-conjugate to the independent deformation-gradient controls. The
+remaining stress components arise as reactions to the rotation constraint
+and are recovered by :meth:`~abqhom.abqmodel.AbaqusRVE.average_stress`.
+
+The effective stress obtained independently from
+:meth:`~abqhom.abqmodel.AbaqusRVE.average_stress` can be compared with the
+prescribed work-conjugate components as an equilibrium check. Mixed
+stress--deformation control is not currently implemented.
+
+The simple-cubic beam-lattice tutorial demonstrates linear displacement and
+stress control. The spherical-inclusion tutorial recovers a
+displacement-controlled finite-strain state under the corresponding stress.
 
 Nonlinear analyses
 ------------------
