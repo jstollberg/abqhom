@@ -405,15 +405,6 @@ def install(prefix, abqhom_source=None):
     scripts : list of str
         Paths to the generated platform-specific activation scripts.
 
-    Raises
-    ------
-    OSError
-        If the runtime directories or activation files cannot be managed.
-    RuntimeError
-        If the destination is unmanaged or the staged runtime is invalid.
-    subprocess.CalledProcessError
-        If pip cannot install the selected packages.
-
     """
 
     prefix = _prepare_prefix(prefix)
