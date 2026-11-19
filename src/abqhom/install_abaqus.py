@@ -308,18 +308,23 @@ def _write_activation_scripts(directory, package_directory):
                 "}} else {{\n"
                 "    $env:PYTHONPATH = $abqhomSitePackages + ';' + "
                 "$env:PYTHONPATH\n"
-                "}}\n".format(_powershell_quote(package_directory)))
+                "}}\n"
+                "Write-Host \"abqhom activated: $abqhomSitePackages\"\n"
+                .format(_powershell_quote(package_directory)))
         paths.append(powershell)
 
         batch = os.path.join(directory, "activate_abqhom.bat")
         with open(batch, "w") as output:
             output.write(
                 "@echo off\n"
+                "set \"abqhomSitePackages={}\"\n"
                 "if defined PYTHONPATH (\n"
-                "    set \"PYTHONPATH={};%PYTHONPATH%\"\n"
+                "    set \"PYTHONPATH=%abqhomSitePackages%;%PYTHONPATH%\"\n"
                 ") else (\n"
-                "    set \"PYTHONPATH={}\"\n"
-                ")\n".format(package_directory, package_directory))
+                "    set \"PYTHONPATH=%abqhomSitePackages%\"\n"
+                ")\n"
+                "echo abqhom activated: %abqhomSitePackages%\n"
+                .format(package_directory))
         paths.append(batch)
     else:
         shell = os.path.join(directory, "activate_abqhom.sh")
@@ -331,7 +336,10 @@ def _write_activation_scripts(directory, package_directory):
                 "    export PYTHONPATH=\"$abqhom_site_packages:$PYTHONPATH\"\n"
                 "else\n"
                 "    export PYTHONPATH=\"$abqhom_site_packages\"\n"
-                "fi\n".format(_shell_quote(package_directory)))
+                "fi\n"
+                "printf '%s\\n' \"abqhom activated: "
+                "$abqhom_site_packages\"\n"
+                .format(_shell_quote(package_directory)))
         os.chmod(shell, 0o755)
         paths.append(shell)
     return paths

@@ -234,8 +234,9 @@ class TestActivationAndCommandLine(_InstallerTestCase):
     """Test activation scripts and command-line entry points."""
 
     def test_activation_script_sets_pythonpath(self):
-        """The generated shell activation changes PYTHONPATH when executed."""
+        """Activation reports the runtime and changes ``PYTHONPATH``."""
         package_directory = self._create_runtime(self.directory)
+        confirmation = "abqhom activated: {}".format(package_directory)
         scripts = installer._write_activation_scripts(
             self.directory, package_directory)
         environment = os.environ.copy()
@@ -250,7 +251,9 @@ class TestActivationAndCommandLine(_InstallerTestCase):
                 ["cmd.exe", "/d", "/c", command],
                 env=environment,
                 universal_newlines=True)
-            self.assertEqual(output.strip(), package_directory)
+            lines = output.strip().splitlines()
+            self.assertEqual(lines[-2], confirmation)
+            self.assertEqual(lines[-1], package_directory)
 
             powershell = [path for path in scripts
                           if path.endswith(".ps1")][0]
@@ -272,7 +275,9 @@ class TestActivationAndCommandLine(_InstallerTestCase):
                  "sh", shell],
                 env=environment,
                 universal_newlines=True)
-        self.assertEqual(output.strip(), package_directory)
+        lines = output.strip().splitlines()
+        self.assertEqual(lines[-2], confirmation)
+        self.assertEqual(lines[-1], package_directory)
 
     def test_main_reports_installed_runtime(self):
         """The command-line entry point reports paths returned by install."""

@@ -47,6 +47,9 @@ On Linux:
 
    . ~/.abqhom/abaqus-runtime/.../activate_abqhom.sh
 
+Successful activation prints ``abqhom activated:`` followed by the managed
+runtime package directory.
+
 Only this dedicated runtime directory is added to ``PYTHONPATH``. Other
 packages installed in the regular Python environment are not exposed to
 Abaqus. For batch systems, the reported path can equivalently be added by the
