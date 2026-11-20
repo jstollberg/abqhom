@@ -256,8 +256,8 @@ class TestManagedRuntime(_InstallerTestCase):
 class TestGmshDeepbindPatch(_InstallerTestCase):
     """Test the optional native Gmsh loader compatibility patch."""
 
-    def test_patch_is_scoped_to_linux_abaqus(self):
-        """The patched wrapper keeps the default loader elsewhere."""
+    def test_patch_adds_linux_abaqus_loader(self):
+        """The patch scopes deep binding and retains the default loader."""
         package_directory = self._create_runtime(self.directory)
         path = self._write_gmsh_wrapper(package_directory)
 
@@ -510,6 +510,41 @@ class TestTransactionalInstallation(_InstallerTestCase):
         self.assertTrue(all(os.path.isfile(path) for path in scripts))
         self.assertEqual(installer._read_marker(prefix)["site_packages"],
                          package_directory)
+
+    def test_standard_reinstall_removes_deepbind_patch(self):
+        """Reinstalling without the option restores the Gmsh wrapper."""
+        prefix = os.path.join(self.directory, "runtime")
+        original_install = installer._install_packages
+        original_requirements = installer._runtime_requirements
+        original_imports = installer._check_runtime_imports
+
+        def fake_install(stage, source, requirements):
+            """Create a staged runtime with a patchable Gmsh wrapper."""
+            package_directory = self._create_runtime(stage)
+            self._write_gmsh_wrapper(package_directory)
+
+        installer._install_packages = fake_install
+        installer._runtime_requirements = lambda: TEST_REQUIREMENTS
+        installer._check_runtime_imports = lambda prefix, packages: None
+        try:
+            package_directory, _ = installer.install(
+                prefix, gmsh_deepbind=True)
+            gmsh_wrapper = os.path.join(package_directory, "gmsh.py")
+            with open(gmsh_wrapper, "r") as source:
+                self.assertIn("RTLD_DEEPBIND", source.read())
+            self.assertTrue(
+                installer._read_marker(prefix)["gmsh_deepbind"])
+
+            package_directory, _ = installer.install(prefix)
+        finally:
+            installer._install_packages = original_install
+            installer._runtime_requirements = original_requirements
+            installer._check_runtime_imports = original_imports
+
+        gmsh_wrapper = os.path.join(package_directory, "gmsh.py")
+        with open(gmsh_wrapper, "r") as source:
+            self.assertNotIn("RTLD_DEEPBIND", source.read())
+        self.assertFalse(installer._read_marker(prefix)["gmsh_deepbind"])
 
 
 if __name__ == "__main__":

@@ -246,7 +246,7 @@ def _check_runtime_contents(prefix, package_directory):
 
 
 def _patch_gmsh_deepbind(package_directory):
-    """Isolate native Gmsh symbols when loaded by Abaqus on Linux."""
+    """Patch the Gmsh wrapper to isolate native symbols in Linux Abaqus."""
 
     path = os.path.join(package_directory, "gmsh.py")
     with open(path, "r") as source:
@@ -273,6 +273,9 @@ def _patch_gmsh_deepbind(package_directory):
         contents = contents.replace(
             import_anchor, import_anchor + "import sys\n", 1)
 
+    # The managed wrapper is also available to regular Python. Select deep
+    # binding only for the two Abaqus executables that load the native Gmsh
+    # library into an existing solver process.
     replacement = (
         marker + "\n"
         "if (platform.system() == \"Linux\"\n"
