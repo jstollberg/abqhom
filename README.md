@@ -76,6 +76,10 @@ python -m pip install .
 abqhom-install-abaqus --abqhom-source .
 ```
 
+If Gmsh initialization fails inside Abaqus on Linux because of a native
+library conflict, the [installation documentation](https://abqhom.readthedocs.io/en/latest/installation.html#linux-gmsh-compatibility-mode)
+describes an optional `--gmsh-deepbind` compatibility mode.
+
 The helper does not modify the Abaqus installation. It creates a versioned
 runtime below `~/.abqhom/abaqus-runtime` containing only `abqhom`, Gmsh,
 Paraqus, and the weak-reference backport. Activate the generated script in the

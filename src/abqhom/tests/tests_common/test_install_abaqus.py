@@ -75,10 +75,24 @@ class _InstallerTestCase(unittest.TestCase):
                 pass
         return package_directory
 
-    def _write_valid_marker(self, prefix, package_directory):
+    def _write_valid_marker(self, prefix, package_directory,
+                            gmsh_deepbind=False):
         """Write a valid ownership marker for a test runtime."""
         installer._write_marker(
-            prefix, prefix, package_directory, TEST_REQUIREMENTS)
+            prefix, prefix, package_directory, TEST_REQUIREMENTS,
+            gmsh_deepbind=gmsh_deepbind)
+
+    def _write_gmsh_wrapper(self, package_directory):
+        """Write the Gmsh imports and loader targeted by the patch."""
+        path = os.path.join(package_directory, "gmsh.py")
+        with open(path, "w") as output:
+            output.write(
+                "from ctypes import CDLL\n"
+                "import os\n"
+                "import platform\n\n"
+                "libpath = 'libgmsh.so'\n"
+                "lib = CDLL(libpath)\n")
+        return path
 
 
 class TestRequirementsAndCommand(_InstallerTestCase):
@@ -167,6 +181,15 @@ class TestManagedRuntime(_InstallerTestCase):
         self.assertEqual(data["prefix"], self.directory)
         self.assertEqual(data["site_packages"], package_directory)
         self.assertEqual(data["requirements"], list(TEST_REQUIREMENTS))
+        self.assertFalse(data["gmsh_deepbind"])
+
+    def test_marker_records_gmsh_deepbind_mode(self):
+        """The marker identifies a runtime using the compatibility patch."""
+        package_directory = self._create_runtime(self.directory)
+        self._write_valid_marker(
+            self.directory, package_directory, gmsh_deepbind=True)
+        self.assertTrue(
+            installer._read_marker(self.directory)["gmsh_deepbind"])
 
     def test_valid_managed_prefix_can_be_reused(self):
         """A valid managed prefix may be replaced transactionally."""
@@ -230,6 +253,53 @@ class TestManagedRuntime(_InstallerTestCase):
             self.directory, package_directory)
 
 
+class TestGmshDeepbindPatch(_InstallerTestCase):
+    """Test the optional native Gmsh loader compatibility patch."""
+
+    def test_patch_is_scoped_to_linux_abaqus(self):
+        """The patched wrapper keeps the default loader elsewhere."""
+        package_directory = self._create_runtime(self.directory)
+        path = self._write_gmsh_wrapper(package_directory)
+
+        installer._patch_gmsh_deepbind(package_directory)
+
+        with open(path, "r") as source:
+            contents = source.read()
+        self.assertIn("import sys", contents)
+        self.assertIn('platform.system() == "Linux"', contents)
+        self.assertIn('(\"smapython\", \"abqcaek\")', contents)
+        self.assertIn("os.RTLD_DEEPBIND", contents)
+        self.assertIn("else:\n    lib = CDLL(libpath)", contents)
+        compile(contents, path, "exec")
+
+    def test_patch_is_idempotent(self):
+        """Applying the compatibility patch twice leaves one loader block."""
+        package_directory = self._create_runtime(self.directory)
+        path = self._write_gmsh_wrapper(package_directory)
+
+        installer._patch_gmsh_deepbind(package_directory)
+        installer._patch_gmsh_deepbind(package_directory)
+
+        with open(path, "r") as source:
+            contents = source.read()
+        self.assertEqual(contents.count("# abqhom: use RTLD_DEEPBIND"), 1)
+        self.assertEqual(contents.count("import sys"), 1)
+
+    def test_unsupported_wrapper_is_rejected(self):
+        """An unknown Gmsh loader layout fails without modifying the file."""
+        package_directory = self._create_runtime(self.directory)
+        path = os.path.join(package_directory, "gmsh.py")
+        with open(path, "w") as output:
+            output.write("# unknown wrapper layout\n")
+
+        self.assertRaises(
+            RuntimeError, installer._patch_gmsh_deepbind,
+            package_directory)
+
+        with open(path, "r") as source:
+            self.assertEqual(source.read(), "# unknown wrapper layout\n")
+
+
 class TestActivationAndCommandLine(_InstallerTestCase):
     """Test activation scripts and command-line entry points."""
 
@@ -285,10 +355,18 @@ class TestActivationAndCommandLine(_InstallerTestCase):
         original_stdout = sys.stdout
         script = os.path.join(self.directory, "activate_abqhom.sh")
         output = StringIO()
-        installer.install = lambda prefix, source: (self.directory, [script])
+        received = {}
+
+        def fake_install(prefix, source, gmsh_deepbind=False):
+            """Record parsed arguments and return a synthetic runtime."""
+            received["gmsh_deepbind"] = gmsh_deepbind
+            return self.directory, [script]
+
+        installer.install = fake_install
         sys.stdout = output
         try:
-            result = installer.main(["--prefix", self.directory])
+            result = installer.main([
+                "--prefix", self.directory, "--gmsh-deepbind"])
         finally:
             installer.install = original_install
             sys.stdout = original_stdout
@@ -296,6 +374,8 @@ class TestActivationAndCommandLine(_InstallerTestCase):
         self.assertEqual(result, 0)
         self.assertIn(self.directory, output.getvalue())
         self.assertIn(script, output.getvalue())
+        self.assertIn("RTLD_DEEPBIND", output.getvalue())
+        self.assertTrue(received["gmsh_deepbind"])
 
     def test_console_bootstrap_ignores_shadowing_checkout(self):
         """The entry point imports abqhom from its own distribution."""

@@ -75,6 +75,28 @@ side:
 The activated runtime supplies abqhom, Gmsh, Paraqus, and the legacy
 weak-reference backport to the examples.
 
+Linux Gmsh compatibility mode
+-----------------------------
+
+Some Linux Abaqus installations terminate at ``gmsh.initialize()`` with a
+native-library error such as ``free(): invalid pointer``. If the same managed
+runtime works with regular Python but fails only inside Abaqus, reinstall it
+with the optional compatibility mode:
+
+.. code-block:: console
+
+   abqhom-install-abaqus --abqhom-source . --gmsh-deepbind
+
+This option changes only how the managed Gmsh shared library is loaded by
+Abaqus on Linux. It uses ``RTLD_DEEPBIND`` to isolate Gmsh from conflicting
+symbols already loaded by the Abaqus executable. Regular Python, other
+platforms, and the Gmsh NumPy interface retain their standard behavior. Use
+the option only when the native-library conflict occurs.
+
+The selected mode is recorded as ``gmsh_deepbind`` in the runtime marker
+``.abqhom-runtime.json``. Reinstalling the same managed prefix without
+``--gmsh-deepbind`` restores the unmodified Gmsh wrapper.
+
 .. tip::
 
    Do not copy packages into the Abaqus ``site-packages`` directory. The
