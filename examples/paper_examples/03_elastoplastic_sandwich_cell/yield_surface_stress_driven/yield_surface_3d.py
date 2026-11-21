@@ -5,12 +5,12 @@
 
 The sampling directions are the 642 vertices of a level-three icosphere. Both
 the initial and evolved surfaces are sampled independently on the complete
-sphere.
+sphere using prescribed effective-stress histories.
 
 Select the surface, worker index, worker count, and merge operation in the
-configuration block of ``main``. Each worker writes an independent, resumable
-CSV file. After all workers finish, the merge operation assembles the complete
-surface and its triangular connectivity.
+final call to ``main``. Each worker writes an independent, resumable CSV file.
+After all workers finish, the merge operation assembles the complete surface
+and its triangular connectivity.
 """
 
 import csv
@@ -20,26 +20,31 @@ import sys
 
 import gmsh
 import numpy as np
-from yield_surface_sections import (STRAIN_HEADER, STRESS_HEADER,
-                                    build_gmsh_cell, elastic_calibration,
-                                    open_csv_file, sample_direction,
-                                    state_definition,
-                                    validate_result_configuration)
 
 from abqhom.utils import export_to_csv_file
+from yield_surface_common import (CONSTITUENT_PARAMETERS,
+                                  MAXIMUM_STRESS_INCREMENT,
+                                  MESH_PARAMETERS,
+                                  PLASTIC_WORK_DENSITY_THRESHOLD,
+                                  STRAIN_HEADER, STRESS_HEADER,
+                                  VOIGT_COMPONENTS, build_gmsh_cell,
+                                  open_csv_file, sample_direction,
+                                  state_definition,
+                                  validate_result_configuration)
 
-here = os.getcwd()
+script_directory = os.path.dirname(os.path.abspath(__file__))
 
-COMPONENT_NAMES = ("11", "22", "33", "23", "13", "12")
 CSV_HEADER = (["direction-index", "n1", "n2", "n3", "yield-time",
-               "strain-limit"]
-              + ["epsilon-{}".format(name) for name in COMPONENT_NAMES]
-              + ["sigma-{}".format(name) for name in COMPONENT_NAMES]
-              + ["base-sigma-{}".format(name) for name in COMPONENT_NAMES]
+               "stress-limit", "additional-plastic-work-density"]
+              + ["epsilon-{}".format(name) for name in VOIGT_COMPONENTS]
+              + ["sigma-{}".format(name) for name in VOIGT_COMPONENTS]
+              + ["base-epsilon-{}".format(name)
+                 for name in VOIGT_COMPONENTS]
+              + ["base-sigma-{}".format(name) for name in VOIGT_COMPONENTS]
               + ["max-unload-delta-peeq-shell",
                  "max-unload-delta-peeq-beam",
                  "max-delta-peeq-shell", "max-delta-peeq-beam",
-                 "controlling-constituent"])
+                 "first-yielding-constituent"])
 
 
 def _make_directory(path):
@@ -120,13 +125,15 @@ def remove_output_database(path):
 def result_row(direction_index, direction, state):
     """Return one CSV row for a sampled state."""
     return ([direction_index] + list(direction)
-            + [state["time"], state["strain_limit"]]
+            + [state["time"], state["stress_limit"],
+               state["additional_plastic_work_density"]]
             + list(state["strain"]) + list(state["stress"])
+            + list(state["base_strain"])
             + list(state["base_stress"])
             + [state["unload_peeq_shell"],
                state["unload_peeq_beam"],
                state["peeq_shell"], state["peeq_beam"],
-               state["constituent"]])
+               state["first_yielding_constituent"]])
 
 
 def read_worker_results(path):
@@ -210,11 +217,20 @@ def merge_worker_results(state_name, root_directory, directions, faces,
             .format(state_name, len(missing)))
 
     # Every direction independently reproduces the same probing base state.
-    # Validate its effective stress before assembling the surface.
+    # Validate its effective strain and stress before assembling the surface.
+    base_strains = np.asarray([
+        [float(records[index]["base-epsilon-" + name])
+         for name in VOIGT_COMPONENTS]
+        for index in range(len(directions))])
     base_stresses = np.asarray([
         [float(records[index]["base-sigma-" + name])
-         for name in COMPONENT_NAMES]
+         for name in VOIGT_COMPONENTS]
         for index in range(len(directions))])
+    if not np.allclose(
+            base_strains, base_strains[0], rtol=1.0e-6, atol=1.0e-9):
+        raise RuntimeError(
+            "The independently reproduced base states do not have "
+            "consistent effective strains.")
     if not np.allclose(
             base_stresses, base_stresses[0], rtol=1.0e-6, atol=1.0e-9):
         raise RuntimeError(
@@ -239,45 +255,20 @@ def merge_worker_results(state_name, root_directory, directions, faces,
         faces, os.path.join(root_directory, "faces.csv"),
         header="vertex_1,vertex_2,vertex_3", fmt="%d")
     export_to_csv_file(
+        base_strains[:1], os.path.join(root_directory, "base_strain.csv"),
+        header=STRAIN_HEADER)
+    export_to_csv_file(
         base_stresses[:1], os.path.join(root_directory, "base_stress.csv"),
         header=STRESS_HEADER)
     print("Wrote {} complete directions and {} faces to {}.".format(
         len(directions), len(faces), output))
 
 
-def main():
+def main(state_name="initial", worker_index=0, number_of_workers=1,
+         merge_only=False):
     """Run one sampling worker or merge all completed worker files."""
-    # Analysis configuration. Workers are numbered from zero. After every
-    # worker has completed, set merge_only to True and run the script once
-    # more with the same state name and worker count.
-    state_name = "initial"
-    worker_index = 0
-    number_of_workers = 1
-    merge_only = False
+    # Analysis configuration. Workers are numbered from zero.
     subdivisions = 3
-    criterion = 1.0e-4
-    maximum_strain_increment = 6.0e-5
-    elastic_strain = 1.0e-5
-    parameters = {
-        "matrix_E": 1.0,
-        "matrix_nu": 0.3,
-        "shell_E": 100.0,
-        "shell_nu": 0.3,
-        "shell_yield": 0.4,
-        "beam_E": 100.0,
-        "beam_nu": 0.3,
-        "beam_yield": 0.6,
-        "shell_thickness": 0.02,
-        "beam_radius": 0.05,
-    }
-    mesh_parameters = {
-        "edge_length": 1.0,
-        "matrix_elements_per_edge": 8,
-        "elements_per_strut": 16,
-        "element_order": 1,
-        "algorithm_2d": 6,
-        "algorithm_3d": 1,
-    }
 
     state_name = state_name.lower()
     if state_name not in ("initial", "evolved"):
@@ -289,36 +280,9 @@ def main():
             "The worker index must lie in [0, number_of_workers).")
     definition = state_definition(state_name)
 
-    # Sampling requires the calibration generated by the planar-section
-    # script. Merge-only runs operate solely on completed worker files.
-    if not merge_only:
-        calibration_directory = os.path.join(
-            here, "yield_surface", "results")
-        stiffness_path = os.path.join(
-            calibration_directory, "effective_stiffness.csv")
-        compliance_path = os.path.join(
-            calibration_directory, "effective_compliance.csv")
-        if not (os.path.isfile(stiffness_path)
-                and os.path.isfile(compliance_path)):
-            raise RuntimeError(
-                "The effective elastic calibration is unavailable. Run "
-                "yield_surface_sections.py first.")
-        validate_result_configuration(
-            os.path.join(
-                calibration_directory, "calibration_configuration.csv"),
-            {
-                "analysis": "elastic_calibration",
-                "elastic_strain": elastic_strain,
-                "materials": parameters,
-                "mesh": mesh_parameters,
-            },
-            (stiffness_path, compliance_path))
-        compliance = elastic_calibration(
-            None, parameters, elastic_strain, calibration_directory)
-
     directions, faces = icosphere(subdivisions)
     root_directory = os.path.join(
-        here, "yield_surface", "surface_3d", state_name)
+        script_directory, "3d_surface_results_{}".format(state_name))
     part_directory = os.path.join(root_directory, "parts")
     _make_directory(part_directory)
     existing_results = [
@@ -336,16 +300,16 @@ def main():
         os.path.join(root_directory, "sampling_configuration.csv"),
         {
             "analysis": "yield_surface_3d",
-            "criterion": criterion,
-            "elastic_strain": elastic_strain,
-            "materials": parameters,
-            "maximum_strain_increment": maximum_strain_increment,
-            "mesh": mesh_parameters,
+            "materials": CONSTITUENT_PARAMETERS,
+            "maximum_stress_increment": MAXIMUM_STRESS_INCREMENT,
+            "mesh": MESH_PARAMETERS,
             "number_of_workers": number_of_workers,
-            "preload_strain": definition["preload_strain"],
-            "base_strain": definition["base_strain"],
+            "preload_stress": definition["preload_stress"],
+            "plastic_work_density_threshold": (
+                PLASTIC_WORK_DENSITY_THRESHOLD),
+            "base_stress": definition["base_stress"],
             "state": state_name,
-            "strain_limits": definition["strain_limits"],
+            "stress_limits": definition["stress_limits"],
             "subdivisions": subdivisions,
         },
         existing_results)
@@ -353,10 +317,6 @@ def main():
         merge_worker_results(
             state_name, root_directory, directions, faces,
             number_of_workers)
-        export_to_csv_file(
-            definition["base_strain"][None, :],
-            os.path.join(root_directory, "base_strain.csv"),
-            header=STRAIN_HEADER)
         return
 
     analysis_directory = os.path.join(
@@ -378,7 +338,7 @@ def main():
     original_directory = os.getcwd()
     try:
         os.chdir(analysis_directory)
-        gmsh_cell = build_gmsh_cell(mesh_parameters)
+        gmsh_cell = build_gmsh_cell(MESH_PARAMETERS)
 
         completed_count = len(set(selected).intersection(completed))
         print("{} worker {}/{}: {} assigned directions, {} complete."
@@ -390,13 +350,11 @@ def main():
             if direction_index in completed:
                 continue
 
-            # Map the unit normal-stress direction to a proportional strain
-            # direction through the effective elastic compliance.
+            # Prescribe the icosphere vertex directly as a normal-stress
+            # direction while keeping all shear stresses zero.
             direction = directions[direction_index]
             stress_direction = np.zeros(6)
             stress_direction[:3] = direction
-            strain_direction = compliance.dot(stress_direction)
-            strain_direction /= np.max(np.abs(strain_direction))
 
             print("  worker {}: {}/{} direction {} ({:+.4f}, {:+.4f}, "
                   "{:+.4f})".format(
@@ -407,11 +365,12 @@ def main():
             for attempt in range(2):
                 try:
                     state = sample_direction(
-                        gmsh_cell, parameters,
-                        definition["preload_strain"],
-                        definition["base_strain"], strain_direction,
-                        definition["strain_limits"], criterion,
-                        maximum_strain_increment)
+                        gmsh_cell, CONSTITUENT_PARAMETERS,
+                        definition["preload_stress"],
+                        definition["base_stress"], stress_direction,
+                        definition["stress_limits"],
+                        PLASTIC_WORK_DENSITY_THRESHOLD,
+                        MAXIMUM_STRESS_INCREMENT)
                     break
                 except Exception as error:
                     if attempt == 1:
@@ -437,4 +396,5 @@ if __name__ == "__main__":
     # Abaqus replaces stdout. Restore the shell that launched the example.
     if sys.__stdout__ is not None:
         sys.stdout = sys.__stdout__
-    main()
+    main(state_name="initial", worker_index=0, number_of_workers=1,
+         merge_only=False)
