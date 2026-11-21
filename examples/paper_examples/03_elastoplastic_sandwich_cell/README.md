@@ -9,12 +9,19 @@ and an embedded ideally plastic BCC beam core.
 
 - `main.py` computes the cyclic effective response, PEEQ histories,
   verification measures, and VTK output.
-- `yield_surface_sections.py` computes the elastic calibration and the
-  initial and evolved yield-surface sections in the `sigma11-sigma22` and
-  `sigma11-sigma33` planes.
-- `yield_surface_3d.py` samples the complete initial or evolved yield surface
-  in normal-stress space using independent resumable workers.
 - `sandwich.py` provides the shared Gmsh geometry definition.
+- `yield_surface_strain_driven/` contains the strain-driven yield-surface
+  workflow.
+
+The yield-surface directory provides two entry points:
+
+- `yield_surface_2d.py` computes the elastic calibration and the initial and
+  evolved sections in the `sigma11-sigma22` and `sigma11-sigma33` planes.
+- `yield_surface_3d.py` samples the complete initial or evolved surface in
+  normal-stress space using independent resumable workers.
+
+Shared model construction, state preparation, yield detection, and
+configuration helpers are collected in `yield_surface_common.py`.
 
 Activate the isolated Abaqus runtime as described in the
 [installation guide](https://abqhom.readthedocs.io/en/latest/installation.html).
@@ -30,12 +37,12 @@ abaqus cae noGUI=main.py
 The prescribed axial history contains two fully reversed cycles between
 `epsilon_11 = -0.03` and `epsilon_11 = 0.03`, followed by unloading to zero.
 
-## Yield-surface sections
+## Yield-surface workflow
 
-Run the planar sampling with:
+Enter `yield_surface_strain_driven/` and run the planar sampling with:
 
 ```console
-abaqus cae noGUI=yield_surface_sections.py
+abaqus cae noGUI=yield_surface_2d.py
 ```
 
 The default configuration computes the elastic calibration and samples both
@@ -46,10 +53,10 @@ or `both`, and `selected_plane` equal to `sigma11_sigma22`,
 effective stiffness and compliance needed by the 3D sampler are required.
 Completed angular prefixes are resumed from their existing CSV files.
 
-## Three-dimensional normal-stress yield surfaces
+### Three-dimensional normal-stress yield surfaces
 
 The 3D sampler requires the elastic calibration produced by
-`yield_surface_sections.py`. Configure `state_name`, `worker_index`, and
+`yield_surface_2d.py`. Configure `state_name`, `worker_index`, and
 `number_of_workers` in `yield_surface_3d.py`, then run every worker with:
 
 ```console
@@ -86,19 +93,20 @@ The cyclic `results/` directory contains:
 | `peeq_history.csv` | Pseudo-time and maximum shell and beam PEEQ |
 | `verification_metrics.csv` | Maximum stress asymmetry, Hill–Mandel residual, shell PEEQ, and beam PEEQ |
 
-Yield-surface output is stored below `yield_surface/`:
+Yield-surface output is stored below `yield_surface_strain_driven/`:
 
 | Directory | Contents |
 |---|---|
-| `calibration_abq/` | Elastic-calibration Abaqus jobs |
-| `results/` | Elastic calibration and initial yield-surface sections |
-| `evolved_results/` | Evolved yield-surface sections |
-| `initial_abq/`, `evolved_abq/` | Section-sampling Abaqus jobs |
-| `surface_3d/initial/`, `surface_3d/evolved/` | Worker files and merged 3D surfaces |
+| `2d_section_results_initial/` | Elastic calibration, initial sections, and their Abaqus jobs |
+| `2d_section_results_evolved/` | Evolved sections and their Abaqus jobs |
+| `3d_surface_results_initial/` | Initial 3D surface, worker files, and Abaqus jobs |
+| `3d_surface_results_evolved/` | Evolved 3D surface, worker files, and Abaqus jobs |
 
 The sectional result directories contain `sigma11_sigma22.csv`,
 `sigma11_sigma33.csv`, the common base strain and stress, and their sampling
-configuration. Each merged 3D directory contains the yield surface in the
-three-dimensional normal-stress subspace in `yield_surface.csv`, the sampling
-directions in `directions.csv`, triangular connectivity in `faces.csv`, the
-common base state, and the resumable worker files below `parts/`.
+configuration. The initial section directory additionally contains the
+effective stiffness and compliance and the corresponding calibration data.
+Each merged 3D directory contains the yield surface in the three-dimensional
+normal-stress subspace in `yield_surface.csv`, the sampling directions in
+`directions.csv`, triangular connectivity in `faces.csv`, the common base
+state, and the resumable worker files below `parts/`.

@@ -1,17 +1,7 @@
 # SPDX-FileCopyrightText: 2023-2026 Jonathan Stollberg
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Sample sections of the initial and evolved effective yield surfaces.
-
-Every direction uses a fresh RVE. Initial yield is probed from the stress-free
-state. Evolved yield is probed after monotonic preloading and elastic unloading
-to a common base state. Both cases use the same incremental dissipation
-criterion and PEEQ guard relative to their respective base states.
-
-Run ``abaqus cae noGUI=yield_surface_sections.py`` after selecting the desired
-surfaces and planes in the configuration block of ``main``. Partially
-completed plane sections are resumed from their CSV files.
-"""
+"""Shared helpers for strain-driven effective yield-surface sampling."""
 
 import csv
 import errno
@@ -21,22 +11,53 @@ import sys
 import tempfile
 import time
 
-import gmsh
+# The entry-point scripts run from this subdirectory. Add the parent example
+# directory so they can reuse the common sandwich-cell geometry definition.
+example_directory = os.path.dirname(
+    os.path.dirname(os.path.abspath(__file__)))
+if example_directory not in sys.path:
+    sys.path.insert(0, example_directory)
+
 import numpy as np
 from abaqusConstants import OFF
-from sandwich import create_geometry
 
 from abqhom.abqmodel import AbaqusRVE, LoadHistory
 from abqhom.gmshmodel import GmshRVE
 from abqhom.utils import (export_to_csv_file, read_csv_file,
                           tensor_to_voigt, voigt_to_tensor)
+from sandwich import create_geometry
 
-here = os.getcwd()
 VOIGT_COMPONENTS = ("11", "22", "33", "23", "13", "12")
 STRAIN_HEADER = ",".join(
     "epsilon_" + component for component in VOIGT_COMPONENTS)
 STRESS_HEADER = ",".join(
     "sigma_" + component for component in VOIGT_COMPONENTS)
+
+# These settings define the same model and operational yield criterion for
+# the two-dimensional sections and the three-dimensional surface.
+DISSIPATION_RATIO_THRESHOLD = 1.0e-4
+MAXIMUM_STRAIN_INCREMENT = 6.0e-5
+ELASTIC_STRAIN = 1.0e-5
+CONSTITUENT_PARAMETERS = {
+    "matrix_E": 1.0,
+    "matrix_nu": 0.3,
+    "shell_E": 100.0,
+    "shell_nu": 0.3,
+    "shell_yield": 0.4,
+    "beam_E": 100.0,
+    "beam_nu": 0.3,
+    "beam_yield": 0.6,
+    "shell_thickness": 0.02,
+    "beam_radius": 0.05,
+}
+MESH_PARAMETERS = {
+    "edge_length": 1.0,
+    "matrix_elements_per_edge": 8,
+    "elements_per_strut": 16,
+    "element_order": 1,
+    "algorithm_2d": 6,
+    "algorithm_3d": 1,
+}
 
 
 def open_csv_file(path, mode):
@@ -56,7 +77,7 @@ def _open_csv_descriptor(descriptor):
 # ---------------------------------------------------------------
 # Constituent definitions and effective elastic calibration
 
-def assign_sections(cell, parameters):
+def _assign_sections(cell, parameters):
     """Assign the elastic matrix and perfectly plastic constituents."""
     # Plasticity is confined to the shell and beam constituents. The soft
     # matrix remains elastic throughout every preparation and probing path.
@@ -86,7 +107,7 @@ def assign_sections(cell, parameters):
         pre_integrate=False)
 
 
-def compute_elastic_stiffness(gmsh_cell, parameters, strain_magnitude):
+def _compute_elastic_stiffness(gmsh_cell, parameters, strain_magnitude):
     """Compute the complete effective elastic stiffness in Voigt notation."""
     stiffness = np.zeros((6, 6))
     component_names = ("xx", "yy", "zz", "yz", "xz", "xy")
@@ -105,7 +126,7 @@ def compute_elastic_stiffness(gmsh_cell, parameters, strain_magnitude):
 
         history = LoadHistory(np.asarray([0.0, 1.0]), strain_path)
         cell = AbaqusRVE(gmsh_cell, custom_types={1: "B31"})
-        assign_sections(cell, parameters)
+        _assign_sections(cell, parameters)
         step_name = "ELASTIC_LOAD"
         cell.model.StaticStep(
             name=step_name, previous="Initial", nlgeom=OFF,
@@ -126,16 +147,79 @@ def compute_elastic_stiffness(gmsh_cell, parameters, strain_magnitude):
     return stiffness
 
 
+def elastic_calibration(gmsh_cell, parameters, strain_magnitude,
+                        result_directory):
+    """Return the effective elastic compliance used for stress directions."""
+    stiffness_path = os.path.join(
+        result_directory, "effective_stiffness.csv")
+    compliance_path = os.path.join(
+        result_directory, "effective_compliance.csv")
+
+    # Reuse the six elastic calibration analyses across both yield surfaces.
+    if os.path.isfile(stiffness_path) and os.path.isfile(compliance_path):
+        stiffness = read_csv_file(stiffness_path)
+        compliance = read_csv_file(compliance_path)
+        print("Reusing the existing effective elastic calibration.")
+    else:
+        stiffness = _compute_elastic_stiffness(
+            gmsh_cell, parameters, strain_magnitude)
+        compliance = None
+
+    if stiffness.shape != (6, 6) or not np.all(np.isfinite(stiffness)):
+        raise RuntimeError(
+            "The effective stiffness must be a finite 6 x 6 matrix.")
+
+    # The symmetric part defines the stress-to-strain direction map. The raw
+    # matrix is retained in the output so its numerical symmetry can be
+    # checked.
+    stiffness_symmetric = 0.5 * (stiffness + stiffness.T)
+    symmetry_residual = (np.linalg.norm(stiffness - stiffness.T)
+                         / np.linalg.norm(stiffness))
+    eigenvalues = np.linalg.eigvalsh(stiffness_symmetric)
+    if np.min(eigenvalues) <= 0.0:
+        raise RuntimeError("The effective elastic stiffness is not positive.")
+    if compliance is None:
+        compliance = np.linalg.inv(stiffness_symmetric)
+        export_to_csv_file(stiffness, stiffness_path)
+        export_to_csv_file(compliance, compliance_path)
+    if compliance.shape != (6, 6) or not np.all(np.isfinite(compliance)):
+        raise RuntimeError(
+            "The effective compliance must be a finite 6 x 6 matrix.")
+    if not np.allclose(
+            stiffness_symmetric.dot(compliance), np.eye(6),
+            rtol=1.0e-6, atol=1.0e-9):
+        raise RuntimeError(
+            "The cached effective stiffness and compliance are inconsistent.")
+    print("Elastic stiffness symmetry residual: {:.3e}".format(
+        symmetry_residual))
+    print("Elastic stiffness eigenvalues: {}".format(eigenvalues))
+    sys.stdout.flush()
+    return compliance
+
+
 # ---------------------------------------------------------------
 # Incremental yield detection from the converged Abaqus output
 
-def constituent_peeq_increment_data(cell, step_name, lower_time, upper_time,
-                                    tolerance=1.0e-12):
+def _matching_frame_index(frame_times, pseudo_time):
+    """Return the field frame matching a history-output time."""
+    index = int(np.argmin(np.abs(frame_times - pseudo_time)))
+    if not np.isclose(
+            frame_times[index], pseudo_time, rtol=1.0e-10,
+            atol=1.0e-12):
+        raise RuntimeError(
+            "Field and history output do not share the required increment "
+            "at pseudo-time {}.".format(pseudo_time))
+    return index
+
+
+def _constituent_peeq_increment_data(cell, step_name, lower_time, upper_time,
+                                     tolerance=1.0e-12):
     """Return constituent PEEQ increments and first-yield times.
 
     PEEQ increments are measured from the first frame of the requested step.
-    Because PEEQ is non-decreasing, the first frame with a nonzero increment
-    is located by a binary search rather than by reading every output frame.
+    Because PEEQ is non-decreasing, the first frame whose increment exceeds
+    the tolerance is located by a binary search rather than by reading every
+    output frame.
     """
     close_odb = cell.odb is None
     cell.open_odb_file()
@@ -147,13 +231,13 @@ def constituent_peeq_increment_data(cell, step_name, lower_time, upper_time,
             instance.elementSets["ELSET_BEAM_STRUTS"],
         )
 
-        # Frame indices are obtained from the requested pseudo-times because
-        # energy histories and field output can use different sampling grids.
+        # The interpolation below assumes that field and history output share
+        # the converged increments bracketing the work-density threshold.
         frames = step.frames
         frame_times = np.asarray(
             [frame.frameValue for frame in frames], dtype=float)
-        lower_frame = int(np.argmin(np.abs(frame_times - lower_time)))
-        upper_frame = int(np.argmin(np.abs(frame_times - upper_time)))
+        lower_frame = _matching_frame_index(frame_times, lower_time)
+        upper_frame = _matching_frame_index(frame_times, upper_time)
 
         # Subtracting the first frame makes the same operation valid for the
         # stress-free initial state and the plastically preloaded base state.
@@ -185,7 +269,7 @@ def constituent_peeq_increment_data(cell, step_name, lower_time, upper_time,
             return cache[key]
 
         # Locate the first frame with additional plastic straining separately
-        # for shells and beams to identify the controlling constituent.
+        # for shells and beams to identify the first-yielding constituent.
         onset_times = [np.nan, np.nan]
         for constituent in range(len(constituent_sets)):
             if (constituent_increment(len(frames) - 1, constituent)
@@ -213,9 +297,9 @@ def constituent_peeq_increment_data(cell, step_name, lower_time, upper_time,
     return peeq, np.asarray(onset_times)
 
 
-def yield_state(cell, step_name, base_strain, strain_direction,
-                strain_limit, criterion):
-    """Interpolate yield from increments accumulated during one probe."""
+def _yield_state(cell, step_name, base_strain, strain_direction,
+                 strain_limit, dissipation_ratio_threshold):
+    """Interpolate yield from work increments accumulated during one probe."""
     close_odb = cell.odb is None
     cell.open_odb_file()
     try:
@@ -229,16 +313,19 @@ def yield_state(cell, step_name, base_strain, strain_direction,
             raise RuntimeError(
                 "ALLPD and ALLIE are not available at identical times.")
 
-        # The operational yield criterion uses work increments measured from
-        # the base frame of the probe, not values accumulated during preload.
+        # Only work increments accumulated from the probe base state enter the
+        # operational yield criterion. Preload values are subtracted for the
+        # evolved surface.
         plastic_increment = np.maximum(
             plastic[:, 1] - plastic[0, 1], 0.0)
         internal_increment = internal[:, 1] - internal[0, 1]
-        ratio = (plastic_increment
-                 / np.maximum(np.abs(internal_increment), 1.0e-30))
+        dissipation_ratio = (
+            plastic_increment
+            / np.maximum(np.abs(internal_increment), 1.0e-30))
 
         # First bracket the prescribed dissipation ratio in pseudo-time.
-        yielded = np.flatnonzero(ratio >= criterion)
+        yielded = np.flatnonzero(
+            dissipation_ratio >= dissipation_ratio_threshold)
         if yielded.size == 0:
             return None
         upper = int(yielded[0])
@@ -249,7 +336,7 @@ def yield_state(cell, step_name, base_strain, strain_direction,
 
         # The PEEQ guard prevents an energy-ratio crossing from being accepted
         # before either structural constituent has accumulated plastic strain.
-        _, onset_times = constituent_peeq_increment_data(
+        _, onset_times = _constituent_peeq_increment_data(
             cell, step_name, plastic[0, 0], plastic[-1, 0])
         if np.all(np.isnan(onset_times)):
             return None
@@ -258,33 +345,35 @@ def yield_state(cell, step_name, base_strain, strain_direction,
             onset_frame = int(np.searchsorted(
                 plastic[:, 0], plastic_onset - 1.0e-12))
             eligible = np.flatnonzero(
-                (np.arange(len(ratio)) >= onset_frame)
-                & (ratio >= criterion))
+                (np.arange(len(dissipation_ratio)) >= onset_frame)
+                & (dissipation_ratio >= dissipation_ratio_threshold))
             if eligible.size == 0:
                 return None
             upper = int(eligible[0])
             lower = upper - 1
 
         # Interpolate the crossing within the two converged bracket frames.
-        denominator = ratio[upper] - ratio[lower]
+        denominator = (dissipation_ratio[upper]
+                       - dissipation_ratio[lower])
         if (plastic[upper, 0] <= plastic_onset + 1.0e-12
-                and ratio[lower] >= criterion):
+                and dissipation_ratio[lower] >= dissipation_ratio_threshold):
             fraction = 1.0
         else:
-            fraction = ((criterion - ratio[lower]) / denominator
+            fraction = ((dissipation_ratio_threshold
+                         - dissipation_ratio[lower]) / denominator
                         if abs(denominator) > 1.0e-30 else 1.0)
         yield_time = (plastic[lower, 0]
                       + fraction * (plastic[upper, 0] - plastic[lower, 0]))
 
         # Apply the same interpolation fraction to stress and PEEQ output.
-        peeq, _ = constituent_peeq_increment_data(
+        peeq, _ = _constituent_peeq_increment_data(
             cell, step_name, plastic[lower, 0], plastic[upper, 0])
         frame_times = np.asarray(
             [frame.frameValue for frame in step.frames], dtype=float)
-        lower_frame = int(np.argmin(
-            np.abs(frame_times - plastic[lower, 0])))
-        upper_frame = int(np.argmin(
-            np.abs(frame_times - plastic[upper, 0])))
+        lower_frame = _matching_frame_index(
+            frame_times, plastic[lower, 0])
+        upper_frame = _matching_frame_index(
+            frame_times, plastic[upper, 0])
         lower_stress = tensor_to_voigt(
             cell.average_stress(step_name, lower_frame), "STRESS")
         upper_stress = tensor_to_voigt(
@@ -297,34 +386,35 @@ def yield_state(cell, step_name, base_strain, strain_direction,
         if np.isnan(onset_times[1]) or (
                 not np.isnan(onset_times[0])
                 and onset_times[0] < onset_times[1] - 1.0e-12):
-            controlling_constituent = "SHELL"
+            first_yielding_constituent = "SHELL"
         elif np.isnan(onset_times[0]) or (
                 onset_times[1] < onset_times[0] - 1.0e-12):
-            controlling_constituent = "BEAM"
+            first_yielding_constituent = "BEAM"
         else:
-            controlling_constituent = "BOTH"
+            first_yielding_constituent = "BOTH"
 
         return {
             "time": yield_time,
             "strain": strain,
             "stress": stress,
+            "dissipation_ratio": dissipation_ratio_threshold,
             "peeq_shell": peeq_yield[0],
             "peeq_beam": peeq_yield[1],
-            "constituent": controlling_constituent,
+            "first_yielding_constituent": first_yielding_constituent,
         }
     finally:
         if close_odb:
             cell.close_odb_file()
 
 
-def sample_direction(gmsh_cell, parameters, preload_strain, base_strain,
-                     strain_direction, strain_limits, criterion,
+def sample_direction(gmsh_cell, parameters, preload_strain, base_strain_target,
+                     strain_direction, strain_limits,
+                     dissipation_ratio_threshold,
                      maximum_strain_increment):
-    """Prepare one RVE state and probe a proportional loading direction."""
+    """Prepare one RVE state and probe a proportional strain direction."""
     preload_strain = np.asarray(preload_strain, dtype=float)
-    base_strain = np.asarray(base_strain, dtype=float)
-    prepared_state = (np.any(np.abs(preload_strain) > 0.0)
-                      or np.any(np.abs(base_strain) > 0.0))
+    base_strain_target = np.asarray(base_strain_target, dtype=float)
+    prepared_state = np.any(np.abs(preload_strain) > 0.0)
 
     # Increase the probe range only when the preceding range does not reach
     # yield. Every attempt starts from a fresh RVE with an independent history.
@@ -335,22 +425,21 @@ def sample_direction(gmsh_cell, parameters, preload_strain, base_strain,
 
         def strain_path(pseudo_time, direction=strain_direction,
                         limit=strain_limit):
-            """Return preparation and proportional probing strains."""
+            """Return preloading, unloading, and probing strains."""
             if not prepared_state:
                 strain = pseudo_time * limit * direction
             elif pseudo_time <= 1.0:
                 strain = pseudo_time * preload_strain
             elif pseudo_time <= 2.0:
-                strain = (preload_strain
-                          + (pseudo_time - 1.0)
-                          * (base_strain - preload_strain))
+                strain = (2.0 - pseudo_time) * preload_strain
+                strain += (pseudo_time - 1.0) * base_strain_target
             else:
-                strain = (base_strain
-                          + (pseudo_time - 2.0) * limit * direction)
+                strain = base_strain_target.copy()
+                strain += (pseudo_time - 2.0) * limit * direction
             return voigt_to_tensor(strain, "STRAIN")
 
         cell = AbaqusRVE(gmsh_cell, custom_types={1: "B31"})
-        assign_sections(cell, parameters)
+        _assign_sections(cell, parameters)
 
         # The initial surface starts directly with the probe. The evolved
         # surface first reproduces its monotonic preload and elastic unloading.
@@ -385,8 +474,10 @@ def sample_direction(gmsh_cell, parameters, preload_strain, base_strain,
             history = LoadHistory(np.asarray([0.0, 1.0]), strain_path)
             first_step = probe_step
 
-        # Applying the complete history at its first step propagates the same
-        # periodic macroscopic loading through all subsequent analysis steps.
+        # Applying the complete macroscopic-strain history at its first step
+        # propagates the periodic displacement conditions through all steps.
+        # The conforming beam endpoints share the host nodes at the cell
+        # corners, so periodicity precedes embedding of the interior nodes.
         cell.apply_periodic_bc(first_step, history)
         cell.model.EmbeddedRegion(
             "EMBEDDED_BEAM_CORE",
@@ -399,10 +490,16 @@ def sample_direction(gmsh_cell, parameters, preload_strain, base_strain,
         # Reuse one ODB handle for unloading checks and yield extraction.
         cell.open_odb_file()
         try:
-            # Confirm that returning from the preload to the common base state
-            # did not produce additional plastic strain during unloading.
+            # Confirm that unloading to the effective base strain did not
+            # produce additional plastic strain.
             if prepared_state:
-                unload_peeq, _ = constituent_peeq_increment_data(
+                preload_peeq, _ = _constituent_peeq_increment_data(
+                    cell, preload_step, 0.0, 1.0)
+                if np.max(preload_peeq[-1]) <= 1.0e-12:
+                    raise RuntimeError(
+                        "The preload did not produce plastic strain.")
+
+                unload_peeq, _ = _constituent_peeq_increment_data(
                     cell, unload_step, 0.0, 1.0)
                 maximum_unload_peeq = unload_peeq[-1]
                 if np.max(maximum_unload_peeq) > 1.0e-10:
@@ -412,23 +509,26 @@ def sample_direction(gmsh_cell, parameters, preload_strain, base_strain,
                         "{}.".format(maximum_unload_peeq))
                 base_stress = tensor_to_voigt(
                     cell.average_stress(unload_step), "STRESS")
+                base_strain = base_strain_target.copy()
             else:
                 maximum_unload_peeq = np.zeros(2)
                 base_stress = np.zeros(6)
+                base_strain = np.zeros(6)
 
             # Extract the first acceptable yield point from the probe.
-            state = yield_state(
+            state = _yield_state(
                 cell, probe_step, base_strain, strain_direction,
-                strain_limit, criterion)
+                strain_limit, dissipation_ratio_threshold)
         finally:
             cell.close_odb_file()
         if state is not None:
             state.update({
                 "strain_limit": strain_limit,
+                "base_strain": base_strain,
                 "base_stress": base_stress,
                 "unload_peeq_shell": maximum_unload_peeq[0],
                 "unload_peeq_beam": maximum_unload_peeq[1],
-                # The 3D worker removes this temporary database after the
+                # The caller may remove this temporary database after the
                 # sampled state has been persisted.
                 "odb_path": os.path.abspath(cell.job_name + ".odb"),
             })
@@ -439,7 +539,7 @@ def sample_direction(gmsh_cell, parameters, preload_strain, base_strain,
 
 
 # ---------------------------------------------------------------
-# Resumable result persistence
+# Resumable configuration records
 
 def _configuration_value(value):
     """Return a JSON-compatible configuration value."""
@@ -535,69 +635,8 @@ def validate_result_configuration(path, configuration, result_paths=()):
         os.rmdir(lock_path)
 
 
-def write_yield_results(path, records):
-    """Write sampled yield points and their common base state."""
-    header = (["theta", "yield-time", "strain-limit"]
-              + ["epsilon-{}".format(name)
-                 for name in VOIGT_COMPONENTS]
-              + ["sigma-{}".format(name)
-                 for name in VOIGT_COMPONENTS]
-              + ["base-sigma-{}".format(name)
-                 for name in VOIGT_COMPONENTS]
-              + ["max-unload-delta-peeq-shell",
-                 "max-unload-delta-peeq-beam",
-                 "max-delta-peeq-shell", "max-delta-peeq-beam",
-                 "controlling-constituent"])
-    with open_csv_file(path, "w") as csv_file:
-        writer = csv.writer(csv_file)
-        writer.writerow(header)
-        for record in records:
-            writer.writerow(
-                [record["theta"], record["time"],
-                 record["strain_limit"]]
-                + list(record["strain"])
-                + list(record["stress"])
-                + list(record["base_stress"])
-                + [record["unload_peeq_shell"],
-                   record["unload_peeq_beam"],
-                   record["peeq_shell"], record["peeq_beam"],
-                   record["constituent"]])
-
-
-def read_yield_results(path):
-    """Read completed yield directions for a resumable sampling run."""
-    if not os.path.isfile(path):
-        return []
-
-    records = []
-    with open_csv_file(path, "r") as csv_file:
-        for row in csv.DictReader(csv_file):
-            records.append({
-                "theta": float(row["theta"]),
-                "time": float(row["yield-time"]),
-                "strain_limit": float(row["strain-limit"]),
-                "strain": np.asarray([
-                    float(row["epsilon-" + name])
-                    for name in VOIGT_COMPONENTS]),
-                "stress": np.asarray([
-                    float(row["sigma-" + name])
-                    for name in VOIGT_COMPONENTS]),
-                "base_stress": np.asarray([
-                    float(row["base-sigma-" + name])
-                    for name in VOIGT_COMPONENTS]),
-                "unload_peeq_shell": float(
-                    row["max-unload-delta-peeq-shell"]),
-                "unload_peeq_beam": float(
-                    row["max-unload-delta-peeq-beam"]),
-                "peeq_shell": float(row["max-delta-peeq-shell"]),
-                "peeq_beam": float(row["max-delta-peeq-beam"]),
-                "constituent": row["controlling-constituent"],
-            })
-    return records
-
-
 # ---------------------------------------------------------------
-# Geometry, state definitions, and plane sampling
+# Geometry and state definitions
 
 def build_gmsh_cell(mesh_parameters):
     """Build the periodic mesh shared by the yield-surface analyses."""
@@ -630,318 +669,19 @@ def state_definition(state_name):
             "preload_strain": zero_strain,
             "base_strain": zero_strain,
             "strain_limits": (0.006, 0.012, 0.024, 0.03, 0.06),
-            "result_directory": "results",
         },
-        # The evolved surface is probed from the common elastically unloaded
-        # state following monotonic epsilon_11 preloading.
+        # Prepare the evolved surface by monotonic strain preloading followed
+        # by elastic unloading to the specified base strain.
         "evolved": {
             "preload_strain": np.asarray(
-                [0.03, 0.0, 0.0, 0.0, 0.0, 0.0]),
+                [0.03, 0.0, 0.0,
+                 0.0, 0.0, 0.0]),
             "base_strain": np.asarray(
-                [0.027, 0.0, 0.0, 0.0, 0.0, 0.0]),
+                [0.027, 0.0, 0.0,
+                 0.0, 0.0, 0.0]),
             "strain_limits": (0.003, 0.006, 0.012, 0.024),
-            "result_directory": "evolved_results",
         },
     }
     if state_name not in definitions:
         raise ValueError("The yield state must be initial or evolved.")
     return definitions[state_name]
-
-
-def elastic_calibration(gmsh_cell, parameters, strain_magnitude,
-                        result_directory):
-    """Return the effective elastic compliance used for stress directions."""
-    stiffness_path = os.path.join(
-        result_directory, "effective_stiffness.csv")
-    compliance_path = os.path.join(
-        result_directory, "effective_compliance.csv")
-
-    # Reuse the six elastic calibration analyses across both yield surfaces.
-    if os.path.isfile(stiffness_path) and os.path.isfile(compliance_path):
-        stiffness = read_csv_file(stiffness_path)
-        compliance = read_csv_file(compliance_path)
-        print("Reusing the existing effective elastic calibration.")
-    else:
-        stiffness = compute_elastic_stiffness(
-            gmsh_cell, parameters, strain_magnitude)
-        compliance = None
-
-    if stiffness.shape != (6, 6) or not np.all(np.isfinite(stiffness)):
-        raise RuntimeError(
-            "The effective stiffness must be a finite 6 x 6 matrix.")
-
-    # The symmetric part defines the stress-to-strain direction map. The raw
-    # matrix is retained in the output so its numerical symmetry can be
-    # checked.
-    stiffness_symmetric = 0.5 * (stiffness + stiffness.T)
-    symmetry_residual = (np.linalg.norm(stiffness - stiffness.T)
-                         / np.linalg.norm(stiffness))
-    eigenvalues = np.linalg.eigvalsh(stiffness_symmetric)
-    if np.min(eigenvalues) <= 0.0:
-        raise RuntimeError("The effective elastic stiffness is not positive.")
-    if compliance is None:
-        compliance = np.linalg.inv(stiffness_symmetric)
-        export_to_csv_file(stiffness, stiffness_path)
-        export_to_csv_file(compliance, compliance_path)
-    if compliance.shape != (6, 6) or not np.all(np.isfinite(compliance)):
-        raise RuntimeError(
-            "The effective compliance must be a finite 6 x 6 matrix.")
-    if not np.allclose(
-            stiffness_symmetric.dot(compliance), np.eye(6),
-            rtol=1.0e-6, atol=1.0e-9):
-        raise RuntimeError(
-            "The cached effective stiffness and compliance are inconsistent.")
-    print("Elastic stiffness symmetry residual: {:.3e}".format(
-        symmetry_residual))
-    print("Elastic stiffness eigenvalues: {}".format(eigenvalues))
-    sys.stdout.flush()
-    return compliance
-
-
-def sample_plane(gmsh_cell, parameters, compliance, state_name,
-                 preload_strain, base_strain, plane, angles,
-                 strain_limits, criterion, maximum_strain_increment,
-                 result_directory):
-    """Sample one resumable normal-stress-plane section."""
-    plane_name, first, second = plane
-    result_path = os.path.join(result_directory, plane_name + ".csv")
-
-    # A completed prefix of angular directions can be resumed safely only when
-    # it belongs to the same ordered angular grid.
-    records = read_yield_results(result_path)
-    completed_angles = [record["theta"] for record in records]
-    if (len(records) > len(angles)
-            or not np.allclose(completed_angles, angles[:len(records)])):
-        print("Existing {} results do not match the angular grid. "
-              "Starting this plane again.".format(plane_name))
-        records = []
-
-    print("\nSampling {} {} with {} fixed-increment directions.".format(
-        state_name, plane_name, len(angles)))
-    if records:
-        print("  resuming after {} completed directions".format(
-            len(records)))
-
-    for direction_index in range(len(records), len(angles)):
-        angle = angles[direction_index]
-
-        # Prescribe a target stress-space direction and use the effective
-        # elastic compliance to obtain its proportional strain-space direction.
-        stress_direction = np.zeros(6)
-        stress_direction[first] = np.cos(angle)
-        stress_direction[second] = np.sin(angle)
-        strain_direction = compliance.dot(stress_direction)
-        strain_direction /= np.max(np.abs(strain_direction))
-
-        print("  direction {:02d}/{:02d}: theta = {:7.2f} deg".format(
-            direction_index + 1, len(angles), np.degrees(angle)))
-        sys.stdout.flush()
-
-        # A single clean retry handles occasional solver or file-access
-        # failures without silently continuing after a repeated failure.
-        for attempt in range(2):
-            try:
-                state = sample_direction(
-                    gmsh_cell, parameters, preload_strain, base_strain,
-                    strain_direction, strain_limits, criterion,
-                    maximum_strain_increment)
-                break
-            except Exception as error:
-                if attempt == 1:
-                    raise
-                print("    analysis failed once. Rebuilding and retrying: "
-                      "{}".format(error))
-                sys.stdout.flush()
-        state["theta"] = angle
-        records.append(state)
-
-        # Persist every completed direction so long sampling runs are
-        # resumable.
-        write_yield_results(result_path, records)
-
-    print("Completed {}.".format(plane_name))
-    sys.stdout.flush()
-
-
-# ---------------------------------------------------------------
-# Script orchestration
-
-def main():
-    """Compute initial and evolved effective yield-surface sections."""
-    # Analysis configuration. Set selected_state to "initial", "evolved", or
-    # "both". Set selected_plane to one of the names below or leave it as None.
-    calibration_only = False
-    number_of_directions = 36
-    selected_state = "both"
-    selected_plane = None
-    criterion = 1.0e-4
-    maximum_strain_increment = 6.0e-5
-    elastic_strain = 1.0e-5
-    parameters = {
-        "matrix_E": 1.0,
-        "matrix_nu": 0.3,
-        "shell_E": 100.0,
-        "shell_nu": 0.3,
-        "shell_yield": 0.4,
-        "beam_E": 100.0,
-        "beam_nu": 0.3,
-        "beam_yield": 0.6,
-        "shell_thickness": 0.02,
-        "beam_radius": 0.05,
-    }
-    mesh_parameters = {
-        "edge_length": 1.0,
-        "matrix_elements_per_edge": 8,
-        "elements_per_strut": 16,
-        "element_order": 1,
-        "algorithm_2d": 6,
-        "algorithm_3d": 1,
-    }
-
-    original_directory = os.getcwd()
-    try:
-        gmsh_cell = build_gmsh_cell(mesh_parameters)
-
-        # The elastic calibration is shared by the initial and evolved sweeps.
-        yield_directory = os.path.join(here, "yield_surface")
-        calibration_directory = os.path.join(yield_directory, "results")
-        calibration_analysis = os.path.join(
-            yield_directory, "calibration_abq")
-        for directory in (calibration_analysis, calibration_directory):
-            if not os.path.isdir(directory):
-                os.makedirs(directory)
-        calibration_results = (
-            os.path.join(calibration_directory, "effective_stiffness.csv"),
-            os.path.join(calibration_directory, "effective_compliance.csv"),
-        )
-        validate_result_configuration(
-            os.path.join(
-                calibration_directory, "calibration_configuration.csv"),
-            {
-                "analysis": "elastic_calibration",
-                "elastic_strain": elastic_strain,
-                "materials": parameters,
-                "mesh": mesh_parameters,
-            },
-            calibration_results)
-        os.chdir(calibration_analysis)
-        compliance = elastic_calibration(
-            gmsh_cell, parameters, elastic_strain, calibration_directory)
-        if calibration_only:
-            print("*** Elastic calibration finished ***")
-            return
-
-        # The two requested normal-stress planes use the same complete angular
-        # grid without invoking symmetry of the cell or effective response.
-        if number_of_directions < 4:
-            raise ValueError(
-                "At least four yield-surface directions are required.")
-        angles = np.linspace(
-            0.0, 2.0 * np.pi, number_of_directions, endpoint=False)
-        stress_planes = (
-            ("sigma11_sigma22", 0, 1),
-            ("sigma11_sigma33", 0, 2),
-        )
-        plane_names = tuple(plane[0] for plane in stress_planes)
-        if selected_plane is not None and selected_plane not in plane_names:
-            raise ValueError(
-                "The selected plane must be one of {} or None."
-                .format(plane_names))
-
-        selected_state = selected_state.lower()
-        if selected_state not in ("initial", "evolved", "both"):
-            raise ValueError(
-                "The yield state must be initial, evolved, or both.")
-
-        # Each surface has its own Abaqus working directory and resumable CSVs.
-        for state_name in ("initial", "evolved"):
-            if selected_state not in (state_name, "both"):
-                continue
-            definition = state_definition(state_name)
-            result_directory = os.path.join(
-                yield_directory, definition["result_directory"])
-            analysis_directory = os.path.join(
-                yield_directory, state_name + "_abq")
-            for directory in (analysis_directory, result_directory):
-                if not os.path.isdir(directory):
-                    os.makedirs(directory)
-            result_paths = tuple(
-                os.path.join(result_directory, name + ".csv")
-                for name in plane_names)
-            result_paths += (
-                os.path.join(result_directory, "base_strain.csv"),
-                os.path.join(result_directory, "base_stress.csv"),
-            )
-            validate_result_configuration(
-                os.path.join(
-                    result_directory, "sampling_configuration.csv"),
-                {
-                    "analysis": "yield_surface_sections",
-                    "criterion": criterion,
-                    "directions": number_of_directions,
-                    "materials": parameters,
-                    "maximum_strain_increment": maximum_strain_increment,
-                    "mesh": mesh_parameters,
-                    "planes": plane_names,
-                    "preload_strain": definition["preload_strain"],
-                    "base_strain": definition["base_strain"],
-                    "state": state_name,
-                    "strain_limits": definition["strain_limits"],
-                },
-                result_paths)
-            os.chdir(analysis_directory)
-            export_to_csv_file(
-                definition["base_strain"][None, :],
-                os.path.join(result_directory, "base_strain.csv"),
-                header=STRAIN_HEADER)
-
-            print("\n{} yield surface".format(state_name.capitalize()))
-            print("  preload strain: {}".format(
-                definition["preload_strain"]))
-            print("  base strain: {}".format(definition["base_strain"]))
-            for plane in stress_planes:
-                if (selected_plane is not None
-                        and plane[0] != selected_plane):
-                    continue
-                sample_plane(
-                    gmsh_cell, parameters, compliance, state_name,
-                    definition["preload_strain"],
-                    definition["base_strain"], plane, angles,
-                    definition["strain_limits"], criterion,
-                    maximum_strain_increment,
-                    result_directory=result_directory)
-
-            # Independently reproduced base states must be identical across all
-            # probing directions and both sampled planes.
-            records = []
-            for plane in stress_planes:
-                path = os.path.join(
-                    result_directory, plane[0] + ".csv")
-                if os.path.isfile(path):
-                    records.extend(read_yield_results(path))
-            if records:
-                base_stresses = np.asarray([
-                    record["base_stress"] for record in records])
-                if not np.allclose(
-                        base_stresses, base_stresses[0],
-                        rtol=1.0e-6, atol=1.0e-9):
-                    raise RuntimeError(
-                        "The independently reproduced base states do not "
-                        "have consistent effective stresses.")
-                export_to_csv_file(
-                    base_stresses[:1],
-                    os.path.join(result_directory, "base_stress.csv"),
-                    header=STRESS_HEADER)
-
-        print("*** Yield-surface sampling finished ***")
-    finally:
-        os.chdir(original_directory)
-        if gmsh.is_initialized():
-            gmsh.finalize()
-
-
-if __name__ == "__main__":
-    # Abaqus replaces stdout. Restore the shell that launched the example.
-    if sys.__stdout__ is not None:
-        sys.stdout = sys.__stdout__
-    main()
