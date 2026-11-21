@@ -121,7 +121,7 @@ studies from the
 |---|---|
 | [`01_small_strain_verification`](examples/paper_examples/01_small_strain_verification) | Mixed continuum–shell–beam verification |
 | [`02_hyperelastic_octet_lattice`](examples/paper_examples/02_hyperelastic_octet_lattice) | Imperfect hyperelastic Octet lattice and supercell comparison |
-| [`03_elastoplastic_sandwich_cell`](examples/paper_examples/03_elastoplastic_sandwich_cell) | Cyclic plasticity and effective yield surfaces |
+| [`03_elastoplastic_sandwich_cell`](examples/paper_examples/03_elastoplastic_sandwich_cell) | Cyclic plasticity and strain- and stress-driven effective yield surfaces |
 
 Execution order and generated data products are documented in the
 [`paper_examples` README](examples/paper_examples/README.md).

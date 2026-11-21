@@ -86,3 +86,8 @@ documents the required execution order and generated data products. Their
 model sizes and number of analyses may require a full Abaqus license. See the
 `manuscript-example instructions <https://github.com/jstollberg/abqhom/tree/main/examples/paper_examples>`_
 before running them.
+
+The elastoplastic sandwich-cell example provides two alternative
+yield-surface workflows. One prescribes effective-stress paths, while the
+other prescribes macroscopic strain paths. Both workflows include matching
+scripts for two-dimensional sections and complete three-dimensional surfaces.
