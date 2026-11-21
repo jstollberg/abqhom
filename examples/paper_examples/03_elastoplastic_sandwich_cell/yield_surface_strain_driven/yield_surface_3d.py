@@ -32,7 +32,7 @@ from yield_surface_common import (CONSTITUENT_PARAMETERS, ELASTIC_STRAIN,
                                   sample_direction, state_definition,
                                   validate_result_configuration)
 
-script_directory = os.path.dirname(os.path.abspath(__file__))
+script_directory = os.getcwd()
 
 CSV_HEADER = (["direction-index", "n1", "n2", "n3", "yield-time",
                "strain-limit", "additional-plastic-work-density"]

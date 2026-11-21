@@ -33,7 +33,7 @@ from yield_surface_common import (CONSTITUENT_PARAMETERS,
                                   state_definition,
                                   validate_result_configuration)
 
-script_directory = os.path.dirname(os.path.abspath(__file__))
+script_directory = os.getcwd()
 
 
 # ---------------------------------------------------------------
