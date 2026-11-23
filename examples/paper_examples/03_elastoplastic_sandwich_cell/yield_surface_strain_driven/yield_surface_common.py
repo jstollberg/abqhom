@@ -497,14 +497,20 @@ def sample_direction(gmsh_cell, parameters, preload_strain, base_strain_target,
             # Confirm that unloading to the effective base strain did not
             # produce additional plastic strain.
             if prepared_state:
+                preload_frames = cell.odb.steps[preload_step].frames
                 preload_peeq, _ = _constituent_peeq_increment_data(
-                    cell, preload_step, 0.0, 1.0)
+                    cell, preload_step,
+                    preload_frames[0].frameValue,
+                    preload_frames[-1].frameValue)
                 if np.max(preload_peeq[-1]) <= 1.0e-12:
                     raise RuntimeError(
                         "The preload did not produce plastic strain.")
 
+                unload_frames = cell.odb.steps[unload_step].frames
                 unload_peeq, _ = _constituent_peeq_increment_data(
-                    cell, unload_step, 0.0, 1.0)
+                    cell, unload_step,
+                    unload_frames[0].frameValue,
+                    unload_frames[-1].frameValue)
                 maximum_unload_peeq = unload_peeq[-1]
                 if np.max(maximum_unload_peeq) > 1.0e-10:
                     raise RuntimeError(
