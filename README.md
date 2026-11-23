@@ -29,9 +29,8 @@ integration, nonlinear solution procedures, and output databases.
 - Periodic translational and rotational constraints for continuum and
   structural finite elements.
 - Ownership-consistent treatment of structural members on periodic
-  boundaries through automatic removal of redundant copies. Complete cells
-  can instead be retained with an explicitly weighted linear-elastic
-  response.
+  boundaries through automatic removal of redundant copies. A complete cell
+  can instead be retained when its response is weighted consistently.
 - Effective first Piola–Kirchhoff stress recovery from element nodal forces
   and incremental microscopic work for discrete Hill–Mandel checks.
 - Nonconforming structural–continuum coupling through Abaqus embedded
