@@ -7,7 +7,8 @@ The twelve edge struts are shared by four neighboring cells, making this the
 simplest example of ownership weighting. The complete cell is retained and
 the Young's modulus of every strut is scaled by its ownership factor 1/4.
 The numerical stiffness is compared with ``C11 = E*pi*r**2/L**2``, while the
-transverse coupling terms are expected to vanish.
+transverse coupling terms are expected to vanish. A subsequent uniaxial
+stress-controlled case verifies the recovered effective stress and strain.
 """
 
 import os
@@ -91,7 +92,9 @@ def main():
             "STRUTS", "WEIGHTED_STRUT", radius)
         unit_cell.model.StaticStep(name="LOAD", previous="Initial")
 
-        # Run the homogenization routine (six load cases in 3D)
+        # Run the six independent three-dimensional strain cases. Each
+        # recovered stress vector forms one column of the effective stiffness
+        # matrix in Voigt notation.
         strain_magnitude = 0.03
         component_names = ("xx", "yy", "zz", "yz", "xz", "xy")
         C = np.zeros((6, 6))
@@ -106,7 +109,7 @@ def main():
                 return time*voigt_to_tensor(strain, "STRAIN")
 
             history = LoadHistory(np.array([0.0, 1.0]), strain_history)
-            unit_cell.apply_periodic_bc("LOAD", history)
+            unit_cell.apply_periodic_displacement_bc("LOAD", history)
             print("  Run Abaqus analysis.")
             sys.stdout.flush()
             unit_cell.run_analysis(field_outputs=["U"])
@@ -123,6 +126,43 @@ def main():
 
         # ---------------------------------------------------------------
         C11_analytical = E*np.pi*radius**2/length**2
+
+        # Verify the inverse response by prescribing the analytical axial
+        # stress corresponding to the strain used above. The remaining free
+        # macroscopic controls impose zero transverse and shear stress, and
+        # the solution should recover the original axial strain.
+        stress_magnitude = C11_analytical*strain_magnitude
+        print("\n------------------------------")
+        print("Run stress-controlled case (xx).")
+
+        def stress_history(time):
+            """Return the ramped macroscopic Cauchy stress."""
+            stress = np.zeros((3, 3))
+            stress[0, 0] = time*stress_magnitude
+            return stress
+
+        history = LoadHistory(np.array([0.0, 1.0]), stress_history)
+        unit_cell.apply_periodic_traction_bc("LOAD", history)
+        print("  Run Abaqus analysis.")
+        sys.stdout.flush()
+        unit_cell.run_analysis(field_outputs=["U"])
+
+        effective_stress = unit_cell.average_stress("LOAD")
+        deformation_gradient = unit_cell.average_deformation_gradient(
+            "LOAD")
+        recovered_strain = deformation_gradient[0, 0] - 1.0
+        stress_residual = (
+            np.linalg.norm(effective_stress - stress_history(1.0))
+            / stress_magnitude)
+        strain_error = (
+            abs(recovered_strain - strain_magnitude)/strain_magnitude)
+
+        print("  Export VTK results.")
+        sys.stdout.flush()
+        unit_cell.export_to_vtk(
+            os.path.join(here, "vtk_output", "stress_xx"),
+            field_outputs=["U"], clear=True)
+
         print("\n------------------------------")
         print("Effective constitutive matrix (Voigt):")
         print(np.array2string(C, precision=4, suppress_small=True))
@@ -133,12 +173,30 @@ def main():
             abs(C[0, 0] - C11_analytical)/C11_analytical))
         print("  max |C12,C13,C23| (should vanish) = {:.2e}".format(
             max(abs(C[0, 1]), abs(C[0, 2]), abs(C[1, 2]))))
+        print("\nPeriodic stress-control verification:")
+        print("  prescribed sigma11 = {:.6e}".format(stress_magnitude))
+        print("  recovered sigma11  = {:.6e}".format(
+            effective_stress[0, 0]))
+        print("  recovered epsilon11 = {:.6e}".format(recovered_strain))
+        print("  relative stress residual = {:.2e}".format(stress_residual))
+        print("  relative strain error    = {:.2e}".format(strain_error))
 
-        # Store the effective stiffness
+        # Store the effective stiffness and stress-control verification.
         result_dir = os.path.join(here, "results")
         if not os.path.isdir(result_dir):
             os.makedirs(result_dir)
         export_to_csv_file(C, os.path.join(result_dir, "stiffness.csv"))
+        stress_control = np.array([[stress_magnitude,
+                                    effective_stress[0, 0],
+                                    strain_magnitude,
+                                    recovered_strain,
+                                    stress_residual,
+                                    strain_error]])
+        export_to_csv_file(
+            stress_control, os.path.join(result_dir, "stress_control.csv"),
+            header=("prescribed_sigma_11,recovered_sigma_11,"
+                    "expected_epsilon_11,recovered_epsilon_11,"
+                    "stress_residual,strain_error"))
     finally:
         if gmsh.is_initialized():
             gmsh.finalize()

@@ -35,7 +35,7 @@ STRESS_HEADER = ",".join(
 
 # These settings define the same model and operational yield criterion for
 # the two-dimensional sections and the three-dimensional surface.
-DISSIPATION_RATIO_THRESHOLD = 1.0e-4
+PLASTIC_WORK_DENSITY_THRESHOLD = 1.0e-6
 MAXIMUM_STRAIN_INCREMENT = 6.0e-5
 ELASTIC_STRAIN = 1.0e-5
 CONSTITUENT_PARAMETERS = {
@@ -132,7 +132,7 @@ def _compute_elastic_stiffness(gmsh_cell, parameters, strain_magnitude):
             name=step_name, previous="Initial", nlgeom=OFF,
             timePeriod=1.0, maxNumInc=1,
             initialInc=1.0, minInc=1.0, maxInc=1.0)
-        cell.apply_periodic_bc(step_name, history)
+        cell.apply_periodic_displacement_bc(step_name, history)
         cell.model.EmbeddedRegion(
             "EMBEDDED_BEAM_CORE",
             cell.instance.sets["ELSET_BEAM_STRUTS"],
@@ -297,9 +297,8 @@ def _constituent_peeq_increment_data(cell, step_name, lower_time, upper_time,
     return peeq, np.asarray(onset_times)
 
 
-def _yield_state(cell, step_name, base_strain, strain_direction,
-                 strain_limit, dissipation_ratio_threshold):
-    """Interpolate yield from work increments accumulated during one probe."""
+def _yield_state(cell, step_name, plastic_work_density_threshold):
+    """Interpolate a fixed additional plastic-work-density crossing."""
     close_odb = cell.odb is None
     cell.open_odb_file()
     try:
@@ -307,67 +306,50 @@ def _yield_state(cell, step_name, base_strain, strain_direction,
         history_region = step.historyRegions["Assembly ASSEMBLY"]
         plastic = np.asarray(
             history_region.historyOutputs["ALLPD"].data, dtype=float)
-        internal = np.asarray(
-            history_region.historyOutputs["ALLIE"].data, dtype=float)
-        if not np.allclose(plastic[:, 0], internal[:, 0]):
-            raise RuntimeError(
-                "ALLPD and ALLIE are not available at identical times.")
 
-        # Only work increments accumulated from the probe base state enter the
-        # operational yield criterion. Preload values are subtracted for the
-        # evolved surface.
-        plastic_increment = np.maximum(
-            plastic[:, 1] - plastic[0, 1], 0.0)
-        internal_increment = internal[:, 1] - internal[0, 1]
-        dissipation_ratio = (
-            plastic_increment
-            / np.maximum(np.abs(internal_increment), 1.0e-30))
+        # Only the additional plastic work accumulated from the probe base
+        # state enters the criterion. Preload dissipation is subtracted for
+        # the evolved surface, and division by the reference-cell measure
+        # makes the threshold independent of cell size.
+        additional_plastic_work_density = np.maximum(
+            plastic[:, 1] - plastic[0, 1], 0.0) / cell.get_volume()
 
-        # First bracket the prescribed dissipation ratio in pseudo-time.
+        # Bracket the prescribed plastic-work-density threshold in
+        # pseudo-time before checking that local plastic straining occurred.
         yielded = np.flatnonzero(
-            dissipation_ratio >= dissipation_ratio_threshold)
+            additional_plastic_work_density >= plastic_work_density_threshold)
         if yielded.size == 0:
             return None
         upper = int(yielded[0])
         if upper == 0:
             raise RuntimeError(
-                "The initial frame satisfies the yield criterion.")
+                "The initial frame satisfies the plastic-work-density "
+                "threshold.")
         lower = upper - 1
 
-        # The PEEQ guard prevents an energy-ratio crossing from being accepted
-        # before either structural constituent has accumulated plastic strain.
-        _, onset_times = _constituent_peeq_increment_data(
-            cell, step_name, plastic[0, 0], plastic[-1, 0])
+        # Read the bracketing PEEQ values and locate the first frame with
+        # additional plastic strain in either structural constituent.
+        peeq, onset_times = _constituent_peeq_increment_data(
+            cell, step_name, plastic[lower, 0], plastic[upper, 0])
         if np.all(np.isnan(onset_times)):
             return None
         plastic_onset = np.nanmin(onset_times)
         if plastic[upper, 0] < plastic_onset - 1.0e-12:
-            onset_frame = int(np.searchsorted(
-                plastic[:, 0], plastic_onset - 1.0e-12))
-            eligible = np.flatnonzero(
-                (np.arange(len(dissipation_ratio)) >= onset_frame)
-                & (dissipation_ratio >= dissipation_ratio_threshold))
-            if eligible.size == 0:
-                return None
-            upper = int(eligible[0])
-            lower = upper - 1
+            raise RuntimeError(
+                "Plastic work crossed its threshold before the PEEQ "
+                "output indicated plastic flow.")
 
         # Interpolate the crossing within the two converged bracket frames.
-        denominator = (dissipation_ratio[upper]
-                       - dissipation_ratio[lower])
-        if (plastic[upper, 0] <= plastic_onset + 1.0e-12
-                and dissipation_ratio[lower] >= dissipation_ratio_threshold):
-            fraction = 1.0
-        else:
-            fraction = ((dissipation_ratio_threshold
-                         - dissipation_ratio[lower]) / denominator
-                        if abs(denominator) > 1.0e-30 else 1.0)
+        denominator = (additional_plastic_work_density[upper]
+                       - additional_plastic_work_density[lower])
+        fraction = ((plastic_work_density_threshold
+                     - additional_plastic_work_density[lower])
+                    / denominator)
         yield_time = (plastic[lower, 0]
                       + fraction * (plastic[upper, 0] - plastic[lower, 0]))
 
-        # Apply the same interpolation fraction to stress and PEEQ output.
-        peeq, _ = _constituent_peeq_increment_data(
-            cell, step_name, plastic[lower, 0], plastic[upper, 0])
+        # Apply the same interpolation fraction to the effective stress,
+        # effective strain, and PEEQ output.
         frame_times = np.asarray(
             [frame.frameValue for frame in step.frames], dtype=float)
         lower_frame = _matching_frame_index(
@@ -379,7 +361,19 @@ def _yield_state(cell, step_name, base_strain, strain_direction,
         upper_stress = tensor_to_voigt(
             cell.average_stress(step_name, upper_frame), "STRESS")
         stress = lower_stress + fraction * (upper_stress - lower_stress)
-        strain = base_strain + yield_time * strain_limit * strain_direction
+
+        identity = np.eye(3)
+        lower_gradient = cell.average_deformation_gradient(
+            step_name, lower_frame)
+        upper_gradient = cell.average_deformation_gradient(
+            step_name, upper_frame)
+        lower_strain = 0.5 * (
+            lower_gradient + lower_gradient.T) - identity
+        upper_strain = 0.5 * (
+            upper_gradient + upper_gradient.T) - identity
+        strain = tensor_to_voigt(
+            lower_strain + fraction * (upper_strain - lower_strain),
+            "STRAIN")
         peeq_yield = peeq[0] + fraction * (peeq[1] - peeq[0])
 
         # Report which structural constituent first activated the PEEQ guard.
@@ -397,7 +391,7 @@ def _yield_state(cell, step_name, base_strain, strain_direction,
             "time": yield_time,
             "strain": strain,
             "stress": stress,
-            "dissipation_ratio": dissipation_ratio_threshold,
+            "additional_plastic_work_density": plastic_work_density_threshold,
             "peeq_shell": peeq_yield[0],
             "peeq_beam": peeq_yield[1],
             "first_yielding_constituent": first_yielding_constituent,
@@ -409,7 +403,7 @@ def _yield_state(cell, step_name, base_strain, strain_direction,
 
 def sample_direction(gmsh_cell, parameters, preload_strain, base_strain_target,
                      strain_direction, strain_limits,
-                     dissipation_ratio_threshold,
+                     plastic_work_density_threshold,
                      maximum_strain_increment):
     """Prepare one RVE state and probe a proportional strain direction."""
     preload_strain = np.asarray(preload_strain, dtype=float)
@@ -447,17 +441,27 @@ def sample_direction(gmsh_cell, parameters, preload_strain, base_strain_target,
             preload_step = "MONOTONIC_PRELOAD"
             unload_step = "ELASTIC_UNLOAD"
             probe_step = "PROBE"
+            number_of_preload_increments = int(np.ceil(
+                np.max(np.abs(preload_strain))
+                / maximum_strain_increment))
+            preload_increment = 1.0 / number_of_preload_increments
+            number_of_unload_increments = int(np.ceil(
+                np.max(np.abs(preload_strain - base_strain_target))
+                / maximum_strain_increment))
+            unload_increment = 1.0 / number_of_unload_increments
             cell.model.StaticStep(
                 name=preload_step, previous="Initial", nlgeom=OFF,
-                timePeriod=1.0, maxNumInc=100,
-                initialInc=0.01, minInc=0.01, maxInc=0.01)
+                timePeriod=1.0, maxNumInc=number_of_preload_increments + 1,
+                initialInc=preload_increment, minInc=preload_increment,
+                maxInc=preload_increment)
             cell.model.StaticStep(
                 name=unload_step, previous=preload_step, nlgeom=OFF,
-                timePeriod=1.0, maxNumInc=10,
-                initialInc=0.1, minInc=0.1, maxInc=0.1)
+                timePeriod=1.0, maxNumInc=number_of_unload_increments + 1,
+                initialInc=unload_increment, minInc=unload_increment,
+                maxInc=unload_increment)
             cell.model.StaticStep(
                 name=probe_step, previous=unload_step, nlgeom=OFF,
-                timePeriod=1.0, maxNumInc=number_of_increments,
+                timePeriod=1.0, maxNumInc=number_of_increments + 1,
                 initialInc=probe_increment, minInc=probe_increment,
                 maxInc=probe_increment)
             history = LoadHistory(
@@ -468,7 +472,7 @@ def sample_direction(gmsh_cell, parameters, preload_strain, base_strain_target,
             probe_step = "PROBE"
             cell.model.StaticStep(
                 name=probe_step, previous="Initial", nlgeom=OFF,
-                timePeriod=1.0, maxNumInc=number_of_increments,
+                timePeriod=1.0, maxNumInc=number_of_increments + 1,
                 initialInc=probe_increment, minInc=probe_increment,
                 maxInc=probe_increment)
             history = LoadHistory(np.asarray([0.0, 1.0]), strain_path)
@@ -478,14 +482,14 @@ def sample_direction(gmsh_cell, parameters, preload_strain, base_strain_target,
         # propagates the periodic displacement conditions through all steps.
         # The conforming beam endpoints share the host nodes at the cell
         # corners, so periodicity precedes embedding of the interior nodes.
-        cell.apply_periodic_bc(first_step, history)
+        cell.apply_periodic_displacement_bc(first_step, history)
         cell.model.EmbeddedRegion(
             "EMBEDDED_BEAM_CORE",
             cell.instance.sets["ELSET_BEAM_STRUTS"],
             cell.instance.sets["ELSET_CONTINUUM_MATRIX"])
         cell.run_analysis(
             field_outputs=["PEEQ"],
-            history_outputs=["ALLPD", "ALLIE"], numCpus=1)
+            history_outputs=["ALLPD"], numCpus=1)
 
         # Reuse one ODB handle for unloading checks and yield extraction.
         cell.open_odb_file()
@@ -493,14 +497,20 @@ def sample_direction(gmsh_cell, parameters, preload_strain, base_strain_target,
             # Confirm that unloading to the effective base strain did not
             # produce additional plastic strain.
             if prepared_state:
+                preload_frames = cell.odb.steps[preload_step].frames
                 preload_peeq, _ = _constituent_peeq_increment_data(
-                    cell, preload_step, 0.0, 1.0)
+                    cell, preload_step,
+                    preload_frames[0].frameValue,
+                    preload_frames[-1].frameValue)
                 if np.max(preload_peeq[-1]) <= 1.0e-12:
                     raise RuntimeError(
                         "The preload did not produce plastic strain.")
 
+                unload_frames = cell.odb.steps[unload_step].frames
                 unload_peeq, _ = _constituent_peeq_increment_data(
-                    cell, unload_step, 0.0, 1.0)
+                    cell, unload_step,
+                    unload_frames[0].frameValue,
+                    unload_frames[-1].frameValue)
                 maximum_unload_peeq = unload_peeq[-1]
                 if np.max(maximum_unload_peeq) > 1.0e-10:
                     raise RuntimeError(
@@ -509,7 +519,17 @@ def sample_direction(gmsh_cell, parameters, preload_strain, base_strain_target,
                         "{}.".format(maximum_unload_peeq))
                 base_stress = tensor_to_voigt(
                     cell.average_stress(unload_step), "STRESS")
-                base_strain = base_strain_target.copy()
+                base_gradient = cell.average_deformation_gradient(
+                    unload_step)
+                base_strain = tensor_to_voigt(
+                    0.5 * (base_gradient + base_gradient.T) - np.eye(3),
+                    "STRAIN")
+                if np.max(np.abs(
+                        base_strain - base_strain_target)) > 1.0e-7:
+                    raise RuntimeError(
+                        "Unloading did not recover the prescribed effective "
+                        "base strain: {} instead of {}.".format(
+                            base_strain, base_strain_target))
             else:
                 maximum_unload_peeq = np.zeros(2)
                 base_stress = np.zeros(6)
@@ -517,8 +537,7 @@ def sample_direction(gmsh_cell, parameters, preload_strain, base_strain_target,
 
             # Extract the first acceptable yield point from the probe.
             state = _yield_state(
-                cell, probe_step, base_strain, strain_direction,
-                strain_limit, dissipation_ratio_threshold)
+                cell, probe_step, plastic_work_density_threshold)
         finally:
             cell.close_odb_file()
         if state is not None:
@@ -534,7 +553,8 @@ def sample_direction(gmsh_cell, parameters, preload_strain, base_strain_target,
             })
             return state
     raise RuntimeError(
-        "The yield criterion was not reached up to a maximum strain of {}."
+        "The plastic-work-density threshold was not reached up to a maximum "
+        "strain of {}."
         .format(strain_limits[-1]))
 
 

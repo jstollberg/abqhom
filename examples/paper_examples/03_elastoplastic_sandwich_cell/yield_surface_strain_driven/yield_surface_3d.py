@@ -22,10 +22,10 @@ import gmsh
 import numpy as np
 
 from abqhom.utils import export_to_csv_file
-from yield_surface_common import (CONSTITUENT_PARAMETERS,
-                                  DISSIPATION_RATIO_THRESHOLD, ELASTIC_STRAIN,
+from yield_surface_common import (CONSTITUENT_PARAMETERS, ELASTIC_STRAIN,
                                   MAXIMUM_STRAIN_INCREMENT,
                                   MESH_PARAMETERS,
+                                  PLASTIC_WORK_DENSITY_THRESHOLD,
                                   STRAIN_HEADER, STRESS_HEADER,
                                   VOIGT_COMPONENTS, build_gmsh_cell,
                                   elastic_calibration, open_csv_file,
@@ -35,7 +35,7 @@ from yield_surface_common import (CONSTITUENT_PARAMETERS,
 script_directory = os.getcwd()
 
 CSV_HEADER = (["direction-index", "n1", "n2", "n3", "yield-time",
-               "strain-limit", "dissipation-ratio"]
+               "strain-limit", "additional-plastic-work-density"]
               + ["epsilon-{}".format(name) for name in VOIGT_COMPONENTS]
               + ["sigma-{}".format(name) for name in VOIGT_COMPONENTS]
               + ["base-epsilon-{}".format(name)
@@ -126,7 +126,7 @@ def result_row(direction_index, direction, state):
     """Return one CSV row for a sampled state."""
     return ([direction_index] + list(direction)
             + [state["time"], state["strain_limit"],
-               state["dissipation_ratio"]]
+               state["additional_plastic_work_density"]]
             + list(state["strain"]) + list(state["stress"])
             + list(state["base_strain"])
             + list(state["base_stress"])
@@ -334,7 +334,8 @@ def main(state_name="initial", worker_index=0, number_of_workers=1,
             "mesh": MESH_PARAMETERS,
             "number_of_workers": number_of_workers,
             "preload_strain": definition["preload_strain"],
-            "dissipation_ratio_threshold": DISSIPATION_RATIO_THRESHOLD,
+            "plastic_work_density_threshold": (
+                PLASTIC_WORK_DENSITY_THRESHOLD),
             "base_strain": definition["base_strain"],
             "state": state_name,
             "strain_limits": definition["strain_limits"],
@@ -399,7 +400,7 @@ def main(state_name="initial", worker_index=0, number_of_workers=1,
                         definition["preload_strain"],
                         definition["base_strain"], strain_direction,
                         definition["strain_limits"],
-                        DISSIPATION_RATIO_THRESHOLD,
+                        PLASTIC_WORK_DENSITY_THRESHOLD,
                         MAXIMUM_STRAIN_INCREMENT)
                     break
                 except Exception as error:

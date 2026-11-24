@@ -3,12 +3,14 @@
 
 """
 End-to-end homogenization tests for AbaqusRVE. These must be run in the
-Abaqus Python interpreter (they build a small RVE, run a linear analysis
-and check the effective stiffness). Meshes are kept tiny for the
-Learning Edition node limit.
+Abaqus Python interpreter. They build small RVEs and check linear and
+finite-strain effective responses. Meshes are kept tiny for the Learning
+Edition node limit.
 
 """
 import numpy as np
+from abaqusConstants import (ISOTROPIC, NEO_HOOKE, OFF, ON,
+                             VOLUMETRIC_DATA)
 
 from abqhom.utils import voigt_to_tensor, tensor_to_voigt
 from abqhom.gmshmodel import GmshRVE
@@ -41,8 +43,18 @@ def _stiffness_column(build, assign_sections, comp, element_size,
     if bc == "affine":
         unit_cell.apply_affine_displacement_bc("LOAD", history)
     else:
-        unit_cell.apply_periodic_bc("LOAD", history)
+        unit_cell.apply_periodic_displacement_bc("LOAD", history)
     unit_cell.run_analysis(field_outputs=["U"])
+
+    deformation_gradient = (
+        unit_cell.average_deformation_gradient("LOAD"))
+    dim = deformation_gradient.shape[0]
+    expected_deformation_gradient = (
+        np.eye(dim) + strain_history(1.0)[:dim, :dim])
+    np.testing.assert_allclose(
+        deformation_gradient, expected_deformation_gradient,
+        rtol=1.0e-6, atol=1.0e-10)
+
     stress = tensor_to_voigt(unit_cell.average_stress("LOAD"), "STRESS")
     return stress/STRAIN
 
@@ -107,7 +119,7 @@ class TestBeamLattices(AbaqusTestCase):
             return voigt_to_tensor(strain, "STRAIN")
 
         history = LoadHistory(np.array([0.0, 1.0]), strain_history)
-        unit.apply_periodic_bc("LOAD", history)
+        unit.apply_periodic_displacement_bc("LOAD", history)
         unit.run_analysis()
 
         stress = unit.average_stress("LOAD")
@@ -138,7 +150,7 @@ class TestBeamLattices(AbaqusTestCase):
             return voigt_to_tensor(strain, "STRAIN")
 
         history = LoadHistory(np.array([0.0, 1.0]), strain_history)
-        unit.apply_periodic_bc("LOAD", history)
+        unit.apply_periodic_displacement_bc("LOAD", history)
         unit.run_analysis()
 
         stress = unit.average_stress("LOAD")
@@ -185,8 +197,8 @@ class TestBeamLattices(AbaqusTestCase):
                 strain[c] = STRAIN
                 return time*voigt_to_tensor(strain, "STRAIN")
 
-            unit.apply_periodic_bc("LOAD", LoadHistory(np.array([0.0, 1.0]),
-                                                       strain_history))
+            unit.apply_periodic_displacement_bc(
+                "LOAD", LoadHistory(np.array([0.0, 1.0]), strain_history))
             unit.run_analysis(field_outputs=["U"])
             columns.append(tensor_to_voigt(unit.average_stress("LOAD"),
                                            "STRESS")
@@ -223,7 +235,108 @@ class TestShells(AbaqusTestCase):
 
 
 class TestContinuum(AbaqusTestCase):
-    """Test periodic and affine homogenization of a continuum cell."""
+    """Test kinematic and stress-controlled continuum homogenization."""
+
+    def test_finite_strain_stress_control_recovers_deformation(self):
+        """Nominal-stress control inverts a hyperelastic deformation."""
+        E, nu = 100.0, 0.3
+        fixtures.solid_cube("CBF", length=1.0)
+        rve = GmshRVE("CBF")
+        rve.add_periodic_mesh_constraints()
+        rve.generate_mesh(element_size=0.5)
+
+        unit = AbaqusRVE(rve)
+        shear_modulus = E/(2.0*(1.0 + nu))
+        bulk_modulus = E/(3.0*(1.0 - 2.0*nu))
+        material = unit.model.Material(name="M")
+        material.Hyperelastic(
+            materialType=ISOTROPIC,
+            table=((0.5*shear_modulus, 2.0/bulk_modulus),),
+            testData=OFF, type=NEO_HOOKE,
+            volumetricResponse=VOLUMETRIC_DATA)
+        unit.assign_solid_section("SOLID", "M")
+        unit.model.StaticStep(
+            name="LOAD", previous="Initial", nlgeom=ON,
+            initialInc=0.1, minInc=0.01, maxInc=0.1)
+
+        target_gradient = np.zeros((3, 3))
+        target_gradient[0, 0] = 0.05
+        target_gradient[0, 1] = 0.03
+
+        def gradient_history(time):
+            """Return the ramped macroscopic displacement gradient."""
+            return time*target_gradient
+
+        history = LoadHistory(np.array([0.0, 1.0]), gradient_history)
+        unit.apply_periodic_displacement_bc("LOAD", history)
+        unit.run_analysis(field_outputs=["U"])
+
+        target_stress = unit.average_stress("LOAD")
+        target_deformation = unit.average_deformation_gradient("LOAD")
+        self.assertFalse(np.allclose(target_stress, target_stress.T))
+        np.testing.assert_allclose(
+            target_deformation, np.eye(3) + target_gradient,
+            rtol=1.0e-6, atol=1.0e-8)
+
+        def stress_history(time):
+            """Return the ramped effective first Piola--Kirchhoff stress."""
+            return time*target_stress
+
+        history = LoadHistory(np.array([0.0, 1.0]), stress_history)
+        unit.apply_periodic_traction_bc("LOAD", history)
+        unit.run_analysis(field_outputs=["U"])
+
+        recovered_stress = unit.average_stress("LOAD")
+        recovered_deformation = unit.average_deformation_gradient("LOAD")
+        np.testing.assert_allclose(
+            recovered_stress, target_stress, rtol=1.0e-5, atol=1.0e-7)
+        np.testing.assert_allclose(
+            recovered_deformation, target_deformation,
+            rtol=1.0e-5, atol=1.0e-7)
+
+    def test_stress_control_recovers_isotropic_compliance(self):
+        """Stress control recovers analytical stress and compliance."""
+        E, nu = 100.0, 0.3
+        normal_stress, shear_stress = 1.0, 0.4
+        fixtures.solid_cube("CBS", length=1.0)
+        rve = GmshRVE("CBS")
+        rve.add_periodic_mesh_constraints()
+        rve.generate_mesh(element_size=0.5)
+
+        unit = AbaqusRVE(rve)
+        _elastic(unit, "M", E, nu)
+        unit.assign_solid_section("SOLID", "M")
+        unit.model.StaticStep(
+            name="LOAD", previous="Initial", nlgeom=OFF)
+
+        def stress_history(time):
+            """Return ramped normal and shear effective stresses."""
+            stress = np.zeros((3, 3))
+            stress[0, 0] = time*normal_stress
+            stress[0, 1] = time*shear_stress
+            stress[1, 0] = stress[0, 1]
+            return stress
+
+        history = LoadHistory(np.array([0.0, 1.0]), stress_history)
+        unit.apply_periodic_traction_bc("LOAD", history)
+        unit.run_analysis(field_outputs=["U"])
+
+        stress = unit.average_stress("LOAD")
+        deformation_gradient = unit.average_deformation_gradient(
+            "LOAD")
+        expected_stress = stress_history(1.0)
+        expected_strain = np.diag([
+            normal_stress/E, -nu*normal_stress/E,
+            -nu*normal_stress/E])
+        shear_modulus = E/(2.0*(1.0 + nu))
+        expected_strain[0, 1] = shear_stress/(2.0*shear_modulus)
+        expected_strain[1, 0] = expected_strain[0, 1]
+
+        np.testing.assert_allclose(
+            stress, expected_stress, rtol=1.0e-5, atol=1.0e-8)
+        np.testing.assert_allclose(
+            deformation_gradient, np.eye(3) + expected_strain,
+            rtol=1.0e-5, atol=1.0e-8)
 
     def test_homogeneous_cube_recovers_material(self):
         """A homogeneous continuum RVE homogenizes to the material itself."""
@@ -307,7 +420,7 @@ class TestMixedDimensionalCell(AbaqusTestCase):
             return gradient
 
         history = LoadHistory(np.array([0.0, 1.0]), strain_history)
-        unit.apply_periodic_bc("LOAD", history)
+        unit.apply_periodic_displacement_bc("LOAD", history)
         unit.run_analysis()
 
         stress = unit.average_stress("LOAD")
@@ -349,8 +462,8 @@ class TestEmbeddedFibers(AbaqusTestCase):
             strain[2] = STRAIN
             return time*voigt_to_tensor(strain, "STRAIN")
 
-        unit.apply_periodic_bc("LOAD", LoadHistory(np.array([0.0, 1.0]),
-                                                   strain_history))
+        unit.apply_periodic_displacement_bc(
+            "LOAD", LoadHistory(np.array([0.0, 1.0]), strain_history))
         unit.run_analysis(field_outputs=["U"])
         stress = tensor_to_voigt(unit.average_stress("LOAD"), "STRESS")
 

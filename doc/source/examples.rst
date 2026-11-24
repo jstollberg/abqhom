@@ -25,7 +25,8 @@ Tutorial examples
      - Demonstrates
    * - `beam_lattice_simple_cubic_3d <https://github.com/jstollberg/abqhom/tree/main/examples/beam_lattice_simple_cubic_3d>`_
      - Simple-cubic beam lattice
-     - Full-cell ownership weighting and analytical :math:`C_{11}` check
+     - Full-cell ownership weighting, periodic displacement and stress
+       control, and an analytical :math:`C_{11}` check
    * - `beam_lattice_honeycomb_2d <https://github.com/jstollberg/abqhom/tree/main/examples/beam_lattice_honeycomb_2d>`_
      - Regular beam honeycomb
      - Two-dimensional effective response and in-plane isotropy
@@ -43,7 +44,8 @@ Tutorial examples
      - Effective stiffness and Voigt--Reuss bounds
    * - `continuum_spherical_inclusion_3d <https://github.com/jstollberg/abqhom/tree/main/examples/continuum_spherical_inclusion_3d>`_
      - Spherical inclusion in a matrix
-     - Finite-strain response with automatic boundary classification
+     - Automatic boundary classification and recovery of a
+       displacement-controlled finite-strain state under stress control
    * - `mixed_embedded_beam_fibers_3d <https://github.com/jstollberg/abqhom/tree/main/examples/mixed_embedded_beam_fibers_3d>`_
      - Beam fibers embedded in a continuum
      - Mixed-dimensional, nonconforming coupling
@@ -84,3 +86,8 @@ documents the required execution order and generated data products. Their
 model sizes and number of analyses may require a full Abaqus license. See the
 `manuscript-example instructions <https://github.com/jstollberg/abqhom/tree/main/examples/paper_examples>`_
 before running them.
+
+The elastoplastic sandwich-cell example provides two alternative
+yield-surface workflows. One prescribes effective-stress paths, while the
+other prescribes macroscopic strain paths. Both workflows include matching
+scripts for two-dimensional sections and complete three-dimensional surfaces.

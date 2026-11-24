@@ -31,6 +31,11 @@ Boundary conditions and kinematics
 * Periodic rotations of beam and shell nodes are supported for zero imposed
   macroscopic curvature. The effective medium is a first-order Cauchy
   continuum. Macroscopic couple stress and curvature are not identified.
+* Periodic stress control uses Cauchy stress in geometrically linear
+  analyses. At finite strains, first Piola--Kirchhoff stress is prescribed
+  with an upper-triangular deformation gradient that fixes the arbitrary
+  macroscopic rigid rotation. Mixed stress--deformation control is not
+  currently implemented.
 * Affine displacement boundary conditions are restricted to elements without
   rotational degrees of freedom. Use periodic conditions for beam and shell
   cells.

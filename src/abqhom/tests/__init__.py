@@ -45,11 +45,6 @@ def run_abaqus_tests():
     is written to ``abqhom_test_report_abaqus.txt`` in the current working
     directory. The temporary directory is retained when a test fails.
 
-    Raises
-    ------
-    RuntimeError
-        If Abaqus cannot be imported (i.e. not running in Abaqus Python).
-
     """
     try:
         import abaqus  # noqa: F401

@@ -6,7 +6,7 @@
 Every direction uses a fresh Abaqus model and a prescribed macroscopic-strain
 history. Initial yield is probed from the stress-free state. Evolved yield is
 probed after monotonic preloading and elastic unloading to a prescribed base
-strain. Both cases use the same incremental dissipation-ratio criterion and
+strain. Both cases use the same additional plastic-work-density threshold and
 PEEQ guard relative to their respective base states.
 
 Run ``abaqus cae noGUI=yield_surface_2d.py`` after selecting the desired
@@ -22,10 +22,10 @@ import gmsh
 import numpy as np
 
 from abqhom.utils import export_to_csv_file
-from yield_surface_common import (CONSTITUENT_PARAMETERS,
-                                  DISSIPATION_RATIO_THRESHOLD, ELASTIC_STRAIN,
+from yield_surface_common import (CONSTITUENT_PARAMETERS, ELASTIC_STRAIN,
                                   MAXIMUM_STRAIN_INCREMENT,
                                   MESH_PARAMETERS,
+                                  PLASTIC_WORK_DENSITY_THRESHOLD,
                                   STRAIN_HEADER, STRESS_HEADER,
                                   VOIGT_COMPONENTS, build_gmsh_cell,
                                   elastic_calibration, open_csv_file,
@@ -41,7 +41,7 @@ script_directory = os.getcwd()
 def write_yield_results(path, records):
     """Write sampled yield points and their common base state."""
     header = (["theta", "yield-time", "strain-limit",
-               "dissipation-ratio"]
+               "additional-plastic-work-density"]
               + ["epsilon-{}".format(name)
                  for name in VOIGT_COMPONENTS]
               + ["sigma-{}".format(name)
@@ -61,7 +61,7 @@ def write_yield_results(path, records):
             writer.writerow(
                 [record["theta"], record["time"],
                  record["strain_limit"],
-                 record["dissipation_ratio"]]
+                 record["additional_plastic_work_density"]]
                 + list(record["strain"])
                 + list(record["stress"])
                 + list(record["base_strain"])
@@ -84,7 +84,8 @@ def read_yield_results(path):
                 "theta": float(row["theta"]),
                 "time": float(row["yield-time"]),
                 "strain_limit": float(row["strain-limit"]),
-                "dissipation_ratio": float(row["dissipation-ratio"]),
+                "additional_plastic_work_density": float(
+                    row["additional-plastic-work-density"]),
                 "strain": np.asarray([
                     float(row["epsilon-" + name])
                     for name in VOIGT_COMPONENTS]),
@@ -114,7 +115,7 @@ def read_yield_results(path):
 
 def sample_plane(gmsh_cell, parameters, compliance, state_name,
                  preload_strain, base_strain, plane, angles,
-                 strain_limits, dissipation_ratio_threshold,
+                 strain_limits, plastic_work_density_threshold,
                  maximum_strain_increment, result_directory):
     """Sample one resumable normal-stress-plane section."""
     plane_name, first, second = plane
@@ -158,7 +159,7 @@ def sample_plane(gmsh_cell, parameters, compliance, state_name,
                 state = sample_direction(
                     gmsh_cell, parameters, preload_strain, base_strain,
                     strain_direction, strain_limits,
-                    dissipation_ratio_threshold,
+                    plastic_work_density_threshold,
                     maximum_strain_increment)
                 break
             except Exception as error:
@@ -278,8 +279,8 @@ def main(selected_state="both", selected_plane=None,
                     "mesh": MESH_PARAMETERS,
                     "planes": plane_names,
                     "preload_strain": definition["preload_strain"],
-                    "dissipation_ratio_threshold": (
-                        DISSIPATION_RATIO_THRESHOLD),
+                    "plastic_work_density_threshold": (
+                        PLASTIC_WORK_DENSITY_THRESHOLD),
                     "base_strain": definition["base_strain"],
                     "state": state_name,
                     "strain_limits": definition["strain_limits"],
@@ -300,7 +301,7 @@ def main(selected_state="both", selected_plane=None,
                     state_name, definition["preload_strain"],
                     definition["base_strain"], plane, angles,
                     definition["strain_limits"],
-                    DISSIPATION_RATIO_THRESHOLD,
+                    PLASTIC_WORK_DENSITY_THRESHOLD,
                     MAXIMUM_STRAIN_INCREMENT,
                     result_directory=result_directory)
 

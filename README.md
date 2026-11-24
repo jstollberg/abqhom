@@ -24,8 +24,9 @@ integration, nonlinear solution procedures, and output databases.
 
 ## Capabilities
 
-- Periodic and affine boundary conditions for two- and three-dimensional
-  cells.
+- Periodic deformation-gradient and stress control, using Cauchy stress in
+  geometrically linear analyses and first Piola–Kirchhoff stress at finite
+  strains. Affine displacement boundary conditions are also available.
 - Linear, finite-strain, nonlinear-elastic, and path-dependent analyses using
   Abaqus material models and solution procedures.
 - Periodic translational and rotational constraints for continuum and
@@ -103,7 +104,7 @@ abaqus cae noGUI=main.py
 The script constructs and periodically meshes the complete lattice, weights
 the boundary-member stiffnesses by their ownership, evaluates six independent
 small-strain cases, compares the axial stiffness with its analytical value,
-and writes CSV and VTK output.
+verifies periodic stress control, and writes CSV and VTK output.
 
 See the
 [`beam_lattice_simple_cubic_3d/main.py`](examples/beam_lattice_simple_cubic_3d/main.py)
@@ -125,7 +126,7 @@ studies from the
 |---|---|
 | [`01_small_strain_verification`](examples/paper_examples/01_small_strain_verification) | Mixed continuum–shell–beam verification |
 | [`02_hyperelastic_octet_lattice`](examples/paper_examples/02_hyperelastic_octet_lattice) | Imperfect hyperelastic Octet lattice and supercell comparison |
-| [`03_elastoplastic_sandwich_cell`](examples/paper_examples/03_elastoplastic_sandwich_cell) | Cyclic plasticity and effective yield surfaces |
+| [`03_elastoplastic_sandwich_cell`](examples/paper_examples/03_elastoplastic_sandwich_cell) | Cyclic plasticity and strain- and stress-driven effective yield surfaces |
 
 Execution order and generated data products are documented in the
 [`paper_examples` README](examples/paper_examples/README.md).
