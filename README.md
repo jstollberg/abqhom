@@ -5,8 +5,10 @@
 # abqhom
 
 [![CI](https://github.com/jstollberg/abqhom/actions/workflows/ci.yaml/badge.svg?branch=main)](https://github.com/jstollberg/abqhom/actions/workflows/ci.yaml)
+[![PyPI version](https://img.shields.io/pypi/v/abqhom.svg)](https://pypi.org/project/abqhom/)
 [![License: GPL v3+](https://img.shields.io/badge/License-GPL_v3%2B-blue.svg)](LICENSE)
 [![Documentation Status](https://readthedocs.org/projects/abqhom/badge/?version=latest)](https://abqhom.readthedocs.io/en/latest/?badge=latest)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24513359.svg)](https://doi.org/10.5281/zenodo.24513359)
 
 `abqhom` is an open-source Python framework for first-order computational
 homogenization of two- and three-dimensional unit cells and representative
@@ -66,15 +68,17 @@ Python 3-based releases. Larger examples may require a full Abaqus license.
 
 ## Installation
 
-Until the first PyPI release, install from a source checkout and create the
+Install the released package in a regular Python environment and create the
 isolated Abaqus runtime with the supplied helper:
 
 ```console
-git clone https://github.com/jstollberg/abqhom.git
-cd abqhom
-python -m pip install .
-abqhom-install-abaqus --abqhom-source .
+python -m pip install abqhom
+abqhom-install-abaqus
 ```
+
+If Gmsh initialization fails inside Abaqus on Linux because of a native
+library conflict, the [installation documentation](https://abqhom.readthedocs.io/en/latest/installation.html#linux-gmsh-compatibility-mode)
+describes an optional `--gmsh-deepbind` compatibility mode.
 
 The helper does not modify the Abaqus installation. It creates a versioned
 runtime below `~/.abqhom/abaqus-runtime` containing only `abqhom`, Gmsh,
@@ -87,11 +91,13 @@ verification.
 
 ## Quick start
 
-After activating the runtime, run the simple-cubic beam-lattice tutorial from
-its directory:
+The examples are maintained in the source repository and are not installed
+with the Python package. Clone the repository, activate the runtime, and run
+the simple-cubic beam-lattice tutorial from its directory:
 
 ```console
-cd examples/beam_lattice_simple_cubic_3d
+git clone https://github.com/jstollberg/abqhom.git
+cd abqhom/examples/beam_lattice_simple_cubic_3d
 abaqus cae noGUI=main.py
 ```
 

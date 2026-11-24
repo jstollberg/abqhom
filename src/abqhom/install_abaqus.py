@@ -245,6 +245,53 @@ def _check_runtime_contents(prefix, package_directory):
                 "Abaqus must use its bundled NumPy installation.")
 
 
+def _patch_gmsh_deepbind(package_directory):
+    """Patch the Gmsh wrapper to isolate native symbols in Linux Abaqus."""
+
+    path = os.path.join(package_directory, "gmsh.py")
+    with open(path, "r") as source:
+        contents = source.read()
+
+    marker = "# abqhom: use RTLD_DEEPBIND in Abaqus on Linux."
+    if marker in contents:
+        return
+
+    loader = "lib = CDLL(libpath)"
+    if contents.count(loader) != 1:
+        raise RuntimeError(
+            "The installed Gmsh wrapper has an unsupported library-loading "
+            "layout. The --gmsh-deepbind compatibility patch was not "
+            "applied.")
+
+    if not re.search(r"^import sys$", contents, flags=re.MULTILINE):
+        import_anchor = "import os\n"
+        if contents.count(import_anchor) != 1:
+            raise RuntimeError(
+                "The installed Gmsh wrapper has an unsupported import "
+                "layout. The --gmsh-deepbind compatibility patch was not "
+                "applied.")
+        contents = contents.replace(
+            import_anchor, import_anchor + "import sys\n", 1)
+
+    # The managed wrapper is also available to regular Python. Select deep
+    # binding only for the two Abaqus executables that load the native Gmsh
+    # library into an existing solver process.
+    replacement = (
+        marker + "\n"
+        "if (platform.system() == \"Linux\"\n"
+        "        and os.path.basename(sys.executable).lower()\n"
+        "        in (\"smapython\", \"abqcaek\")):\n"
+        "    lib = CDLL(\n"
+        "        libpath, mode=(os.RTLD_NOW | os.RTLD_LOCAL\n"
+        "                       | os.RTLD_DEEPBIND))\n"
+        "else:\n"
+        "    lib = CDLL(libpath)")
+    contents = contents.replace(loader, replacement, 1)
+
+    with open(path, "w") as output:
+        output.write(contents)
+
+
 def _check_runtime_imports(prefix, package_directory):
     """Import isolated runtime packages and validate the abqhom version."""
 
@@ -308,18 +355,23 @@ def _write_activation_scripts(directory, package_directory):
                 "}} else {{\n"
                 "    $env:PYTHONPATH = $abqhomSitePackages + ';' + "
                 "$env:PYTHONPATH\n"
-                "}}\n".format(_powershell_quote(package_directory)))
+                "}}\n"
+                "Write-Host \"abqhom activated: $abqhomSitePackages\"\n"
+                .format(_powershell_quote(package_directory)))
         paths.append(powershell)
 
         batch = os.path.join(directory, "activate_abqhom.bat")
         with open(batch, "w") as output:
             output.write(
                 "@echo off\n"
+                "set \"abqhomSitePackages={}\"\n"
                 "if defined PYTHONPATH (\n"
-                "    set \"PYTHONPATH={};%PYTHONPATH%\"\n"
+                "    set \"PYTHONPATH=%abqhomSitePackages%;%PYTHONPATH%\"\n"
                 ") else (\n"
-                "    set \"PYTHONPATH={}\"\n"
-                ")\n".format(package_directory, package_directory))
+                "    set \"PYTHONPATH=%abqhomSitePackages%\"\n"
+                ")\n"
+                "echo abqhom activated: %abqhomSitePackages%\n"
+                .format(package_directory))
         paths.append(batch)
     else:
         shell = os.path.join(directory, "activate_abqhom.sh")
@@ -331,17 +383,22 @@ def _write_activation_scripts(directory, package_directory):
                 "    export PYTHONPATH=\"$abqhom_site_packages:$PYTHONPATH\"\n"
                 "else\n"
                 "    export PYTHONPATH=\"$abqhom_site_packages\"\n"
-                "fi\n".format(_shell_quote(package_directory)))
+                "fi\n"
+                "printf '%s\\n' \"abqhom activated: "
+                "$abqhom_site_packages\"\n"
+                .format(_shell_quote(package_directory)))
         os.chmod(shell, 0o755)
         paths.append(shell)
     return paths
 
 
-def _write_marker(directory, prefix, package_directory, requirements):
+def _write_marker(directory, prefix, package_directory, requirements,
+                  gmsh_deepbind=False):
     """Record the managed runtime layout for safe repeated installation."""
 
     data = {
         "abqhom_version": __version__,
+        "gmsh_deepbind": gmsh_deepbind,
         "managed_by": "abqhom",
         "prefix": prefix,
         "requirements": list(requirements),
@@ -385,7 +442,7 @@ def _promote_stage(stage, prefix):
                   "{}: {}".format(backup, error), file=sys.stderr)
 
 
-def install(prefix, abqhom_source=None):
+def install(prefix, abqhom_source=None, gmsh_deepbind=False):
     """
     Install and configure an isolated Python runtime for Abaqus.
 
@@ -397,6 +454,9 @@ def install(prefix, abqhom_source=None):
         Wheel, source directory, or package requirement used to install
         abqhom. By default, the running abqhom version is installed from the
         configured package index.
+    gmsh_deepbind : bool, optional
+        Apply the Linux Abaqus compatibility patch that loads the native Gmsh
+        library with ``RTLD_DEEPBIND``.
 
     Returns
     -------
@@ -421,6 +481,8 @@ def install(prefix, abqhom_source=None):
         _install_packages(stage, abqhom_source, requirements)
         stage_packages = _find_site_packages(stage)
         _check_runtime_contents(stage, stage_packages)
+        if gmsh_deepbind:
+            _patch_gmsh_deepbind(stage_packages)
         _check_runtime_imports(stage, stage_packages)
 
         # Write activation data for the final location, not the staging path.
@@ -432,7 +494,8 @@ def install(prefix, abqhom_source=None):
             for path in stage_scripts
         ]
         _write_marker(
-            stage, prefix, final_packages, requirements=requirements)
+            stage, prefix, final_packages, requirements=requirements,
+            gmsh_deepbind=gmsh_deepbind)
 
         # Replace an existing managed runtime only after validation succeeds.
         _promote_stage(stage, prefix)
@@ -463,6 +526,12 @@ def _parser():
         help=(
             "abqhom wheel, source directory or requirement to install; "
             "the running version is used by default"))
+    parser.add_argument(
+        "--gmsh-deepbind",
+        action="store_true",
+        help=(
+            "load native Gmsh symbols with RTLD_DEEPBIND in Abaqus on "
+            "Linux; use only to work around native-library conflicts"))
     return parser
 
 
@@ -473,12 +542,15 @@ def main(argv=None):
     arguments = parser.parse_args(argv)
     try:
         package_directory, scripts = install(
-            arguments.prefix, arguments.abqhom_source)
+            arguments.prefix, arguments.abqhom_source,
+            gmsh_deepbind=arguments.gmsh_deepbind)
     except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
         parser.exit(1, "abqhom installation failed: {}\n".format(error))
 
     print("Abaqus runtime installed successfully.")
     print("PYTHONPATH entry: {}".format(package_directory))
+    if arguments.gmsh_deepbind:
+        print("Gmsh compatibility mode: RTLD_DEEPBIND")
     print("Activation script{}:".format("s" if len(scripts) != 1 else ""))
     for path in scripts:
         print("  {}".format(path))
