@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+message: >-
+  If you use abqhom in your research, please cite the accompanying preprint.
+title: abqhom
+type: software
+authors:
+  - family-names: Stollberg
+    given-names: Jonathan
+    orcid: https://orcid.org/0000-0001-8383-2109
+version: 0.1.0
+date-released: 2026-11-24
+license: GPL-3.0-or-later
+repository-code: https://github.com/jstollberg/abqhom
+url: https://abqhom.readthedocs.io/en/latest/
+preferred-citation:
+  type: article
+  authors:
+    - family-names: Stollberg
+      given-names: Jonathan
+      orcid: https://orcid.org/0000-0001-8383-2109
+    - family-names: Schillinger
+      given-names: Dominik
+      orcid: https://orcid.org/0000-0002-9068-6311
+  title: >-
+    Nonlinear homogenization of periodic unit cells composed of mixed
+    continuum and structural elements with variationally consistent
+    boundary-member reduction
+  journal: "arXiv preprint arXiv:2611.14770"
+  year: 2026
+  doi: 10.48550/arXiv.2611.14770
+  url: https://arxiv.org/abs/2611.14770
