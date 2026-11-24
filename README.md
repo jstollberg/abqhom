@@ -65,14 +65,12 @@ Python 3-based releases. Larger examples may require a full Abaqus license.
 
 ## Installation
 
-Until the first PyPI release, install from a source checkout and create the
+Install the released package in a regular Python environment and create the
 isolated Abaqus runtime with the supplied helper:
 
 ```console
-git clone https://github.com/jstollberg/abqhom.git
-cd abqhom
-python -m pip install .
-abqhom-install-abaqus --abqhom-source .
+python -m pip install abqhom
+abqhom-install-abaqus
 ```
 
 If Gmsh initialization fails inside Abaqus on Linux because of a native
@@ -90,11 +88,13 @@ verification.
 
 ## Quick start
 
-After activating the runtime, run the simple-cubic beam-lattice tutorial from
-its directory:
+The examples are maintained in the source repository and are not installed
+with the Python package. Clone the repository, activate the runtime, and run
+the simple-cubic beam-lattice tutorial from its directory:
 
 ```console
-cd examples/beam_lattice_simple_cubic_3d
+git clone https://github.com/jstollberg/abqhom.git
+cd abqhom/examples/beam_lattice_simple_cubic_3d
 abaqus cae noGUI=main.py
 ```
 

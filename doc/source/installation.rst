@@ -11,7 +11,29 @@ newer.
 Install the package
 -------------------
 
-Until the first PyPI release, install from a source checkout:
+Install the released package from PyPI, then create the isolated Abaqus
+runtime:
+
+.. code-block:: console
+
+   python -m pip install abqhom
+   abqhom-install-abaqus
+
+The first command installs ``abqhom``, its dependencies, and its command-line
+helper in the regular Python environment. The helper then installs the same
+``abqhom`` version together with Gmsh, Paraqus, and ``backports.weakref`` into
+a versioned prefix below ``~/.abqhom/abaqus-runtime``. Dependencies are
+deliberately disabled during this second installation. Abaqus therefore
+continues to use its bundled NumPy installation. Use ``--prefix PATH`` to
+select another runtime location. Running ``abqhom-install-abaqus --help``
+lists the available options. Re-running the helper safely replaces an
+existing runtime managed at the same location.
+
+Install from source
+-------------------
+
+For development, install a checkout and pass it explicitly to the runtime
+helper:
 
 .. code-block:: console
 
@@ -20,13 +42,8 @@ Until the first PyPI release, install from a source checkout:
    python -m pip install .
    abqhom-install-abaqus --abqhom-source .
 
-The helper installs only ``abqhom``, Gmsh, Paraqus, and
-``backports.weakref`` into a versioned prefix below
-``~/.abqhom/abaqus-runtime``. Dependencies are deliberately disabled during
-this step. Abaqus therefore continues to use its bundled NumPy installation.
-Use ``--prefix PATH`` to select another runtime location. Running
-``abqhom-install-abaqus --help`` lists the available options. Re-running the
-helper safely replaces an existing runtime managed at the same location.
+The ``--abqhom-source`` option selects the checkout instead of the published
+release. The runtime layout is otherwise unchanged.
 
 Activate the runtime
 --------------------
@@ -64,12 +81,14 @@ The geometry layer can be checked in a regular Python interpreter:
 
    python -c "from abqhom.gmshmodel import GmshRVE"
 
-Then run one of the bundled examples from its directory to verify the Abaqus
-side:
+The examples are maintained in the source repository and are not installed
+with the Python package. Clone the repository if needed, then run one example
+from its directory to verify the Abaqus side:
 
 .. code-block:: console
 
-   cd examples/beam_lattice_simple_cubic_3d
+   git clone https://github.com/jstollberg/abqhom.git
+   cd abqhom/examples/beam_lattice_simple_cubic_3d
    abaqus cae noGUI=main.py
 
 The activated runtime supplies abqhom, Gmsh, Paraqus, and the legacy
@@ -85,7 +104,7 @@ with the optional compatibility mode:
 
 .. code-block:: console
 
-   abqhom-install-abaqus --abqhom-source . --gmsh-deepbind
+   abqhom-install-abaqus --gmsh-deepbind
 
 This option changes only how the managed Gmsh shared library is loaded by
 Abaqus on Linux. It uses ``RTLD_DEEPBIND`` to isolate Gmsh from conflicting
